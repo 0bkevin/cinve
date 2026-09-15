@@ -1,0 +1,537 @@
+{
+  "review_date": "2026-09-12",
+  "runtime": "Node.js v24.20.0 on Linux/POSIX",
+  "unit_tests": {
+    "passed": 52,
+    "failed": 0,
+    "skipped": 0
+  },
+  "typecheck": "passed; source, tests and scripts",
+  "build": "passed",
+  "dependency_audit_reported_advisories": 0,
+  "full_live_smoke_exit_code": 1,
+  "full_live_smoke": [
+    {
+      "tool": "list_cities",
+      "arguments": {
+        "provider": "cinesunidos"
+      },
+      "status": "available",
+      "total": 10,
+      "partial": false,
+      "sources": [
+        {
+          "url": "https://gateway.cinesunidos.com/search/cities",
+          "fetched_at": "2026-09-12T06:53:58.503Z",
+          "cached": false
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "tool": "list_cinemas",
+      "arguments": {
+        "provider": "cinepic"
+      },
+      "status": "available",
+      "total": 2,
+      "partial": false,
+      "sources": [
+        {
+          "url": "https://cinepiccandelaria.com/es-AR",
+          "fetched_at": "2026-09-12T06:53:58.830Z",
+          "cached": false
+        },
+        {
+          "url": "https://cinepicvip.com/es-AR",
+          "fetched_at": "2026-09-12T06:53:59.279Z",
+          "cached": false
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "tool": "list_cinemas",
+      "arguments": {
+        "provider": "cinesunidos",
+        "city": "Caracas"
+      },
+      "status": "available",
+      "total": 7,
+      "partial": false,
+      "sources": [
+        {
+          "url": "https://www.cinesunidos.com/cines?city=Caracas",
+          "fetched_at": "2026-09-12T06:53:59.480Z",
+          "cached": false
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "tool": "list_cinemas",
+      "arguments": {
+        "provider": "cinex",
+        "city": "Caracas"
+      },
+      "status": "available",
+      "total": 9,
+      "partial": false,
+      "sources": [
+        {
+          "url": "https://www.cinex.com.ve/cines.html",
+          "fetched_at": "2026-09-12T06:53:59.605Z",
+          "cached": false
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "tool": "list_movies",
+      "arguments": {
+        "provider": "cinepic",
+        "cinema_id": "123300",
+        "date": "2026-09-12",
+        "limit": 2
+      },
+      "status": "available",
+      "total": 12,
+      "partial": false,
+      "sources": [
+        {
+          "url": "https://apifront.cinexo.com.ar/mobile/consultas/peliculas/PeliculasConFuncionesYHorarios?idComplejo=123300&fecha=12%2F09%2F2026",
+          "fetched_at": "2026-09-12T06:54:00.005Z",
+          "cached": false
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "tool": "get_showtimes",
+      "arguments": {
+        "provider": "cinepic",
+        "cinema_id": "123300",
+        "date": "2026-09-12",
+        "limit": 100
+      },
+      "status": "available",
+      "total": 22,
+      "partial": false,
+      "sources": [
+        {
+          "url": "https://apifront.cinexo.com.ar/mobile/consultas/peliculas/PeliculasConFuncionesYHorarios?idComplejo=123300&fecha=12%2F09%2F2026",
+          "fetched_at": "2026-09-12T06:54:00.005Z",
+          "cached": true
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "tool": "get_ticket_prices",
+      "arguments": {
+        "provider": "cinepic",
+        "cinema_id": "123300",
+        "session_id": "23257",
+        "movie_id": "913"
+      },
+      "status": "error",
+      "total": 0,
+      "partial": false,
+      "sources": [],
+      "warnings": [
+        "No se pudo leer https://cinepiccandelaria.com/es-AR/compra?cid=123300&fid=23257&pid=913 (conexión, redirección o tiempo de espera)."
+      ]
+    },
+    {
+      "tool": "get_concessions",
+      "arguments": {
+        "provider": "cinepic",
+        "cinema_id": "123300"
+      },
+      "status": "error",
+      "total": 0,
+      "partial": false,
+      "sources": [],
+      "warnings": [
+        "No se pudo leer https://api.cinexo.com.ar/api/complejo/123300/candy (conexión, redirección o tiempo de espera)."
+      ]
+    },
+    {
+      "tool": "list_movies",
+      "arguments": {
+        "provider": "cinepic",
+        "cinema_id": "123301",
+        "date": "2026-09-12",
+        "limit": 2
+      },
+      "status": "available",
+      "total": 6,
+      "partial": false,
+      "sources": [
+        {
+          "url": "https://apifront.cinexo.com.ar/mobile/consultas/peliculas/PeliculasConFuncionesYHorarios?idComplejo=123301&fecha=12%2F09%2F2026",
+          "fetched_at": "2026-09-12T06:54:30.119Z",
+          "cached": false
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "tool": "get_showtimes",
+      "arguments": {
+        "provider": "cinepic",
+        "cinema_id": "123301",
+        "date": "2026-09-12",
+        "limit": 100
+      },
+      "status": "available",
+      "total": 7,
+      "partial": false,
+      "sources": [
+        {
+          "url": "https://apifront.cinexo.com.ar/mobile/consultas/peliculas/PeliculasConFuncionesYHorarios?idComplejo=123301&fecha=12%2F09%2F2026",
+          "fetched_at": "2026-09-12T06:54:30.119Z",
+          "cached": true
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "tool": "get_ticket_prices",
+      "arguments": {
+        "provider": "cinepic",
+        "cinema_id": "123301",
+        "session_id": "3022",
+        "movie_id": "189"
+      },
+      "status": "available",
+      "total": 2,
+      "partial": false,
+      "sources": [
+        {
+          "url": "https://cinepicvip.com/es-AR/compra?cid=123301&fid=3022&pid=189",
+          "fetched_at": "2026-09-12T06:54:32.586Z",
+          "cached": false
+        }
+      ],
+      "warnings": [
+        "Tarifas en VES según la interfaz del proveedor. USD calculado con su tasa de conversión, no una tasa BCV verificada; cargos finales no verificados."
+      ]
+    },
+    {
+      "tool": "get_concessions",
+      "arguments": {
+        "provider": "cinepic",
+        "cinema_id": "123301"
+      },
+      "status": "empty",
+      "total": 0,
+      "partial": false,
+      "sources": [
+        {
+          "url": "https://api.cinexo.com.ar/api/complejo/123301/candy",
+          "fetched_at": "2026-09-12T06:54:33.058Z",
+          "cached": false
+        }
+      ],
+      "warnings": [
+        "La API pública devolvió caramelería vacía para esta sede; no implica que no venda productos en taquilla."
+      ]
+    },
+    {
+      "tool": "list_movies",
+      "arguments": {
+        "provider": "cinesunidos",
+        "city": "Caracas",
+        "date": "2026-09-12",
+        "limit": 8
+      },
+      "status": "available",
+      "total": 28,
+      "partial": false,
+      "sources": [
+        {
+          "url": "https://www.cinesunidos.com/cartelera?city=Caracas",
+          "fetched_at": "2026-09-12T06:54:33.224Z",
+          "cached": false
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "tool": "get_showtimes",
+      "arguments": {
+        "provider": "cinesunidos",
+        "city": "Caracas",
+        "movie_id": "HO00006121",
+        "date": "2026-09-12",
+        "limit": 100
+      },
+      "status": "available",
+      "total": 8,
+      "partial": false,
+      "sources": [
+        {
+          "url": "https://www.cinesunidos.com/cartelera?city=Caracas",
+          "fetched_at": "2026-09-12T06:54:33.224Z",
+          "cached": true
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "tool": "get_ticket_prices",
+      "arguments": {
+        "provider": "cinesunidos",
+        "cinema_id": "1009",
+        "session_id": "53947"
+      },
+      "status": "available",
+      "total": 2,
+      "partial": false,
+      "sources": [
+        {
+          "url": "https://gateway.cinesunidos.com/tickets/www/theaters/1009/sessions/53947/",
+          "fetched_at": "2026-09-12T06:54:33.743Z",
+          "cached": false
+        }
+      ],
+      "warnings": [
+        "Tarifas de la función autenticada; revisa restricciones de canje/edad. No es un total final de compra."
+      ]
+    },
+    {
+      "tool": "get_concessions",
+      "arguments": {
+        "provider": "cinesunidos",
+        "cinema_id": "1005",
+        "limit": 2
+      },
+      "status": "available",
+      "total": 74,
+      "partial": false,
+      "sources": [
+        {
+          "url": "https://gateway.cinesunidos.com/concessions/www/cinemas/1005/concessions",
+          "fetched_at": "2026-09-12T06:54:33.804Z",
+          "cached": false
+        }
+      ],
+      "warnings": [
+        "Precios y stock del catálogo de esta sede; impuestos incluidos y cargos finales no verificados."
+      ]
+    },
+    {
+      "tool": "list_movies",
+      "arguments": {
+        "provider": "cinex",
+        "limit": 8
+      },
+      "status": "available",
+      "total": 28,
+      "partial": false,
+      "sources": [
+        {
+          "url": "https://www.cinex.com.ve/cartelera.html",
+          "fetched_at": "2026-09-12T06:54:33.961Z",
+          "cached": false
+        }
+      ],
+      "warnings": [
+        "Cinex devuelve el catálogo general; consulta funciones para confirmar fecha y sede."
+      ]
+    },
+    {
+      "tool": "get_showtimes",
+      "arguments": {
+        "provider": "cinex",
+        "movie_id": "alwayslalisa",
+        "date": "2026-09-12",
+        "limit": 100
+      },
+      "status": "empty",
+      "total": 0,
+      "partial": false,
+      "sources": [
+        {
+          "url": "https://www.cinex.com.ve/sinopsis-alwayslalisa.html",
+          "fetched_at": "2026-09-12T06:54:34.018Z",
+          "cached": false
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "tool": "get_showtimes",
+      "arguments": {
+        "provider": "cinex",
+        "movie_id": "avengersendgamebonus",
+        "date": "2026-09-12",
+        "limit": 100
+      },
+      "status": "empty",
+      "total": 0,
+      "partial": false,
+      "sources": [
+        {
+          "url": "https://www.cinex.com.ve/sinopsis-avengersendgamebonus.html",
+          "fetched_at": "2026-09-12T06:54:34.109Z",
+          "cached": false
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "tool": "get_showtimes",
+      "arguments": {
+        "provider": "cinex",
+        "movie_id": "codigovenganza",
+        "date": "2026-09-12",
+        "limit": 100
+      },
+      "status": "available",
+      "total": 15,
+      "partial": false,
+      "sources": [
+        {
+          "url": "https://www.cinex.com.ve/sinopsis-codigovenganza.html",
+          "fetched_at": "2026-09-12T06:54:34.212Z",
+          "cached": false
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "tool": "get_ticket_prices",
+      "arguments": {
+        "provider": "cinex",
+        "cinema_id": "MPP",
+        "session_id": "26346"
+      },
+      "status": "available",
+      "total": 2,
+      "partial": false,
+      "sources": [
+        {
+          "url": "https://www.cinex.com.ve/checklogin.php",
+          "fetched_at": "2026-09-12T06:54:34.282Z",
+          "cached": false
+        },
+        {
+          "url": "https://www.cinex.com.ve/boletos.php?sessionid=26346&cinemaid=MPP",
+          "fetched_at": "2026-09-12T06:54:39.419Z",
+          "cached": false
+        }
+      ],
+      "warnings": [
+        "Importe VES de la función, con boleto y otros cargos desglosados; no es un total final de compra."
+      ]
+    },
+    {
+      "tool": "get_concessions",
+      "arguments": {
+        "provider": "cinex",
+        "cinema_id": "TLN",
+        "limit": 2
+      },
+      "status": "available",
+      "total": 86,
+      "partial": false,
+      "sources": [
+        {
+          "url": "https://www.cinex.com.ve/checklogin.php",
+          "fetched_at": "2026-09-12T06:54:39.463Z",
+          "cached": false
+        },
+        {
+          "url": "https://www.cinex.com.ve/concesiones.php?cinemaid=TLN",
+          "fetched_at": "2026-09-12T06:54:49.943Z",
+          "cached": false
+        }
+      ],
+      "warnings": [
+        "Precios VES del catálogo de sede. La cantidad máxima del formulario no se interpreta como stock; cargos finales no verificados."
+      ]
+    },
+    {
+      "tool": "get_ticket_prices",
+      "arguments": {
+        "provider": "cinex",
+        "cinema_id": "TLN"
+      },
+      "status": "unavailable",
+      "total": 0,
+      "partial": false,
+      "sources": [
+        {
+          "url": "https://www.cinex.com.ve/assets/php/datasource.php?method=preparepricecinema&cinemaid=TLN",
+          "fetched_at": "2026-09-12T06:54:50.161Z",
+          "cached": false
+        }
+      ],
+      "warnings": [
+        "Cinex no devuelve un listado de tarifas para esta sede."
+      ]
+    },
+    {
+      "tool": "list_movies",
+      "arguments": {
+        "provider": "trasnocho"
+      },
+      "status": "blocked",
+      "total": 0,
+      "partial": false,
+      "sources": [],
+      "warnings": [
+        "El proveedor respondió HTTP 403 en https://www.trasnochocultural.com/cine/."
+      ]
+    }
+  ],
+  "focused_retry": [
+    {
+      "tool": "get_ticket_prices",
+      "arguments": {
+        "provider": "cinepic",
+        "cinema_id": "123300",
+        "movie_id": "913",
+        "session_id": "23257"
+      },
+      "status": "error",
+      "total": 0,
+      "elapsed_ms": 229,
+      "sources": [
+        {
+          "url": "https://cinepiccandelaria.com/es-AR/compra?cid=123300&fid=23257&pid=913",
+          "fetched_at": "2026-09-12T06:56:12.556Z",
+          "cached": false
+        }
+      ],
+      "warnings": [
+        "Cambió la estructura del proveedor: functionData.datos."
+      ]
+    },
+    {
+      "tool": "get_concessions",
+      "arguments": {
+        "provider": "cinepic",
+        "cinema_id": "123300"
+      },
+      "status": "error",
+      "total": 0,
+      "elapsed_ms": 15004,
+      "sources": [],
+      "warnings": [
+        "No se pudo leer https://api.cinexo.com.ar/api/complejo/123300/candy (conexión, redirección o tiempo de espera)."
+      ]
+    }
+  ],
+  "final_cinepic_check": {
+    "provider": "cinepic",
+    "status": "error",
+    "total": 0,
+    "sources": [],
+    "warnings": [
+      "Se agotó el plazo total de la consulta a https://cinepiccandelaria.com/es-AR/compra?cid=123300&fid=23257&pid=913."
+    ]
+  }
+}

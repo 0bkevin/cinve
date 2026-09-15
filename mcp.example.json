@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "cinev": {
+      "command": "node",
+      "args": ["/home/ubuntu/projects/cinev/dist/index.js"]
+    }
+  }
+}
