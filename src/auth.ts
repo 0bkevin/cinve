@@ -12,7 +12,7 @@ class LoginError extends Error {}
 
 export const AuthProvider = z.enum(['cinex', 'cinesunidos']);
 export type AuthProviderId = z.infer<typeof AuthProvider>;
-const Session = z.object({
+export const Session = z.object({
   version: z.literal(1), provider: AuthProvider, expires_at: z.number().int().positive().max(8.64e15),
   cookie_jar: z.string().max(100000).optional(), access_token: z.string().min(1).max(16000).regex(/^[A-Za-z0-9._~+\/-]+=*$/).optional(),
 }).strict().refine(s => s.provider === 'cinex' ? !!s.cookie_jar && !s.access_token : !!s.access_token && !s.cookie_jar);

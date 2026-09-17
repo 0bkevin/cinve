@@ -1,0 +1,30 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "web": {
+      "root": ".",
+      "entrypoint": "server.ts",
+      "buildCommand": "npm run build:hosted",
+      "functions": {
+        "server.ts": {
+          "maxDuration": 90
+        }
+      },
+      "outputDirectory": ".hosted"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": {
+        "service": "web"
+      }
+    }
+  ],
+  "crons": [
+    {
+      "path": "/internal/cleanup",
+      "schedule": "0 9 * * *"
+    }
+  ]
+}

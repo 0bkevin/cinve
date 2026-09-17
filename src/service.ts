@@ -15,7 +15,7 @@ export class CinemaService {
   async query(op: Operation, q: Query): Promise<QueryResult> {
     // One commercial date for the entire operation, including midnight boundaries.
     if (!q.date && (op === 'showtimes' || (op === 'movies' && q.provider !== 'cinex'))) q = { ...q, date: today() };
-    const c = new ReadContext(this.http);
+    const c = new ReadContext(this.http, q.refresh);
     const result: QueryResult = { provider: q.provider, status: 'empty', queried_at: new Date().toISOString(), timezone: 'America/Caracas', sources: [], items: [], warnings: [], total: 0, next_offset: null, partial: false };
     try {
       const data = await ({ cinepic, cinesunidos, cinex, trasnocho })[q.provider](op, q, c);
