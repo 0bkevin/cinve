@@ -35,7 +35,7 @@ Configuración para agentes que usan el formato `mcpServers`:
 }
 ```
 
-La configuración también está en [mcp.example.json](mcp.example.json). Ajusta la ruta absoluta si mueves el proyecto, y la ruta de `node` si el agente no hereda tu PATH. No requiere claves API. No se ha registrado automáticamente en la configuración de ningún agente ni publicado como servicio remoto.
+La configuración también está en [mcp.example.json](mcp.example.json). Ajusta la ruta absoluta si mueves el proyecto, y la ruta de `node` si el agente no hereda tu PATH. No requiere claves API. No se ha registrado automáticamente en la configuración de ningún agente. El despliegue HTTP y el puente `start:remote` para clientes stdio están descritos en [la guía del servicio alojado](docs/hosted.md).
 
 ## Conectar cuentas personales
 
@@ -60,7 +60,7 @@ npm run logout -- cinesunidos
 
 Logout elimina la sesión local; no revoca automáticamente el token en el proveedor. Las consultas autenticadas no usan caché y releen la sesión al salir de la cola, antes de enviar el HTTP. Una consulta que ya se había enviado puede terminar.
 
-Un despliegue remoto con varios usuarios necesitaría autenticación propia del MCP, un formulario HTTPS privado para conectar cada cuenta y almacenamiento cifrado e independiente por usuario. Esa modalidad todavía no está implementada: no compartas una cuenta de cine entre usuarios del servicio.
+El servicio alojado admite varios clientes con tokens independientes, sesiones cifradas por cliente y un enlace privado de un solo uso para conectar cada cuenta. Revisa [la guía del servicio alojado](docs/hosted.md) antes de desplegarlo; no compartas un token ni una cuenta de cine entre usuarios.
 
 ## Herramientas
 
@@ -132,7 +132,7 @@ Código: `src/server.ts` (contrato MCP), `src/service.ts` (normalización de res
 
 Autenticación: `src/auth.ts` (login HTTP y sesiones), `src/auth-cli.ts` (entrada oculta), `src/authenticated-parsers.ts` (tarifas y caramelería autenticadas). Hallazgos: [investigación con cuentas autorizadas](docs/research/authenticated-access.md).
 
-La investigación original sigue en [docs/research/cinema-data-audit.md](docs/research/cinema-data-audit.md); sus cifras son observaciones fechadas, no constantes del servidor. El CLI de consulta y el servidor HTTP remoto quedan fuera de esta versión.
+La investigación original sigue en [docs/research/cinema-data-audit.md](docs/research/cinema-data-audit.md); sus cifras son observaciones fechadas, no constantes del servidor. El puente stdio para un servidor alojado se ejecuta con `npm run start:remote -- /ruta/privada/cinev.json`; la configuración de ese archivo y del servicio HTTP está en [la guía del servicio alojado](docs/hosted.md).
 
 La [segunda investigación sin navegador](docs/research/http-followup.md) corrigió la incertidumbre de moneda Cinepic y añadió la consulta directa de caramelería, sin requerir película ni función. El MCP sigue usando exclusivamente HTTP: no incorpora un navegador.
 

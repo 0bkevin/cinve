@@ -28,7 +28,7 @@ The terminal implementation is consistent with Node's documented [raw-mode behav
 
 ## Live observations
 
-The full authenticated smoke run occurred on September 12, around 06:54 UTC. Safe metadata from the run and focused follow-ups is saved in [adversarial-2026-09-12.json](adversarial-2026-09-12.json). Counts are observations, not constants or nationwide coverage claims.
+The full authenticated smoke run occurred on September 12, around 06:54 UTC. The safe metadata and focused follow-ups are summarized below; counts are observations, not constants or nationwide coverage claims.
 
 | Check | Observation |
 |---|---|

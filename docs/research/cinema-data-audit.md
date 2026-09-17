@@ -14,7 +14,7 @@ Recomiendo una biblioteca común de proveedores, un CLI inicial con salida JSON 
 - Pruebas de endpoints de lectura encontrados en el código. Sin iniciar sesión, comprar, reservar asientos ni enviar mensajes.
 - El navegador de inspección no estuvo operativo; esta investigación se basa en HTTP, código público y contenido indexado, no en una navegación visual completa del checkout.
 - Las comprobaciones son muestras, no una prueba de todos los cines, fechas o tarifas. No se encontró documentación pública que garantice estabilidad de las APIs utilizadas por las webs.
-- Evidencias seleccionadas: [evidence-2026-09-11.json](evidence-2026-09-11.json). Consultas reproducibles: [queries.http](queries.http).
+- Consultas reproducibles: [queries.http](queries.http). Las cifras y respuestas observadas en esta investigación son históricas; las decisiones vigentes se reflejan en el código y la documentación operativa.
 
 ## Cobertura comprobada
 

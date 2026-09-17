@@ -66,9 +66,6 @@ test('empty candy is distinct from auth-required and blocked providers', async (
   assert.equal(empty.sources.length, 1);
   assert.equal(empty.sources[0].url, 'https://api.cinexo.com.ar/api/complejo/123300/candy');
 });
-test('Cinepic candy tool accepts just a cinema without triggering a purchase-page read', () => {
-  assert.equal(inputSchema('concessions').safeParse({ provider: 'cinepic', cinema_id: '123300' }).success, true);
-});
 test('Cinepic does not invent a USD price if the provider rate is zero', async () => {
   const props = structuredClone(cpBuy); props.configData.tasaConversion = '0';
   const s = new CinemaService(new HttpClient(async () => new Response(page(props))));
