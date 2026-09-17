@@ -41,7 +41,7 @@ export type QueryResult = z.infer<typeof Result>;
 export type Operation = 'cities' | 'cinemas' | 'movies' | 'showtimes' | 'prices' | 'concessions';
 export type Query = {
   provider: ProviderId; city?: string; cinema_id?: string; movie_id?: string; session_id?: string;
-  date?: string; query?: string; offset?: number; limit?: number;
+  date?: string; query?: string; offset?: number; limit?: number; refresh?: boolean;
 };
 export class DataError extends Error {
   constructor(public status: StatusId, message: string) { super(message); }

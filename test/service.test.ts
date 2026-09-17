@@ -103,3 +103,12 @@ test('invalid ticket amount is an error rather than zero', async () => {
   const r = await s.query('prices', { provider: 'cinepic', cinema_id: '123300', movie_id: 'p1', session_id: 'f1' });
   assert.equal(r.status, 'error');
 });
+
+test('refresh survives tool validation and reaches every public source read', async () => {
+  let calls = 0;
+  const s = new CinemaService(new HttpClient(async () => new Response(JSON.stringify([`City ${++calls}`]))));
+  const q = inputSchema('cities').parse({ provider: 'cinesunidos', refresh: true });
+  const first = await s.query('cities', q), second = await s.query('cities', q);
+  assert.equal(first.items[0].name, 'City 1'); assert.equal(second.items[0].name, 'City 2');
+  assert.equal(second.sources[0].cached, false);
+});

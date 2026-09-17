@@ -14,22 +14,32 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
-    "test": "tsx --test test/*.test.ts",
+    "test": "tsx scripts/test-postgres.ts",
     "check": "tsc -p tsconfig.check.json",
     "smoke": "tsx scripts/smoke.ts",
     "login": "tsx src/auth-cli.ts login",
     "logout": "tsx src/auth-cli.ts logout",
-    "auth:status": "tsx src/auth-cli.ts status"
+    "auth:status": "tsx src/auth-cli.ts status",
+    "start:hosted": "node dist/hosted-main.js",
+    "hosted:admin": "node dist/hosted-admin.js",
+    "start:remote": "node dist/remote-main.js",
+    "db:migrate": "tsx src/hosted-admin.ts migrate",
+    "db:cleanup": "tsx src/hosted-admin.ts cleanup",
+    "build:hosted": "tsc -p tsconfig.hosted.json && cp .hosted/server.js .hosted/index.js"
   },
   "dependencies": {
+    "@modelcontextprotocol/client": "^2.0.0",
+    "@modelcontextprotocol/node": "^2.0.0",
     "@modelcontextprotocol/server": "^2.0.0",
     "cheerio": "^1.2.0",
+    "pg": "^8.23.0",
     "tough-cookie": "^6.0.2",
     "zod": "^4.6.2"
   },
   "devDependencies": {
-    "@modelcontextprotocol/client": "^2.0.0",
+    "@neondatabase/serverless": "^1.1.0",
     "@types/node": "^22.20.2",
+    "@types/pg": "^8.23.1",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2"
   }

@@ -14,6 +14,7 @@ export class HttpClient {
   private cache = new Map<string, { page: Page; expires: number; bytes: number }>();
   private cacheBytes = 0;
   private pending = new Map<string, Promise<Page>>();
+  private invalidated = new WeakSet<Promise<Page>>();
   private active = new Map<string, number>();
   private queues = new Map<string, Waiting[]>();
   constructor(private request: typeof fetch = fetch, private timeout = 15000, readonly sessions = new SessionStore()) {}
@@ -21,9 +22,19 @@ export class HttpClient {
     assertPrivateRead(provider, url);
     return this.read(url, new URL(url).origin, () => this.sessions.headers(provider, url));
   }
-  async get(url: string, ttl = 120000): Promise<Page> {
+  async get(url: string, ttl = 120000, refresh = false): Promise<Page> {
     const parsed = new URL(url);
     if (parsed.protocol !== 'https:' || !hosts.has(parsed.hostname) || parsed.port || parsed.username || parsed.password || parsed.hash) throw new DataError('error', 'Origen de consulta no permitido.');
+    // Fresh reads never consume a cached response or an older in-flight read.
+    // Invalidate the old entry, but do not let overlapping requests overwrite
+    // each other's cache with responses obtained in an indeterminate order.
+    if (refresh) {
+      this.evict(url);
+      const older = this.pending.get(url);
+      if (older) this.invalidated.add(older);
+      try { return await this.read(url, parsed.origin, undefined, true); }
+      finally { this.evict(url); }
+    }
     const hit = this.cache.get(url);
     if (hit && hit.expires > Date.now()) return { ...hit.page, source: { ...hit.page.source, cached: true } };
     this.evict(url);
@@ -31,7 +42,7 @@ export class HttpClient {
     if (running) return running;
     const task = this.read(url, parsed.origin).then(page => {
       const bytes = page.body.length * 2; // Conservative UTF-16 string accounting.
-      if (ttl > 0) {
+      if (ttl > 0 && !this.invalidated.has(task)) {
         while (this.cache.size && (this.cache.size >= 64 || this.cacheBytes + bytes > 16 * 1024 * 1024)) this.evict(this.cache.keys().next().value!);
         this.cache.set(url, { page, expires: Date.now() + ttl, bytes }); this.cacheBytes += bytes;
       }
@@ -61,7 +72,7 @@ export class HttpClient {
       q.push(waiting); signal.addEventListener('abort', waiting.cancel, { once: true });
     });
   }
-  private async read(url: string, origin: string, authorize?: () => Promise<Record<string, string>>): Promise<Page> {
+  private async read(url: string, origin: string, authorize?: () => Promise<Record<string, string>>, refresh = false): Promise<Page> {
     const signal = AbortSignal.timeout(this.timeout);
     const release = await this.acquire(origin, signal);
     try {
@@ -69,7 +80,7 @@ export class HttpClient {
       const auth = authorize ? await authorize() : {};
       signal.throwIfAborted();
       const response = await this.request(url, {
-        headers: { 'User-Agent': 'cinev-mcp/0.1', ...(origin.includes('gateway.cinesunidos.com') ? { xChannel: 'www' } : {}), ...auth },
+        headers: { 'User-Agent': 'cinev-mcp/0.1', ...(refresh ? { 'Cache-Control': 'no-cache' } : {}), ...(origin.includes('gateway.cinesunidos.com') ? { xChannel: 'www' } : {}), ...auth },
         signal, redirect: 'manual',
       });
       signal.throwIfAborted();
@@ -108,14 +119,14 @@ export class ReadContext {
   sources: EvidenceSource[] = [];
   warnings: string[] = [];
   partial = false;
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient, private refresh = false) {}
   async authenticated(provider: AuthProviderId, url: string): Promise<string> {
     const page = await this.http.getAuthenticated(provider, url);
     if (!this.sources.some(s => s.url === url)) this.sources.push(page.source);
     return page.body;
   }
   async get(url: string, ttl?: number): Promise<string> {
-    const page = await this.http.get(url, ttl);
+    const page = await this.http.get(url, ttl, this.refresh);
     if (!this.sources.some(s => s.url === url)) this.sources.push(page.source);
     return page.body;
   }

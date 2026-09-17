@@ -2,6 +2,14 @@
 
 Servidor MCP de consulta de cines venezolanos, pensado para agentes. Expone ocho herramientas sobre `stdio` usando el SDK oficial MCP de TypeScript v2. Compatible también con la negociación de protocolo MCP 2025 mediante `serveStdio`. Las consultas y los logins funcionan por HTTP, sin navegador.
 
+## Servicio alojado
+
+El endpoint HTTP `/mcp` permite consultar datos públicos sin iniciar sesión.
+Las conexiones privadas usan Postgres y sesiones cifradas; el usuario introduce
+las credenciales del cine en una página privada. La configuración para Vercel,
+las migraciones y los límites actuales del alta de clientes están en
+[la guía del servicio alojado](docs/hosted.md).
+
 ## Ejecutar y conectar
 
 Requiere Node.js 22 o posterior y acceso a Internet para consultar los cines.
