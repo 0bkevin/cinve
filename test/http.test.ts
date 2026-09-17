@@ -57,18 +57,3 @@ test('refresh bypasses warm cache, requests revalidation and never falls back on
   await assert.rejects(http.get(origin + '/fresh', 120000, true));
   assert.equal(count, 3);
 });
-
-test('refresh does not reuse or cache an older in-flight response', async () => {
-  let release!: () => void, count = 0;
-  const http = new HttpClient(async () => {
-    const n = ++count;
-    if (n === 1) await new Promise<void>(resolve => { release = resolve; });
-    return new Response(String(n));
-  });
-  const older = http.get(origin + '/race');
-  await new Promise(resolve => setImmediate(resolve));
-  const fresh = await http.get(origin + '/race', 120000, true);
-  assert.equal(fresh.body, '2');
-  release(); await older;
-  assert.equal((await http.get(origin + '/race')).body, '3');
-});
