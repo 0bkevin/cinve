@@ -13,6 +13,7 @@ export const PublicUrl = z.string().max(4096).refine(value => {
   try { const u = new URL(value); return u.protocol === 'https:' && !u.username && !u.password && !u.port; } catch { return false; }
 }, 'URL HTTPS sin credenciales');
 export const Source = z.object({ url: PublicUrl, fetched_at: z.string(), cached: z.boolean() });
+export type Operation = 'cities' | 'cinemas' | 'movies' | 'showtimes' | 'prices' | 'concessions';
 export const Item = z.object({
   kind: z.enum(['provider', 'city', 'cinema', 'movie', 'showtime', 'ticket_price', 'concession']),
   id: z.string().min(1).max(200), name: z.string().min(1).max(512),
@@ -32,13 +33,91 @@ export const Item = z.object({
   capabilities: z.record(z.string(), z.string()).optional(),
 });
 export type DataItem = z.infer<typeof Item>;
+
+// Result items are deliberately narrower than the backwards-compatible Item
+// union. Providers emit these fields today; keeping the operation schemas
+// small makes the contract useful for discovery while still leaving fields
+// that are genuinely optional optional.
+const operationItemSchemas = {
+  cities: Item.pick({ kind: true, id: true, name: true }).extend({
+    kind: z.literal('city'),
+  }),
+  cinemas: Item.pick({ kind: true, id: true, name: true, city: true, address: true, url: true }).extend({
+    kind: z.literal('cinema'),
+    id: Id.describe('ID de sede devuelto por list_cinemas.'),
+  }),
+  movies: Item.pick({
+    kind: true, id: true, name: true, cinema_id: true, city: true,
+    duration_minutes: true, genre: true, rating: true, format: true,
+    image_url: true, url: true,
+  }).extend({
+    kind: z.literal('movie'),
+    id: Id.describe('ID de película devuelto por list_movies.'),
+  }),
+  showtimes: Item.pick({
+    kind: true, id: true, name: true, cinema_id: true, movie_id: true,
+    date: true, time: true, starts_at: true, format: true, language: true,
+    screen: true, url: true,
+  }).extend({
+    kind: z.literal('showtime'),
+    id: Id.describe('Identificador de la función; úsalo como session_id al consultar tarifas.'),
+    cinema_id: Item.shape.cinema_id.unwrap().describe('ID de sede que devuelve list_cinemas.'),
+    movie_id: Item.shape.movie_id.unwrap().describe('ID de película que devuelve list_movies.'),
+    date: Item.shape.date.unwrap().describe('Fecha comercial de la función en America/Caracas (YYYY-MM-DD).'),
+    time: Item.shape.time.unwrap().describe('Hora local de inicio (HH:mm).'),
+    starts_at: Item.shape.starts_at.describe('Marca de tiempo con zona horaria; puede faltar en funciones de trasnoche.'),
+  }),
+  prices: Item.pick({
+    kind: true, id: true, name: true, cinema_id: true, movie_id: true,
+    session_id: true, prices: true, provider_currency: true,
+    provider_conversion_rate: true, final_total_verified: true,
+    price_components: true, redemption_only: true, child_only: true,
+    sales_allowed: true, area_category_code: true, screen: true,
+    format: true, language: true, url: true,
+  }).extend({
+    kind: z.literal('ticket_price'),
+    id: Item.shape.id.describe('Identificador del tipo de tarifa.'),
+    cinema_id: Item.shape.cinema_id.unwrap().describe('ID de sede consultada.'),
+    session_id: Item.shape.session_id.unwrap().describe('ID de función; proviene de showtimes.'),
+    prices: Item.shape.prices.unwrap().describe('Importes verificables del proveedor; [] significa que no hubo importe utilizable.'),
+  }),
+  concessions: Item.pick({
+    kind: true, id: true, name: true, cinema_id: true, category: true,
+    stock: true, prices: true, final_total_verified: true,
+    options_required: true, image_url: true, url: true,
+  }).extend({
+    kind: z.literal('concession'),
+    id: Item.shape.id.describe('Identificador del producto de caramelería.'),
+    cinema_id: Item.shape.cinema_id.unwrap().describe('ID de sede consultada.'),
+    prices: Item.shape.prices.unwrap().describe('Importes verificables del proveedor; [] significa que no hubo importe utilizable.'),
+  }),
+} as const;
+
+export type OperationItem = z.infer<(typeof operationItemSchemas)[Operation]>;
+export function operationItemSchema<Op extends Operation>(op: Op): (typeof operationItemSchemas)[Op];
+export function operationItemSchema(op: Operation) {
+  return operationItemSchemas[op];
+}
+
+const resultFields = {
+  provider: Provider,
+  status: Status,
+  queried_at: z.string(),
+  timezone: z.literal('America/Caracas'),
+  sources: z.array(Source),
+  warnings: z.array(z.string()),
+  total: z.number().int().nonnegative(),
+  next_offset: z.number().int().nullable(),
+  partial: z.boolean(),
+};
 export const Result = z.object({
-  provider: Provider, status: Status, queried_at: z.string(), timezone: z.literal('America/Caracas'),
-  sources: z.array(Source), items: z.array(Item), warnings: z.array(z.string()),
-  total: z.number().int().nonnegative(), next_offset: z.number().int().nullable(), partial: z.boolean(),
+  ...resultFields,
+  items: z.array(Item),
 });
 export type QueryResult = z.infer<typeof Result>;
-export type Operation = 'cities' | 'cinemas' | 'movies' | 'showtimes' | 'prices' | 'concessions';
+export function outputSchema<Op extends Operation>(op: Op) {
+  return z.object({ ...resultFields, items: z.array(operationItemSchema(op)) });
+}
 export type Query = {
   provider: ProviderId; city?: string; cinema_id?: string; movie_id?: string; session_id?: string;
   date?: string; query?: string; offset?: number; limit?: number; refresh?: boolean;

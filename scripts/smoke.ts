@@ -19,7 +19,8 @@ async function call(name: string, args: Record<string, unknown>, allowed = ['ava
   const response = await client.callTool({ name, arguments: args });
   const result = Result.parse(response.structuredContent);
   console.log(JSON.stringify({ tool: name, arguments: args, duration_ms: Date.now() - started, status: result.status, total: result.total, partial: result.partial, sources: result.sources, warnings: result.warnings }));
-  if (response.isError || !allowed.includes(result.status)) failed = true;
+  const expectedError = !['available', 'empty'].includes(result.status);
+  if (!allowed.includes(result.status) || response.isError !== expectedError) failed = true;
   if (result.sources.some(s => s.cached)) { failed = true; console.error('Fresh query unexpectedly used cache.'); }
   if (result.status === 'available' && !result.sources.length) failed = true;
   if (name === 'get_showtimes' && result.items.some(s => s.date !== args.date)) failed = true;

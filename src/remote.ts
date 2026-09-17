@@ -1,6 +1,6 @@
 import { constants } from 'node:fs';
 import { open } from 'node:fs/promises';
-import { Server } from '@modelcontextprotocol/server';
+import { SERVER_INFO_META_KEY, Server } from '@modelcontextprotocol/server';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 
 export async function remoteConfig(path: string) {
@@ -17,12 +17,37 @@ export async function remoteConfig(path: string) {
 export async function createRemoteServer(config: { url: string; token: string }) {
   const client = new Client({ name: 'cinev-stdio-bridge', version: '0.1.0' });
   await client.connect(new StreamableHTTPClientTransport(new URL(config.url), { requestInit: { headers: { Authorization: `Bearer ${config.token}` }, redirect: 'error' } }));
-  const server = new Server({ name: 'cinev-hosted-bridge', version: '0.1.0' }, { capabilities: { tools: {} } });
-  server.setRequestHandler('tools/list', request => client.listTools(request.params));
+  // Preserve the upstream usage guidance so a stdio client receives the same
+  // account and data handling instructions as a direct hosted client.
+  const instructions = client.getInstructions();
+  const server = new Server({ name: 'cinev-hosted-bridge', version: '0.1.0' }, {
+    capabilities: { tools: {} },
+    ...(instructions ? { instructions } : {}),
+  });
+  const stripServerIdentity = (meta: Record<string, unknown> | undefined) => {
+    if (!meta) return undefined;
+    const forwarded = { ...meta };
+    // The bridge must identify itself. Forwarding the upstream reserved key
+    // would make clients attribute the bridge response to the hosted server.
+    delete forwarded[SERVER_INFO_META_KEY];
+    return Object.keys(forwarded).length ? forwarded : undefined;
+  };
+  server.setRequestHandler('tools/list', async request => {
+    const result = await client.listTools(request.params);
+    const { _meta, ...body } = result;
+    const forwarded = stripServerIdentity(_meta);
+    return { ...body, ...(forwarded ? { _meta: forwarded } : {}) };
+  });
   server.setRequestHandler('tools/call', async request => {
-    // Forward only ordinary tool results; this bridge does not implement elicitation.
+    // Forward tool metadata as well as ordinary results. This bridge does not
+    // implement elicitation, so it intentionally does not advertise it.
     const result = await client.callTool(request.params);
-    return { content: result.content, structuredContent: result.structuredContent, isError: result.isError };
+    const { _meta, ...body } = result;
+    const forwarded = stripServerIdentity(_meta);
+    return {
+      ...body,
+      ...(forwarded ? { _meta: forwarded } : {}),
+    };
   });
   server.onclose = () => { void client.close(); };
   return server;
