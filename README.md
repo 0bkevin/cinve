@@ -7,7 +7,7 @@ Servidor MCP de consulta de cines venezolanos, pensado para agentes. Expone ocho
 El endpoint HTTP `/mcp` permite consultar datos públicos sin iniciar sesión.
 Las conexiones privadas usan Postgres y sesiones cifradas; el usuario introduce
 las credenciales del cine en una página privada. La configuración para Vercel,
-las migraciones y los límites actuales del alta de clientes están en
+las migraciones y la autorización de clientes están en
 [la guía del servicio alojado](docs/hosted.md).
 
 ## Instalación guiada para asistentes
@@ -65,14 +65,16 @@ npm run logout -- cinesunidos
 
 Logout elimina la sesión local; no revoca automáticamente el token en el proveedor. Las consultas autenticadas no usan caché y releen la sesión al salir de la cola, antes de enviar el HTTP. Una consulta que ya se había enviado puede terminar.
 
-El servicio alojado admite varios clientes con tokens independientes, sesiones cifradas por cliente y un enlace privado de un solo uso para conectar cada cuenta. Revisa [la guía del servicio alojado](docs/hosted.md) antes de desplegarlo; no compartas un token ni una cuenta de cine entre usuarios.
+El servicio alojado permite autorizar el asistente desde el navegador mediante OAuth, sin pedir un token al operador. Ante `auth_required`, el agente llama `connect_account`: el cliente inicia la autorización si hace falta y después la herramienta devuelve un enlace privado de un solo uso para conectar el cine. Al terminar, consulta `get_auth_status` y repite la consulta original. Cada autorización crea una conexión independiente con sesiones cifradas; conectar otra aplicación requiere conectar de nuevo el cine. Se necesita un cliente MCP con OAuth, registro dinámico y PKCE. Los comandos locales anteriores no autentican el servicio alojado. Revisa [la guía del servicio alojado](docs/hosted.md) antes de desplegarlo; no compartas un token ni una cuenta de cine entre usuarios.
 
 ## Herramientas
 
 | Herramienta | Uso y argumentos |
 |---|---|
 | `list_providers` | Capacidades implementadas y limitaciones. No es un chequeo de salud en vivo. |
-| `get_auth_status` | Sin argumentos. Estado local de las cuentas Cinex/Cines Unidos y comandos para conectarlas. |
+| `get_auth_status` | Sin argumentos. Estado de las cuentas Cinex/Cines Unidos y siguiente paso según el modo de conexión. |
+| `connect_account` | Solo alojado: `provider` Cinex/Cines Unidos. Inicia autorización OAuth si hace falta y devuelve el enlace privado para conectar el cine. |
+| `disconnect_account` | Solo alojado: `provider`. Elimina la sesión del cine y sus enlaces pendientes. |
 | `list_cities` | `provider`; ciudades del proveedor. |
 | `list_cinemas` | `provider`, `city` opcional; obligatorio para Cines Unidos. |
 | `list_movies` | Cinepic: `cinema_id`; Cines Unidos: `city`. Ambos admiten `date`, por defecto hoy. Cinex: catálogo general, `query` opcional. |

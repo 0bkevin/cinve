@@ -1,3 +1,4 @@
+import { HostedOAuth } from './oauth.js';
 import { serveInstall } from './install.js';
 import { createServer as nodeServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -13,14 +14,14 @@ import type { AuthSession, AuthProviderId } from './auth.js';
 import type { Operation, Query } from './core.js';
 import { ConnectionLinks } from './hosted-links.js';
 import { EncryptedSessionStore, HostedUsers, digest } from './hosted-store.js';
-import { loginPage, loginScript } from './auth-web.js';
+import { connectionHomePage, loginPage, loginScript } from './auth-web.js';
 
 class AnonymousSessions extends SessionStore {
   override async read(): Promise<AuthSession | undefined> { return undefined; }
   override async save(): Promise<void> { throw new Error("Anonymous sessions cannot persist credentials."); }
   override async remove(): Promise<void> { throw new Error("Anonymous sessions cannot modify credentials."); }
   override async status(p: AuthProviderId) {
-    return { ...await super.status(p), login_command: "Inicia sesión en Cinev cuando necesites conectar una cuenta de cine." };
+    return { ...await super.status(p), login_command: "Usa connect_account para autorizar Cinve desde tu asistente y obtener el enlace privado del cine. No busques páginas de acceso en la web." };
   }
 }
 
@@ -48,6 +49,7 @@ export async function createHostedApp(options: {
       (publicUrl.protocol !== 'https:' && !(options.allowLocal && publicUrl.protocol === 'http:' && publicUrl.hostname === '127.0.0.1'))) throw new Error('CINEV_PUBLIC_URL debe ser un origen HTTPS.');
   if (options.key.length !== 32) throw new Error('Clave de cifrado no válida.');
   let origin = publicUrl.origin;
+  const oauth = new HostedOAuth(options.pool, () => origin);
   const users = new HostedUsers(options.pool);
   const links = new ConnectionLinks(options.pool);
   // Process-level concurrency is an extra bound; rate budgets live in Postgres.
@@ -62,24 +64,44 @@ export async function createHostedApp(options: {
     try {
       if (serveInstall(req, res, origin)) return;
       if (req.method === 'GET' && req.url === '/health') { send(200, { status: 'ok' }); return; }
-      if (req.headers.host !== publicUrl.host || (req.headers.origin && req.headers.origin !== origin)) throw new HttpError(403, 'Origen no permitido.');
+      if (req.headers.host !== publicUrl.host) throw new HttpError(403, 'Origen no permitido.');
+      const forwarded = options.trustedVercelProxy ? req.headers['x-vercel-forwarded-for'] : undefined;
+      const ip = typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : req.socket.remoteAddress ?? 'unknown';
+      if (await oauth.handle(req, res, ip)) return;
+      if (req.url === '/mcp') {
+        // MCP authorization is exclusively bearer-based; cookies are never used.
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, MCP-Protocol-Version, MCP-Session-Id, Last-Event-ID');
+        res.setHeader('Access-Control-Expose-Headers', 'WWW-Authenticate, MCP-Session-Id');
+        if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+      } else if (req.headers.origin && req.headers.origin !== origin) throw new HttpError(403, 'Origen no permitido.');
       if (req.method === 'GET' && req.url === '/internal/cleanup') {
         if (!options.cleanupSecret || !timingSafeEqual(Buffer.from(digest(req.headers.authorization ?? '')), Buffer.from(digest(`Bearer ${options.cleanupSecret}`)))) throw new HttpError(401, 'Acceso requerido.');
         await links.cleanup(); send(200, { cleaned: true }); return;
       }
       if (req.method === 'GET' && (req.url === '/connect' || req.url === '/')) {
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(loginPage()); return;
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(req.url === '/' ? connectionHomePage() : loginPage()); return;
       }
       if (req.method === 'GET' && req.url === '/app.js') {
         res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8' }); res.end(loginScript); return;
       }
       if (req.url === '/mcp') {
         const authorization = req.headers.authorization ?? '';
-        const principal = authorization.startsWith('Bearer ') ? await users.authenticate(authorization.slice(7)) : undefined;
-        if (authorization && !principal) { res.setHeader('WWW-Authenticate', 'Bearer realm="cinev"'); throw new HttpError(401, 'Acceso Cinev requerido.'); }
-        const forwarded = options.trustedVercelProxy ? req.headers['x-vercel-forwarded-for'] : undefined;
-        const clientKey = principal?.id ?? `anonymous:${typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : req.socket.remoteAddress ?? 'unknown'}`;
+        const principal = authorization.startsWith('Bearer ') ? await oauth.authenticate(authorization.slice(7)) ?? await users.authenticate(authorization.slice(7)) : undefined;
+        if (authorization && !principal) { res.setHeader('WWW-Authenticate', oauth.challenge(true)); throw new HttpError(401, 'Acceso Cinev requerido.'); }
+        const clientKey = principal?.id ?? `anonymous:${ip}`;
         if (!await links.budget(`mcp:${clientKey}`, 120) || (active.get(clientKey) ?? 0) >= 4 || totalActive >= 32) throw new HttpError(429, 'Demasiadas consultas. Inténtalo más tarde.');
+        const parsed = req.method === 'POST' ? await body(req, 65536) : undefined;
+        // Discover public tools anonymously. Calling the connection tool triggers
+        // the client's standard OAuth flow, which retries this same tool afterward.
+        if (!principal && parsed && typeof parsed === 'object' && !Array.isArray(parsed) &&
+            'method' in parsed && parsed.method === 'tools/call' && 'params' in parsed &&
+            parsed.params && typeof parsed.params === 'object' && 'name' in parsed.params &&
+            ['connect_account', 'disconnect_account'].includes(String(parsed.params.name))) {
+          res.setHeader('WWW-Authenticate', oauth.challenge());
+          throw new HttpError(401, 'Autoriza Cinve con la opción de autenticación de tu asistente y vuelve a intentar connect_account. No se necesitan tokens manuales ni credenciales en el chat.');
+        }
         active.set(clientKey, (active.get(clientKey) ?? 0) + 1); totalActive++;
         const store = principal ? storeFor(principal.id) : new AnonymousSessions();
         const service = new HostedService(new HttpClient(options.request, 15000, store));
@@ -92,7 +114,6 @@ export async function createHostedApp(options: {
           disconnect: async provider => { await store.remove(provider); },
         } : undefined, !principal), { maxSubscriptions: 0, keepAliveMs: 0 });
         try {
-          const parsed = req.method === 'POST' ? await body(req, 65536) : undefined;
           await toNodeHandler(handler)(req, res, parsed);
         } finally { await handler.close(); active.set(clientKey, active.get(clientKey)! - 1); if (!active.get(clientKey)) active.delete(clientKey); totalActive--; }
         return;

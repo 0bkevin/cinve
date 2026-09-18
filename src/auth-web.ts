@@ -8,7 +8,7 @@ export function loginPage() {
 <form id="login"><label for="provider">Cuenta del cine</label><select id="provider" name="provider" disabled><option value="cinex" >Cinex</option><option value="cinesunidos" >Cines Unidos</option></select>
 <label for="username">Correo de tu cuenta</label><input id="username" name="username" type="email" autocomplete="username" maxlength="320" required>
 <label for="password">Contraseña</label><div class="password"><input id="password" name="password" type="password" autocomplete="current-password" maxlength="4096" required><button id="show" type="button" aria-label="Mostrar contraseña" aria-pressed="false">Mostrar</button></div>
-<p class="note">Cinev enviará tus datos al cine elegido por HTTPS. Guardará tu sesión cifrada para que tu agente consulte precios con tu cuenta. No guarda tu contraseña.</p>
+<p class="note">Cinve enviará tus datos al cine elegido por HTTPS. Guardará tu sesión cifrada para que tu agente consulte precios con tu cuenta. No guarda tu contraseña.</p>
 <button class="primary" id="connect" type="submit">Conectar cuenta</button><div id="feedback" class="feedback" role="status" aria-live="polite"></div></form></div>
 <button id="done" class="secondary">Cancelar conexión</button><footer>Cinepic funciona sin cuenta. Vuelve a tu agente después de conectar. Este enlace caduca en 10 minutos.</footer></main><script src="/app.js"></script></html>`;
 }
@@ -39,7 +39,15 @@ $('login').onsubmit = async event => {
 $('done').onclick = async () => { try { await request('/connect/cancel'); } catch {} token = ''; $('login').reset(); $('login').hidden = true; $('done').hidden = true; $('accounts').textContent = 'Conexión cancelada. Puedes cerrar esta pestaña.'; };
 request('/connect/exchange', {}, invitation).then(data => {
   token = data.browser_token; $('provider').value = data.provider;
-  $('accounts').textContent = 'Conectar ' + (data.provider === 'cinex' ? 'Cinex' : 'Cines Unidos') + ' a tu acceso Cinev (' + data.user_label + ').';
+  $('accounts').textContent = 'Conectar ' + (data.provider === 'cinex' ? 'Cinex' : 'Cines Unidos') + ' a tu acceso Cinve (' + data.user_label + ').';
   $('connect').disabled = false;
 }).catch(() => { $('accounts').textContent = 'Enlace vencido o ya utilizado.'; $('login').hidden = true; $('done').hidden = true; const p = document.createElement('p'); p.textContent = 'Pide a tu agente un enlace nuevo para conectar tu cuenta.'; $('accounts').append(p); });
 `;
+
+export function connectionHomePage() {
+  return `<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cinve · Tus cines, desde tu asistente</title>
+<style>body{font:18px/1.6 system-ui;margin:0;background:#f5f3ee;color:#202522}main{max-width:560px;margin:9vh auto;padding:28px}h1{line-height:1.15;letter-spacing:-1px}a{color:#244d3b}li{margin:14px 0}</style>
+<main><strong>cinve.</strong><h1>Tus cines, desde tu asistente.</h1><p>Consulta películas, funciones y caramelería de cines venezolanos desde el chat.</p>
+<ol><li><a href="/install">Añade Cinve a tu asistente</a>, si todavía no lo has conectado.</li><li>Pregunta por películas o precios. Si el cine requiere una cuenta, tu asistente te pedirá autorizar Cinve y te dará un enlace privado para conectarla.</li><li>Conecta tu cuenta en ese enlace y vuelve al chat para continuar.</li></ol>
+<p>No necesitas otra contraseña para Cinve. Introduce la contraseña del cine únicamente en el formulario privado, nunca en el chat.</p><p>La cartelera y los datos públicos se consultan sin conectar una cuenta.</p></main></html>`;
+}

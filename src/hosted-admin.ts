@@ -1,14 +1,14 @@
 #!/usr/bin/env node
-import { readFile } from 'node:fs/promises';
+import { migrationSql } from './migrations.js';
 import { HostedUsers, databasePool, transaction } from './hosted-store.js';
 import { ConnectionLinks } from './hosted-links.js';
 async function main() {
   const [command, id, ...extra] = process.argv.slice(2);
   if (extra.length) throw new Error('Argumentos no válidos.');
-  const pool = databasePool(), users = new HostedUsers(pool);
+  const pool = databasePool(command === 'migrate' ? process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL : process.env.DATABASE_URL), users = new HostedUsers(pool);
   try {
     if (command === 'migrate' && !id) {
-      const sql = await readFile(new URL('../migrations/001_hosted.sql', import.meta.url), 'utf8');
+      const sql = await migrationSql();
       await transaction(pool, async client => {
         await client.query('SELECT pg_advisory_xact_lock(167493821)');
         await client.query(sql);
