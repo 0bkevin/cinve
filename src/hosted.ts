@@ -22,7 +22,7 @@ class AnonymousSessions extends SessionStore {
   override async save(): Promise<void> { throw new Error("Anonymous sessions cannot persist credentials."); }
   override async remove(): Promise<void> { throw new Error("Anonymous sessions cannot modify credentials."); }
   override async status(p: AuthProviderId) {
-    return { ...await super.status(p), login_command: hostedAuthInstructions };
+    return { ...await super.status(p), status: 'client_authorization_required', login_command: hostedAuthInstructions };
   }
 }
 

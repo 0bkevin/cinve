@@ -25,7 +25,8 @@
     "start:remote": "node dist/remote-main.js",
     "db:migrate": "tsx src/hosted-admin.ts migrate",
     "db:cleanup": "tsx src/hosted-admin.ts cleanup",
-    "build:hosted": "tsc -p tsconfig.hosted.json && cp .hosted/server.js .hosted/index.js"
+    "build:hosted": "tsc -p tsconfig.hosted.json && cp .hosted/server.js .hosted/index.js",
+    "test:codex-auth": "npm run build && node scripts/verify-codex-auth.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/client": "^2.0.0",

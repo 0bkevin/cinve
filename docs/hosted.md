@@ -43,7 +43,24 @@ URL and keep the process alive until the user approves. This must run against
 the user's own local installation, not an unrelated cloud terminal. It is
 assistant authorization, not the local cinema-password login. Settings instructions
 are a fallback only when neither the native action nor local CLI is accessible.
-Existing running clients may need to reconnect to load newly saved credentials.
+A test with Codex 0.155.0 confirmed that CLI login leaves an existing conversation
+using its anonymous connection. `get_auth_status.connection.client_authorized`
+distinguishes this from a missing cinema session; anonymous provider statuses
+are `client_authorization_required`. Use the host's native refresh action once
+(`config/mcpServer/reload` in app-server integrations), rather than repeating login.
+Native `mcpServer/oauth/login` with the thread ID updates the running thread after
+its completion event and avoids that extra refresh. Assistants must only use host
+actions actually available to them; a remote MCP cannot execute these client APIs.
+
+The assistant should show the OAuth URL as a progress update and watch completion,
+without demanding a "done" reply. It must keep the callback process alive, stop it
+on cancellation, and avoid short subprocess timeouts or hiding output. Codex's CLI
+callback returned HTTP 400 for a standard OAuth denial in testing; the pending
+command must be stopped when the user cancels. Public queries remain usable.
+
+For a public-only installation, edit the Codex MCP configuration table directly:
+`codex mcp add` can start optional OAuth immediately and block awaiting approval.
+The `/install` guide describes the non-interactive registration path.
 Clients without OAuth can still use public data. Never send users to search for a login page or paste tokens in chat.
 
 ### OAuth endpoints and lifecycle

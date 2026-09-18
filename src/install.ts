@@ -30,12 +30,22 @@ Server name: cinve
    Preserve other servers and existing authentication settings. If the name cinve
    points elsewhere, explain the conflict before replacing it.
 
-   For Codex, the registration command is:
+   For Codex, register public access by adding or updating only this table in
+   the user's config.toml (normally ~/.codex/config.toml; respect CODEX_HOME):
 
-   codex mcp add cinve --url ${endpoint}
+   [mcp_servers.cinve]
+   url = "${endpoint}"
 
-   For other clients, use their documented equivalent. Do not run the Codex
-   command unless Codex is the application being configured.
+   Parse the existing TOML first, preserve all unrelated settings and comments,
+   avoid duplicate tables, then verify with codex mcp get cinve. Do not print
+   the full configuration, which may contain secrets. Keep any temporary backup
+   private and remove it after verifying the edit.
+
+   Do not use codex mcp add for this anonymous-first installation: some Codex
+   versions start optional OAuth immediately and wait for browser approval.
+   Do not start authorization, wait for a password, or report an install timeout
+   for public access. Start codex mcp login only when the user wants a private
+   cinema connection. For other clients, use their documented equivalent.
 
    If the client does not support remote MCP, report that limitation and consult
    its documentation for supported alternatives. Do not claim that every chat
@@ -78,7 +88,15 @@ PKCE. If it does not open authorization automatically, initiate the client's
 native OAuth action yourself when available. For Codex running locally with
 access to the user's own installed configuration, run \`codex mcp login cinve\`
 (use the actual configured server name if different). Keep the process running,
-present its authorization URL as a clickable link, and wait for completion.
+present its authorization URL as a clickable progress update, and observe
+completion instead of asking the user to type "done". Do not capture all output
+until completion or use a short timeout while waiting for human approval.
+If the user cancels or requests a new link, stop the previous attempt.
+After CLI login, an already-open Codex connection may still be anonymous. Check
+get_auth_status.connection.client_authorized; false does not mean cinema login
+failed. Use the host's native MCP refresh action if available (Codex integrations:
+config/mcpServer/reload), then retry. If unavailable, request one reconnect;
+do not start another login loop. Never invent a host tool or restart another app.
 This is assistant authorization, not a cinema password prompt. Never use
 \`npm run login\` for hosted connections. Do not make the user navigate Settings
 or run commands when you can start the authorization yourself. Do not run login

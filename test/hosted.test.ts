@@ -80,7 +80,12 @@ test('hosted MCP authenticates every request; account links are one-use and sess
   const aStatus = JSON.stringify((await alice.callTool({ name: 'get_auth_status', arguments: {} })).structuredContent);
   const bStatus = JSON.stringify((await bob.callTool({ name: 'get_auth_status', arguments: {} })).structuredContent);
   assert.ok(aStatus.includes('configured')); assert.ok(!bStatus.includes('configured')); assert.ok(!aStatus.includes('SYNTHETIC'));
-  const anonymousStatus = JSON.stringify((await anonymous.callTool({ name: 'get_auth_status', arguments: {} })).structuredContent);
+  const anonymousAuth = (await anonymous.callTool({ name: 'get_auth_status', arguments: {} })).structuredContent as { connection: { mode: string; client_authorized: boolean }; providers: Array<{ status: string }> };
+  assert.deepEqual(anonymousAuth.connection, { mode: 'hosted', client_authorized: false });
+  assert.ok(anonymousAuth.providers.every(p => p.status === 'client_authorization_required'));
+  const signedIn = (await alice.callTool({ name: 'get_auth_status', arguments: {} })).structuredContent as { connection: { mode: string; client_authorized: boolean } };
+  assert.deepEqual(signedIn.connection, { mode: 'hosted', client_authorized: true });
+  const anonymousStatus = JSON.stringify(anonymousAuth);
   assert.ok(!anonymousStatus.includes('configured'));
   const stillPrivate = await anonymous.callTool({ name: 'get_ticket_prices', arguments: { provider: 'cinesunidos', cinema_id: '1', session_id: '1' } });
   assert.equal((stillPrivate.structuredContent as { status: string }).status, 'auth_required');
