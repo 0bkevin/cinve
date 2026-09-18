@@ -404,3 +404,16 @@ test('browser MCP clients discover OAuth without cookies; approval names are esc
   await f.pool.query(await migrationSql());
   assert.ok(await f.users.authenticate(f.alice.token), 'migrations can be rerun without invalidating existing access');
 });
+
+test('local Codex continuation is served as a standalone script with safe HTTP methods', async t => {
+  const f = await fixture(t);
+  const { codexClientScript } = await import('../src/codex-client-script.js');
+  const r = await fetch(f.origin + '/codex-client.mjs');
+  assert.equal(r.status, 200); assert.match(r.headers.get('content-type')!, /javascript/);
+  assert.equal(r.headers.get('cache-control'), 'no-store'); assert.equal(await r.text(), codexClientScript);
+  const head = await fetch(f.origin + '/codex-client.mjs', { method: 'HEAD' });
+  assert.equal(head.status, 200); assert.equal(await head.text(), '');
+  assert.equal((await fetch(f.origin + '/codex-client.mjs', { method: 'POST' })).status, 405);
+  const guide = await (await fetch(f.origin + '/install')).text();
+  assert.ok(guide.includes(f.origin + '/codex-client.mjs'));
+});
