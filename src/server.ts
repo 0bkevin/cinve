@@ -136,7 +136,7 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
     outputSchema: SeatResult, annotations,
   }, async args => {
     const data = await service.seats(args);
-    if (publicHosted && data.status === 'auth_required') data.warnings = ['Conecta tu cuenta mediante connect_account y repite get_seats. ' + hostedAuthInstructions];
+    if ((publicHosted || accounts) && data.status === 'auth_required') data.warnings = ['Conecta tu cuenta mediante connect_account y repite get_seats. ' + hostedAuthInstructions];
     return { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data, isError: data.status !== 'available' };
   });
   const tools: Array<[string, Operation, string]> = [
