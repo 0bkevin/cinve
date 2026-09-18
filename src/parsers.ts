@@ -48,18 +48,32 @@ export function findField(roots: unknown[], key: string): unknown {
   return undefined;
 }
 /** Bounded, iterative traversal: untrusted JSON cannot exhaust the JavaScript stack. */
-export function* objects(root: unknown): Generator<Obj> {
+function* nodes(root: unknown): Generator<unknown> {
   const stack = [{ value: root, depth: 0 }]; let visited = 0;
   while (stack.length) {
     const { value, depth } = stack.pop()!;
     if (++visited > 100000 || depth > 64) throw new DataError('error', 'Los datos del proveedor exceden los límites de estructura.');
     if (!value || typeof value !== 'object') continue;
-    if (!Array.isArray(value)) yield value as Obj;
+    yield value;
     const children = Object.values(value);
     if (stack.length + children.length > 100000) throw new DataError('error', 'Los datos del proveedor exceden los límites de estructura.');
     for (let i = children.length - 1; i >= 0; i--) stack.push({ value: children[i], depth: depth + 1 });
   }
 }
+export function* objects(root: unknown): Generator<Obj> {
+  for (const value of nodes(root)) if (value && typeof value === 'object' && !Array.isArray(value)) yield value as Obj;
+}
+/** Only component props are catalog roots; nested movie.theaters is not a cinema directory. */
+export function pageFields(roots: unknown[], key: string): unknown[] {
+  const fields: unknown[] = [];
+  for (const value of nodes(roots)) {
+    if (!Array.isArray(value) || value[0] !== '$' || value.length !== 4) continue;
+    const props = object(value[3]);
+    if (Object.hasOwn(props, key)) fields.push(props[key]);
+  }
+  return fields;
+}
+
 export function decodeLabel(value: unknown): string {
   let s = text(value).replace(/\\u([0-9a-fA-F]{4})/g, (_, n: string) => String.fromCharCode(parseInt(n, 16)));
   if (/[ÃÂ]/.test(s)) {

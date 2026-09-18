@@ -18,6 +18,8 @@ export const Item = z.object({
   kind: z.enum(['provider', 'city', 'cinema', 'movie', 'showtime', 'ticket_price', 'concession']),
   id: z.string().min(1).max(200), name: z.string().min(1).max(512),
   cinema_id: Id.optional(), movie_id: Id.optional(), session_id: Id.optional(),
+  code_status: z.enum(['verified', 'unverified']).optional().describe('Código confirmado por los datos oficiales actuales; unverified no implica cierre.'),
+  directory_status: z.enum(['listed', 'not_listed']).optional().describe('Presencia en el directorio recibido en esta consulta; not_listed no implica cierre.'),
   city: z.string().optional(), address: z.string().optional(),
   date: z.string().optional(), time: z.string().optional(), starts_at: z.string().optional(),
   format: z.string().optional(), language: z.string().optional(), screen: z.string().optional(),
@@ -42,9 +44,9 @@ const operationItemSchemas = {
   cities: Item.pick({ kind: true, id: true, name: true }).extend({
     kind: z.literal('city'),
   }),
-  cinemas: Item.pick({ kind: true, id: true, name: true, city: true, address: true, url: true }).extend({
+  cinemas: Item.pick({ kind: true, id: true, cinema_id: true, code_status: true, directory_status: true, name: true, city: true, address: true, url: true }).extend({
     kind: z.literal('cinema'),
-    id: Id.describe('ID de sede devuelto por list_cinemas.'),
+    id: Id.describe('ID de sede. directory-* identifica una entrada sin código consultable; si code_status está presente, usa cinema_id solo cuando sea verified.'),
   }),
   movies: Item.pick({
     kind: true, id: true, name: true, cinema_id: true, city: true,

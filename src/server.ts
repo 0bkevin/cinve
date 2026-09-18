@@ -13,7 +13,7 @@ const paging = {
   limit: z.number().int().min(1).max(100).default(50),
 };
 const provider = Provider.describe('Proveedor de cine; obtén capacidades y limitaciones con list_providers.');
-const cinemaId = Id.describe('ID de sede devuelto por list_cinemas del mismo proveedor. No mezcles IDs entre proveedores.');
+const cinemaId = Id.describe('ID de sede devuelto por list_cinemas del mismo proveedor. No mezcles IDs entre proveedores. Si la sede incluye code_status, usa cinema_id solo cuando sea verified; los IDs directory-* no permiten consultas.');
 const movieId = Id.describe('ID de película devuelto por list_movies del mismo proveedor.');
 const sessionId = Id.describe('ID de función devuelto por get_showtimes del mismo proveedor.');
 const schema = z.object({
@@ -125,7 +125,7 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
   }
   const tools: Array<[string, Operation, string]> = [
     ['list_cities', 'cities', 'Lista ciudades del proveedor. Usa sus nombres al consultar Cines Unidos.'],
-    ['list_cinemas', 'cinemas', 'Lista sedes e IDs. Cines Unidos requiere city; Cinepic enumera Candelaria y VVIP Lido. Cinex admite city opcional.'],
+    ['list_cinemas', 'cinemas', 'Lista sedes e IDs. Cines Unidos requiere city; Cinepic verifica las sedes configuradas Candelaria y VVIP Lido. Los proveedores conservan sedes conocidas sin código verificado (code_status=unverified). Cinex admite city opcional e incluye sedes conocidas ausentes del directorio actual (directory_status=not_listed); ninguna condición indica cierre.'],
     ['list_movies', 'movies', 'Busca películas por nombre. Cinepic requiere cinema_id y filtra funciones del día; Cines Unidos requiere city y permite cinema_id/date. Cinex devuelve catálogo general sin fecha/sede: solo provider, query y paginación. Los IDs pertenecen al proveedor y, en Cinepic, a la sede.'],
     ['get_showtimes', 'showtimes', 'Consulta funciones de una fecha (hoy en Caracas por defecto). Cinepic requiere cinema_id; Cines Unidos city; Cinex movie_id. Retorna IDs necesarios para tarifas, sala/formato cuando disponibles y URL de la web.'],
     ['get_ticket_prices', 'prices', 'Consulta tarifas. Cinepic requiere cinema_id, movie_id y session_id de get_showtimes. Cines Unidos requiere cinema_id, session_id y una cuenta conectada. Cinex: cinema_id y session_id con una cuenta conectada; sin session_id consulta listado público que puede no estar disponible. Devuelve USD/VES cuando verificables, desglose Cinex en VES. No devuelve totales finales de compra.'],
