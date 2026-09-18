@@ -2,7 +2,7 @@
 // isolated local Postgres cluster, synthetic cinema credentials and a temporary
 // MCP name provided only through CLI overrides. Never touches production.
 // Requires Node >=22, Codex login, initdb and pg_ctl on PATH.
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, chmod, mkdir } from 'node:fs/promises';
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -123,6 +123,38 @@ try {
  const nativeLink=await tool('connect_account',{provider:'cinesunidos'});
  assert.ok(cinemaLink(nativeLink));
  console.log('Native login automatically updates the running thread: true');
+ // Exercise the shipped continuation against the real installed App Server.
+ const {codexClientScript}=await import(repo+'/dist/codex-client-script.js');
+ const helper=join(dir,'cinve-codex.mjs');await writeFile(helper,codexClientScript);
+ const actualCodex=(await exec('which',['codex'])).stdout.trim();
+ const bin=join(dir,'bin');await mkdir(bin);
+ const wrapper=join(bin,'codex');
+ await writeFile(wrapper,'#!/usr/bin/env node\nconst {spawn}=require("node:child_process");const p=spawn('+JSON.stringify(actualCodex)+','+JSON.stringify(['-c',config,'-c','mcp_servers.cinve.enabled=false'])+'.concat(process.argv.slice(2)),{stdio:"inherit"});p.on("exit",c=>process.exit(c??1));');
+ await chmod(wrapper,0o700);
+ const companion=spawn(process.execPath,[helper,'--server',alias,'connect','cinesunidos'],{cwd:repo,env:{...process.env,PATH:bin+':'+process.env.PATH},stdio:['ignore','pipe','pipe']});
+ children.add(companion);let companionBuffer='',companionEvents=[],connectWork=Promise.resolve();
+ companion.stderr.on('data',()=>{});
+ companion.stdout.on('data',chunk=>{
+  companionBuffer+=chunk;let end;
+  while((end=companionBuffer.indexOf('\n'))>=0){
+   const line=companionBuffer.slice(0,end);companionBuffer=companionBuffer.slice(end+1);
+   const event=JSON.parse(line);companionEvents.push(event);
+   if(event.event==='connect_cinema')connectWork=(async()=>{
+    const token=new URL(event.url).hash.slice(1);
+    const exchanged=await post('/connect/exchange',token);const browser=await exchanged.json();
+    assert.equal((await post('/connect/login',browser.browser_token,{username:'synthetic@example.test',password:'SYNTHETIC_PASSWORD'})).status,200);
+   })();
+  }
+ });
+ const companionTimer=setTimeout(()=>companion.kill(),20000);
+ const companionCode=await new Promise(resolve=>companion.on('exit',resolve));clearTimeout(companionTimer);children.delete(companion);
+ await connectWork;assert.equal(companionCode,0);
+ assert.ok(companionEvents.some(e=>e.event==='ready'));
+ assert.ok(!companionEvents.some(e=>e.event==='authorize_cinve'));
+ console.log('Shipped local continuation reuses saved OAuth and completes cinema connection: true');
+ const queried=await exec(process.execPath,[helper,'--server',alias,'call','list_cities',JSON.stringify({provider:'cinesunidos'})],{cwd:repo,env:{...process.env,PATH:bin+':'+process.env.PATH}});
+ assert.equal(JSON.parse(queried.stdout).structuredContent.status,'available');
+ console.log('Fresh continuation returns the original query result without restarting the existing conversation: true');
  console.log('Synthetic OAuth and cinema form test completed.');
 } catch(e){console.error('Synthetic test failed:',e.message);process.exitCode=1;}
 finally {
