@@ -10,6 +10,11 @@ las credenciales del cine en una página privada. La configuración para Vercel,
 las migraciones y los límites actuales del alta de clientes están en
 [la guía del servicio alojado](docs/hosted.md).
 
+## Instalación guiada para asistentes
+
+Comparte con tu asistente compatible con MCP: `Instala Cinve siguiendo https://cinve.vercel.app/install`.
+La ruta `/install` ofrece instrucciones en texto plano para configurar el cliente y verificar la conexión.
+
 ## Ejecutar y conectar
 
 Requiere Node.js 22 o posterior y acceso a Internet para consultar los cines.
