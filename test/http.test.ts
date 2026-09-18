@@ -57,3 +57,47 @@ test('refresh bypasses warm cache, requests revalidation and never falls back on
   await assert.rejects(http.get(origin + '/fresh', 120000, true));
   assert.equal(count, 3);
 });
+
+test('Cinex ticket migration preserves IDs, credentials, deadline and final source without caching', async () => {
+  const { SessionStore } = await import('../src/auth.js');
+  const source = 'https://www.cinex.com.ve/boletos.php?sessionid=23062&cinemaid=SBC';
+  const target = 'https://www.cinex.com.ve/boletosdev.php?cinemaid=SBC&sessionid=23062';
+  const authorized: string[] = [], signals: Array<AbortSignal | null | undefined> = [];
+  class Store extends SessionStore {
+    override async headers(_provider: 'cinex' | 'cinesunidos', url: string) {
+      authorized.push(url); return { Cookie: `session=${authorized.length}` };
+    }
+  }
+  const http = new HttpClient(async (url, init) => {
+    signals.push(init?.signal);
+    assert.equal(new Headers(init?.headers).get('Cookie'), `session=${authorized.length}`);
+    assert.equal(init?.redirect, 'manual');
+    return String(url) === source ? new Response(null, { status: 302, headers: { Location: target } }) : new Response('prices');
+  }, 1000, new Store());
+  const page = await http.getAuthenticated('cinex', source);
+  assert.equal(page.body, 'prices'); assert.equal(page.source.url, target); assert.equal(page.source.cached, false);
+  assert.deepEqual(authorized, [source, target]); assert.equal(signals[0], signals[1]);
+  await http.getAuthenticated('cinex', source); assert.equal(authorized.length, 4);
+});
+
+test('Cinex ticket redirects cannot change identity, escape the route or loop', async () => {
+  const { SessionStore } = await import('../src/auth.js');
+  class Store extends SessionStore { override async headers() { return { Cookie: 'SYNTHETIC' }; } }
+  const source = 'https://www.cinex.com.ve/boletos.php?sessionid=23062&cinemaid=SBC';
+  for (const destination of [
+    'https://evil.test/boletosdev.php?cinemaid=SBC&sessionid=23062',
+    '/boletosdev.php?cinemaid=TLN&sessionid=23062', '/boletosdev.php?cinemaid=SBC&sessionid=other',
+    '/boletosdev.php?cinemaid=SBC&sessionid=23062&extra=1', '/boletosdev.php?cinemaid=SBC&sessionid=23062&sessionid=23062',
+    '/boletosdev.php?cinemaid=SBC&sessionid=23062#fragment', '/pago.php',
+    'https://user:secret@www.cinex.com.ve/boletosdev.php?cinemaid=SBC&sessionid=23062',
+  ]) {
+    let calls = 0;
+    const http = new HttpClient(async () => { calls++; return new Response(null, { status: 302, headers: { Location: destination } }); }, 1000, new Store());
+    await assert.rejects(http.getAuthenticated('cinex', source), e => e instanceof DataError && e.status === 'unavailable');
+    assert.equal(calls, 1);
+  }
+  let calls = 0;
+  const loop = new HttpClient(async () => { calls++; return new Response(null, { status: 302, headers: { Location: '/boletosdev.php?cinemaid=SBC&sessionid=23062' } }); }, 1000, new Store());
+  await assert.rejects(loop.getAuthenticated('cinex', source), e => e instanceof DataError && e.status === 'unavailable');
+  assert.equal(calls, 2);
+});

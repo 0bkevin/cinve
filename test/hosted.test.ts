@@ -56,7 +56,7 @@ async function link(client: Client) {
 test('hosted MCP authenticates every request; account links are one-use and sessions stay per user', async t => {
   const f = await fixture(t, successfulLogin);
   const anonymous = await f.client();
-  assert.equal((await anonymous.listTools()).tools.length, 10);
+  assert.equal((await anonymous.listTools()).tools.length, 11);
   const publicData = await anonymous.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos' } });
   assert.equal((publicData.structuredContent as { status: string }).status, 'available');
   const protectedData = await anonymous.callTool({ name: 'get_ticket_prices', arguments: { provider: 'cinesunidos', cinema_id: '1', session_id: '1' } });
@@ -64,7 +64,7 @@ test('hosted MCP authenticates every request; account links are one-use and sess
   assert.ok(!JSON.stringify(protectedData).includes('npm run')); 
   assert.equal((await fetch(f.origin + '/mcp', { method: 'POST', headers: { Authorization: 'Bearer invalid' } })).status, 401);
   const alice = await f.client(f.alice.token), bob = await f.client(f.bob.token);
-  assert.equal((await alice.listTools()).tools.length, 10);
+  assert.equal((await alice.listTools()).tools.length, 11);
   const invitation = await link(alice);
   const page = await fetch(f.origin + '/connect');
   assert.equal(page.headers.get('cache-control'), 'no-store'); assert.match(page.headers.get('content-security-policy')!, /frame-ancestors 'none'/);
@@ -165,7 +165,7 @@ test('stdio bridge forwards tools to authenticated hosted MCP with fresh retriev
   const client = new Client({ name: 'bridge-test', version: '1' }); await client.connect(b);
   t.after(async () => { await client.close(); await server.close(); });
   const hostedTools = await client.listTools();
-  assert.equal(hostedTools.tools.length, 10);
+  assert.equal(hostedTools.tools.length, 11);
   assert.ok(hostedTools.tools.every(tool => tool.title));
   assert.match(client.getInstructions() ?? '', /Servidor alojado/);
   assert.deepEqual(client.getServerVersion(), { name: 'cinve', version: '0.1.0' });

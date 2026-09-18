@@ -16,6 +16,7 @@ export const cpSessions = { success: true, data: {
   ],
 } };
 export const cpBuy = {
+  butacasData: { butacas: [{ butaca: "A-1-1", nombre_butaca: "A:1", fila: "1", columna: "1", libre: "1" }] },
   functionData: { datos: [{ id: 'f1', codigo: 'p1' }], tarifas: [{ _id: 't1', descripcion: 'COMPLETO', precio: '4162.4' }] },
   configData: { moneda: '$$', tasaConversion: '832.48', payment_secret: 'SHOULD_NOT_LEAVE_PARSER' },
   candyData: { tiene_unidades_negocios: true, unidades_negocios: [] },

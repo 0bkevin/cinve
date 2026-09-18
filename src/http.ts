@@ -9,6 +9,19 @@ type Page = { body: string; source: EvidenceSource };
 type Waiting = { start: () => void; cancel: () => void };
 const hosts = new Set(['www.cinex.com.ve', 'www.cinesunidos.com', 'gateway.cinesunidos.com', 'cinepiccandelaria.com', 'cinepicvip.com', 'apifront.cinexo.com.ar', 'api.cinexo.com.ar', 'www.trasnochocultural.com']);
 
+function cinexTicketRedirect(url: string, response: Response): string | undefined {
+  if (![301, 302, 303, 307, 308].includes(response.status)) return;
+  const location = response.headers.get('location');
+  if (!location) return;
+  try {
+    const from = new URL(url), to = new URL(location, url);
+    if (from.origin !== 'https://www.cinex.com.ve' || from.pathname !== '/boletos.php' ||
+        to.origin !== from.origin || to.pathname !== '/boletosdev.php') return;
+    assertPrivateRead('cinex', to.href);
+    if (['cinemaid', 'sessionid'].every(key => to.searchParams.get(key) === from.searchParams.get(key))) return to.href;
+  } catch { /* Unrecognized redirects remain unavailable, without leaking their URL. */ }
+}
+
 /** Public reads are cached. Authenticated reads reload local sessions and bypass all caches. */
 export class HttpClient {
   private cache = new Map<string, { page: Page; expires: number; bytes: number }>();
@@ -20,7 +33,7 @@ export class HttpClient {
   constructor(private request: typeof fetch = fetch, private timeout = 15000, readonly sessions = new SessionStore()) {}
   async getAuthenticated(provider: AuthProviderId, url: string): Promise<Page> {
     assertPrivateRead(provider, url);
-    return this.read(url, new URL(url).origin, () => this.sessions.headers(provider, url));
+    return this.read(url, new URL(url).origin, target => this.sessions.headers(provider, target));
   }
   async get(url: string, ttl = 120000, refresh = false): Promise<Page> {
     const parsed = new URL(url);
@@ -72,17 +85,28 @@ export class HttpClient {
       q.push(waiting); signal.addEventListener('abort', waiting.cancel, { once: true });
     });
   }
-  private async read(url: string, origin: string, authorize?: () => Promise<Record<string, string>>, refresh = false): Promise<Page> {
+  private async read(url: string, origin: string, authorize?: (target: string) => Promise<Record<string, string>>, refresh = false): Promise<Page> {
     const signal = AbortSignal.timeout(this.timeout);
     const release = await this.acquire(origin, signal);
     try {
       // Reload after queue admission: logout/account changes affect requests not yet sent.
-      const auth = authorize ? await authorize() : {};
-      signal.throwIfAborted();
-      const response = await this.request(url, {
-        headers: { 'User-Agent': 'cinev-mcp/0.1', ...(refresh ? { 'Cache-Control': 'no-cache' } : {}), ...(origin.includes('gateway.cinesunidos.com') ? { xChannel: 'www' } : {}), ...auth },
-        signal, redirect: 'manual',
-      });
+      const requestPage = async (target: string) => {
+        const auth = authorize ? await authorize(target) : {};
+        signal.throwIfAborted();
+        return this.request(target, {
+          headers: { 'User-Agent': 'cinev-mcp/0.1', ...(refresh ? { 'Cache-Control': 'no-cache' } : {}), ...(origin.includes('gateway.cinesunidos.com') ? { xChannel: 'www' } : {}), ...auth },
+          signal, redirect: 'manual',
+        });
+      };
+      let response = await requestPage(url);
+      // One observed migration of Cinex's ticket page, with identical cinema
+      // and session IDs. Re-read credentials and retain the original deadline.
+      const ticketRedirect = authorize && cinexTicketRedirect(url, response);
+      if (ticketRedirect) {
+        await response.body?.cancel();
+        url = ticketRedirect;
+        response = await requestPage(url);
+      }
       signal.throwIfAborted();
       if (response.status >= 300 && response.status < 400) {
         const destination = response.headers.get('location'); await response.body?.cancel();
