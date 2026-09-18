@@ -1,3 +1,4 @@
+import { installationPage } from './public-web.js';
 import { codexClientScript } from './codex-client-script.js';
 import { seatInstructions } from './seat-guidance.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -144,7 +145,10 @@ export function serveInstall(req: IncomingMessage, res: ServerResponse, publicUr
     res.end('Method not allowed\n');
     return true;
   }
-  const guide = path === '/codex-client.mjs' ? codexClientScript : installGuide(publicUrl);
+  const browser = path === '/install' && req.headers.accept?.includes('text/html') && new URL(req.url!, publicUrl).searchParams.get('format') !== 'text';
+  const guide = path === '/codex-client.mjs' ? codexClientScript : browser ? installationPage(publicUrl) : installGuide(publicUrl);
+  if (browser) res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Vary', 'Accept');
   if (path === '/codex-client.mjs') res.setHeader('Content-Type', 'text/javascript; charset=utf-8');
   res.writeHead(200);
   res.end(req.method === 'HEAD' ? undefined : guide);

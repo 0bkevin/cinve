@@ -12,7 +12,7 @@ las migraciones y la autorización de clientes están en
 
 ## Instalación guiada para asistentes
 
-Comparte con tu asistente compatible con MCP: `Instala Cinve siguiendo https://cinve.vercel.app/install`.
+Comparte con tu asistente compatible con MCP: `Instala Cinve siguiendo https://cinve.kevinbravo.com/install`.
 La ruta `/install` ofrece instrucciones en texto plano para configurar el cliente y verificar la conexión.
 
 ## Ejecutar y conectar
@@ -170,3 +170,13 @@ El resultado incluye los contadores `available`, `occupied`, `unavailable`, `unk
 Un `codex mcp login cinve` externo puede guardar OAuth sin actualizar las herramientas de una conversación ya abierta. Las instrucciones ahora continúan mediante `/codex-client.mjs` cuando no hay refresco nativo. El asistente descarga e inspecciona ese archivo temporal y ejecuta `node RUTA connect cinex` (o `cinesunidos`). El auxiliar carga la configuración del Codex instalado, reutiliza OAuth guardado y muestra los enlaces inmediatamente; espera la conexión de la cuenta sin pedir «listo». Si hace falta OAuth, usa la acción nativa de su propio App Server y continúa después de aprobar.
 
 Las consultas pendientes pueden ejecutarse con `node RUTA call get_seats '{"provider":"cinex","cinema_id":"SBC","session_id":"ID_VERIFICADO"}'`, usando IDs previamente descubiertos. Admite `--server NOMBRE` antes del modo. No reinicia la conversación existente, no inicia turnos de modelo, no extrae tokens, no recibe contraseñas y no contesta aprobaciones. Solo sirve en el equipo que tiene el Codex y configuración del usuario. La ruta nativa sigue siendo preferida cuando el cliente la expone; otros clientes mantienen OAuth MCP estándar.
+
+## Páginas públicas
+
+La portada, la guía de instalación para navegadores, la conexión de cuentas y la autorización comparten `src/public-web.ts`. La paleta y la tipografía siguen el portafolio de Kevin Bravo: Inter, fondos neutros, acento ámbar y modos claro y oscuro según el sistema. Inter se sirve desde el propio proyecto; su licencia está en `src/assets/Inter-LICENSE.txt`.
+
+El dominio principal es `https://cinve.kevinbravo.com`, configurado con `CINEV_PUBLIC_URL`. El dominio anterior `cinve.vercel.app` conserva su origen de autorización para no interrumpir clientes existentes. Las conexiones nuevas usan `/mcp` en el dominio principal.
+
+`/install` responde con una guía en español cuando el navegador solicita HTML. Los asistentes reciben las instrucciones en texto plano; `/install?format=text` permite pedirlas explícitamente. No se cambia el contrato de instalación.
+
+La imagen para compartir tiene una fuente editable en `src/assets/og.svg` y una versión PNG de 1200 × 630 en `src/assets/og.png`. Ambas usan la paleta de la página. Al sustituir la imagen PNG, actualiza su versión en las URLs Open Graph y Twitter de `src/public-web.ts` para evitar la caché de la imagen anterior.

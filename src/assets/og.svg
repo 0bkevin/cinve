@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" fill="none">
+  <title>Cinve · Consulta películas, horarios y precios</title>
+  <desc>Una sala de cine ilustrada con una pantalla iluminada y butacas ámbar. Información de cines en Venezuela desde tu asistente.</desc>
+  <defs>
+    <radialGradient id="room" cx="0" cy="0" r="1" gradientTransform="translate(962 280) rotate(90) scale(370 450)" gradientUnits="userSpaceOnUse"><stop stop-color="#292015"/><stop offset="1" stop-color="#0a0a0a"/></radialGradient>
+    <linearGradient id="screen" x1="930" y1="129" x2="930" y2="252" gradientUnits="userSpaceOnUse"><stop stop-color="#fff5d3"/><stop offset="1" stop-color="#fbbf24"/></linearGradient>
+    <linearGradient id="beam" x1="930" y1="242" x2="930" y2="492" gradientUnits="userSpaceOnUse"><stop stop-color="#fbbf24" stop-opacity=".14"/><stop offset="1" stop-color="#fbbf24" stop-opacity="0"/></linearGradient>
+    <linearGradient id="velvet" x1="36" y1="0" x2="145" y2="157" gradientUnits="userSpaceOnUse"><stop stop-color="#fbbf24"/><stop offset=".52" stop-color="#d97706"/><stop offset="1" stop-color="#8f420b"/></linearGradient>
+    <linearGradient id="cushion" x1="70" y1="129" x2="70" y2="166" gradientUnits="userSpaceOnUse"><stop stop-color="#f8b32b"/><stop offset="1" stop-color="#a8540a"/></linearGradient>
+    <linearGradient id="arm" x1="0" y1="117" x2="0" y2="174" gradientUnits="userSpaceOnUse"><stop stop-color="#ca720f"/><stop offset="1" stop-color="#703508"/></linearGradient>
+    <linearGradient id="dark-seat" x1="0" y1="0" x2="0" y2="170" gradientUnits="userSpaceOnUse"><stop stop-color="#37332e"/><stop offset="1" stop-color="#171717"/></linearGradient>
+    <g id="seat">
+      <path d="M26 13Q27 0 43 0H109Q126 0 127 15L135 132H19Z" fill="url(#velvet)" stroke="#fcd34d" stroke-opacity=".35" stroke-width="1.5"/>
+      <path d="M36 23Q36 12 48 12H104Q116 12 117 23L122 111Q122 119 112 119H40Q29 119 30 110Z" fill="#e99a15" fill-opacity=".35" stroke="#fde68a" stroke-opacity=".32"/>
+      <path d="M46 22Q76 15 106 22" stroke="#ffedaf" stroke-opacity=".5" stroke-width="2" stroke-linecap="round"/>
+      <path d="M74 15V113" stroke="#934407" stroke-opacity=".3"/>
+      <path d="M35 131H118L136 151Q140 155 137 167Q136 175 124 176H28Q15 175 14 168Q12 155 17 150Z" fill="url(#cushion)" stroke="#fccb60" stroke-opacity=".2"/>
+      <path d="M22 153Q76 162 132 153" stroke="#ffe0a0" stroke-opacity=".4" stroke-width="2"/>
+      <path d="M27 176H47V193H31ZM107 176H125L120 193H106Z" fill="#34302b"/>
+      <path d="M22 192H53M101 192H130" stroke="#585047" stroke-width="5" stroke-linecap="round"/>
+      <rect x="0" y="116" width="21" height="53" rx="8" fill="url(#arm)" stroke="#dda031" stroke-opacity=".4"/>
+      <rect x="133" y="116" width="21" height="53" rx="8" fill="url(#arm)" stroke="#dda031" stroke-opacity=".4"/>
+      <ellipse cx="10.5" cy="121" rx="7" ry="3" fill="#f2b342"/>
+      <ellipse cx="143.5" cy="121" rx="7" ry="3" fill="#f2b342"/>
+      <ellipse cx="143.5" cy="122" rx="4.5" ry="1.8" fill="#6b360d"/>
+    </g>
+    <g id="back-seat">
+      <path d="M17 12Q18 0 32 0H91Q106 0 106 13L111 111H11Z" fill="url(#dark-seat)" stroke="#5c4b32"/>
+      <path d="M28 15Q61 8 94 15" stroke="#75603d" stroke-opacity=".7" stroke-width="2"/>
+      <path d="M20 109H101L117 130H6Z" fill="#302b23" stroke="#58452b"/>
+      <rect x="0" y="92" width="16" height="48" rx="6" fill="#28231c" stroke="#58452b"/>
+      <rect x="106" y="92" width="16" height="48" rx="6" fill="#28231c" stroke="#58452b"/>
+    </g>
+  </defs>
+  <path fill="#0a0a0a" d="M0 0h1200v630H0z"/>
+  <path fill="url(#room)" d="M630 0h570v630H630z"/>
+  <!-- Quiet architectural lines frame a small cinema, rather than a UI mockup. -->
+  <path d="M680 522V241Q680 66 922 66Q1164 66 1164 241V522" stroke="#3c3324" stroke-width="1.5"/>
+  <path d="M703 512V244Q703 91 922 91Q1141 91 1141 244V512" stroke="#30291f"/>
+  <path d="M764 254 660 518H1188L1082 254Z" fill="url(#beam)"/>
+  <path d="M757 132Q922 109 1087 132V247Q922 266 757 247Z" fill="#17130d" stroke="#73551f" stroke-width="2"/>
+  <path d="M766 140Q922 119 1078 140V239Q922 257 766 239Z" fill="url(#screen)"/>
+  <path d="M766 140Q922 119 1078 140" stroke="#fff7df" stroke-width="2"/>
+  <path d="M908 168 942 190 908 212Z" fill="#6f430c" fill-opacity=".8" stroke="#6f430c" stroke-linejoin="round" stroke-width="4"/>
+  <path d="M756 259Q922 282 1088 259" stroke="#c58c25" stroke-opacity=".3"/>
+  <path d="M706 473Q922 450 1138 473M684 514Q922 490 1160 514" stroke="#4a3c26" stroke-width="1.5"/>
+  <!-- Seats grow toward the viewer; two amber seats carry the brand accent. -->
+  <g opacity=".8">
+    <use href="#back-seat" transform="translate(735 283) scale(.78)"/>
+    <use href="#back-seat" transform="translate(837 290) scale(.78)"/>
+    <use href="#back-seat" transform="translate(939 290) scale(.78)"/>
+    <use href="#back-seat" transform="translate(1041 283) scale(.78)"/>
+  </g>
+  <ellipse cx="921" cy="518" rx="203" ry="22" fill="#050505" opacity=".75"/>
+  <use href="#seat" transform="translate(752 333) scale(.99)"/>
+  <use href="#seat" transform="translate(937 333) scale(.99)"/>
+  <!-- Typography and neutral / amber palette match kevinbravo.com. -->
+  <g font-family="Inter, Arial, sans-serif">
+    <text x="56" y="90" font-size="44" font-weight="700" letter-spacing="-2" fill="#f5f5f5">cinve<tspan fill="#fbbf24">.</tspan></text>
+    <text x="58" y="176" font-size="13" font-weight="500" letter-spacing="2.4" fill="#a3a3a3">CINES DE VENEZUELA</text>
+    <text x="54" y="260" font-size="60" font-weight="600" letter-spacing="-2.5" fill="#f5f5f5">Consulta películas,</text>
+    <text x="54" y="333" font-size="60" font-weight="600" letter-spacing="-2.5" fill="#fbbf24">horarios y precios.</text>
+    <text x="58" y="393" font-size="24" fill="#a3a3a3">Información de cines en Venezuela</text>
+    <text x="58" y="428" font-size="24" fill="#a3a3a3">desde tu asistente.</text>
+    <text x="58" y="507" font-size="16" fill="#d4d4d4">Cinex <tspan fill="#737373">·</tspan> Cines Unidos <tspan fill="#737373">·</tspan> Cinepic</text>
+    <path d="M56 552H1144" stroke="#303030"/>
+    <text x="58" y="592" font-size="16" fill="#a3a3a3">cinve.kevinbravo.com</text>
+    <text x="1144" y="592" text-anchor="end" font-size="14" fill="#a3a3a3">Developed by Kevin Bravo</text>
+  </g>
+</svg>

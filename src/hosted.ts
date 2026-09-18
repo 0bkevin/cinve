@@ -1,3 +1,4 @@
+import { landingPage, servePublicAsset } from './public-web.js';
 import { hostedAuthInstructions } from './hosted-auth-guidance.js';
 import { HostedOAuth } from './oauth.js';
 import { serveInstall } from './install.js';
@@ -15,7 +16,7 @@ import type { AuthSession, AuthProviderId } from './auth.js';
 import type { Operation, Query } from './core.js';
 import { ConnectionLinks } from './hosted-links.js';
 import { EncryptedSessionStore, HostedUsers, digest } from './hosted-store.js';
-import { connectionHomePage, loginPage, loginScript } from './auth-web.js';
+import { loginPage, loginScript } from './auth-web.js';
 
 class AnonymousSessions extends SessionStore {
   override async read(): Promise<AuthSession | undefined> { return undefined; }
@@ -59,11 +60,11 @@ export async function createHostedApp(options: {
   const handler = async (req: IncomingMessage, res: ServerResponse) => {
     res.setHeader('Cache-Control', 'no-store'); res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'");
+    res.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; font-src 'self'; img-src 'self'; connect-src 'self'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'");
     if (publicUrl.protocol === 'https:') res.setHeader('Strict-Transport-Security', 'max-age=31536000');
     const send = (status: number, data: unknown) => { if (!res.headersSent) { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(data)); } };
     try {
-      if (serveInstall(req, res, origin)) return;
+      if (servePublicAsset(req, res) || serveInstall(req, res, origin)) return;
       if (req.method === 'GET' && req.url === '/health') { send(200, { status: 'ok' }); return; }
       if (req.headers.host !== publicUrl.host) throw new HttpError(403, 'Origen no permitido.');
       const forwarded = options.trustedVercelProxy ? req.headers['x-vercel-forwarded-for'] : undefined;
@@ -81,8 +82,9 @@ export async function createHostedApp(options: {
         if (!options.cleanupSecret || !timingSafeEqual(Buffer.from(digest(req.headers.authorization ?? '')), Buffer.from(digest(`Bearer ${options.cleanupSecret}`)))) throw new HttpError(401, 'Acceso requerido.');
         await links.cleanup(); send(200, { cleaned: true }); return;
       }
-      if (req.method === 'GET' && (req.url === '/connect' || req.url === '/')) {
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(req.url === '/' ? connectionHomePage() : loginPage()); return;
+      const pagePath = req.url?.split('?')[0];
+      if (['GET', 'HEAD'].includes(req.method ?? '') && (pagePath === '/connect' || pagePath === '/')) {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(req.method === 'HEAD' ? undefined : pagePath === '/' ? landingPage(origin) : loginPage()); return;
       }
       if (req.method === 'GET' && req.url === '/app.js') {
         res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8' }); res.end(loginScript); return;

@@ -11,7 +11,7 @@
     "cinev-mcp": "dist/index.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && mkdir -p dist/assets && cp src/assets/* dist/assets/",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "test": "tsx scripts/test-postgres.ts",
@@ -25,7 +25,7 @@
     "start:remote": "node dist/remote-main.js",
     "db:migrate": "tsx src/hosted-admin.ts migrate",
     "db:cleanup": "tsx src/hosted-admin.ts cleanup",
-    "build:hosted": "tsc -p tsconfig.hosted.json && cp .hosted/server.js .hosted/index.js",
+    "build:hosted": "tsc -p tsconfig.hosted.json && cp .hosted/server.js .hosted/index.js && mkdir -p .hosted/src/assets && cp src/assets/* .hosted/src/assets/",
     "test:codex-auth": "npm run build && node scripts/verify-codex-auth.mjs"
   },
   "dependencies": {

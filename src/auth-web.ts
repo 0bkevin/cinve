@@ -1,16 +1,14 @@
+import { publicPage } from './public-web.js';
+
 export function loginPage() {
-  return `<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Conectar cuentas · Cinve</title>
-<style>
-*{box-sizing:border-box}body{margin:0;background:#f5f3ee;color:#202522;font:16px/1.5 system-ui,sans-serif}main{max-width:580px;margin:8vh auto;padding:32px}header{display:flex;justify-content:space-between;align-items:center}.brand{font-size:25px;font-weight:800;letter-spacing:-1px}.local{font-size:12px;background:#e1e9de;padding:5px 10px;border-radius:20px}h1{font-size:34px;line-height:1.15;letter-spacing:-1px;margin:32px 0 12px}p{color:#59615a}.card{background:white;border:1px solid #dedfd6;border-radius:18px;padding:26px;margin-top:26px}label{display:block;font-size:14px;font-weight:650;margin:17px 0 6px}input,select{font:inherit;width:100%;padding:12px;border:1px solid #b4bdb5;border-radius:8px;background:white}input:focus,select:focus,button:focus-visible{outline:3px solid #8db798;outline-offset:2px}button{font:inherit;cursor:pointer;border:0;border-radius:8px;padding:12px 16px}button:disabled{opacity:.6;cursor:wait}.primary{background:#244d3b;color:white;width:100%;margin-top:22px;font-weight:650}.secondary{background:transparent;color:#355643;padding:8px 0}.password{display:flex;gap:8px}.password input{min-width:0}.password button{background:#edf1eb}.note{font-size:13px;margin:18px 0 0}.status{font-size:14px;padding:12px;background:#f1f4ef;border-radius:8px;margin:12px 0}.feedback{min-height:24px;margin-top:16px;font-size:14px}.feedback.error{color:#a32925}.feedback.success{color:#24513c}footer{font-size:12px;color:#647066;margin-top:22px}@media(max-width:600px){main{margin:0 auto;padding:24px}.card{padding:20px}h1{font-size:30px}}
-</style><main><header><span class="brand">cinve<span style="color:#6e9169">.</span></span><span class="local">Conexión privada</span></header>
-<h1>Tus cines, conectados.</h1><p>Conecta tu cuenta para consultar precios de entradas y, en Cinex, caramelería.</p>
-<div class="card"><div id="accounts" aria-live="polite">Comprobando conexiones…</div>
-<form id="login"><label for="provider">Cuenta del cine</label><select id="provider" name="provider" disabled><option value="cinex" >Cinex</option><option value="cinesunidos" >Cines Unidos</option></select>
+  return publicPage('Conectar cuentas', `<p class="eyebrow">Conexión privada</p><h1>Conecta tu cuenta del cine.</h1><p class="lead">Conecta tu cuenta para consultar precios de entradas y, en Cinex, caramelería.</p>
+<div class="card"><div id="accounts" class="status" aria-live="polite">Comprobando conexiones…</div>
+<form id="login"><label for="provider">Cuenta del cine</label><select id="provider" name="provider" disabled><option value="cinex">Cinex</option><option value="cinesunidos">Cines Unidos</option></select>
 <label for="username">Correo de tu cuenta</label><input id="username" name="username" type="email" autocomplete="username" maxlength="320" required>
 <label for="password">Contraseña</label><div class="password"><input id="password" name="password" type="password" autocomplete="current-password" maxlength="4096" required><button id="show" type="button" aria-label="Mostrar contraseña" aria-pressed="false">Mostrar</button></div>
-<p class="note">Cinve enviará tus datos al cine elegido por HTTPS. Guardará tu sesión cifrada para que tu agente consulte precios con tu cuenta. No guarda tu contraseña.</p>
-<button class="primary" id="connect" type="submit">Conectar cuenta</button><div id="feedback" class="feedback" role="status" aria-live="polite"></div></form></div>
-<button id="done" class="secondary">Cancelar conexión</button><footer>Cinepic funciona sin cuenta. Vuelve a tu agente después de conectar. Este enlace caduca en 10 minutos.</footer></main><script src="/app.js"></script></html>`;
+<p class="note">Cinve enviará tus datos al cine elegido por una conexión segura. Guardará tu sesión cifrada para que tu asistente consulte precios con tu cuenta. No guarda tu contraseña.</p>
+<button class="primary full" id="connect" type="submit" disabled>Conectar cuenta</button><div id="feedback" class="feedback" role="status" aria-live="polite"></div></form></div>
+<button id="done" class="secondary">Cancelar conexión</button><p class="note">Cinepic funciona sin cuenta. Vuelve a tu asistente después de conectar. Este enlace caduca en 10 minutos.</p><noscript><p>Activa JavaScript para conectar tu cuenta.</p></noscript>`, { compact: true, script: '/app.js' });
 }
 
 export const loginScript = `
@@ -31,9 +29,9 @@ $('login').onsubmit = async event => {
   let connected = false;
   try { const pending = request('/connect/login', body); body.password = ''; const data = await pending;
     connected = true; token = ''; $('username').value = ''; $('login').reset(); $('login').hidden = true;
-    $('accounts').textContent = 'Cuenta conectada. Vuelve a tu agente para consultar precios.' + (data.profile_update_requested ? ' Cinex solicita actualizar tu perfil en su sitio.' : '');
+    $('accounts').textContent = 'Cuenta conectada. Vuelve a tu asistente para consultar precios.' + (data.profile_update_requested ? ' Cinex solicita actualizar tu perfil en su sitio.' : '');
     $('done').hidden = true;
-  } catch(error) { feedback(error.message || 'No se pudo conectar. Pide un enlace nuevo a tu agente.', 'error'); }
+  } catch(error) { feedback(error.message || 'No se pudo conectar. Pide un enlace nuevo a tu asistente.', 'error'); }
   finally { body.password = ''; if (!connected) { $('connect').disabled = false; $('done').disabled = false; $('connect').textContent = 'Conectar cuenta'; } }
 };
 $('done').onclick = async () => { try { await request('/connect/cancel'); } catch {} token = ''; $('login').reset(); $('login').hidden = true; $('done').hidden = true; $('accounts').textContent = 'Conexión cancelada. Puedes cerrar esta pestaña.'; };
@@ -41,13 +39,5 @@ request('/connect/exchange', {}, invitation).then(data => {
   token = data.browser_token; $('provider').value = data.provider;
   $('accounts').textContent = 'Conectar ' + (data.provider === 'cinex' ? 'Cinex' : 'Cines Unidos') + ' a tu acceso Cinve (' + data.user_label + ').';
   $('connect').disabled = false;
-}).catch(() => { $('accounts').textContent = 'Enlace vencido o ya utilizado.'; $('login').hidden = true; $('done').hidden = true; const p = document.createElement('p'); p.textContent = 'Pide a tu agente un enlace nuevo para conectar tu cuenta.'; $('accounts').append(p); });
+}).catch(() => { $('accounts').textContent = 'Enlace vencido o ya utilizado.'; $('login').hidden = true; $('done').hidden = true; const p = document.createElement('p'); p.textContent = 'Pide a tu asistente un enlace nuevo para conectar tu cuenta.'; $('accounts').append(p); });
 `;
-
-export function connectionHomePage() {
-  return `<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cinve · Tus cines, desde tu asistente</title>
-<style>body{font:18px/1.6 system-ui;margin:0;background:#f5f3ee;color:#202522}main{max-width:560px;margin:9vh auto;padding:28px}h1{line-height:1.15;letter-spacing:-1px}a{color:#244d3b}li{margin:14px 0}</style>
-<main><strong>cinve.</strong><h1>Tus cines, desde tu asistente.</h1><p>Consulta películas, funciones y caramelería de cines venezolanos desde el chat.</p>
-<ol><li><a href="/install">Añade Cinve a tu asistente</a>, si todavía no lo has conectado.</li><li>Pregunta por películas o precios. Si el cine requiere una cuenta, tu asistente te pedirá autorizar Cinve y te dará un enlace privado para conectarla.</li><li>Conecta tu cuenta en ese enlace y vuelve al chat para continuar.</li></ol>
-<p>No necesitas otra contraseña para Cinve. Introduce la contraseña del cine únicamente en el formulario privado, nunca en el chat.</p><p>La cartelera y los datos públicos se consultan sin conectar una cuenta.</p></main></html>`;
-}

@@ -1,3 +1,4 @@
+import { authorizationPage, authorizationErrorPage } from './public-web.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Pool, PoolClient } from 'pg';
@@ -7,7 +8,6 @@ import { ConnectionLinks } from './hosted-links.js';
 
 const scope = 'cinve:accounts';
 const secret = () => randomBytes(32).toString('base64url');
-const escape = (value: string) => value.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 const redirectUri = z.string().max(2048).refine(value => {
   try {
     const u = new URL(value);
@@ -176,16 +176,9 @@ export class HostedOAuth {
         res.setHeader('Referrer-Policy', 'same-origin');
         // Chromium also checks form-action against the POST's redirect target.
         // Only allow the already-validated callback origin, never arbitrary sites.
-        res.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline'; form-action 'self' ${new URL(redirect).origin}; frame-ancestors 'none'; base-uri 'none'`);
+        res.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; img-src 'self'; form-action 'self' ${new URL(redirect).origin}; frame-ancestors 'none'; base-uri 'none'`);
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(`<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Conectar tu asistente · Cinve</title>
-<style>body{font:17px/1.5 system-ui;margin:0;background:#f5f3ee;color:#202522}main{max-width:520px;margin:8vh auto;padding:28px}h1{line-height:1.2}form{background:white;padding:24px;border-radius:18px}button{font:inherit;border:0;border-radius:8px;padding:12px 18px;cursor:pointer;background:#244d3b;color:white}button[value=deny]{background:#eee;color:#333}small{display:block;overflow-wrap:anywhere;color:#59615a;margin:16px 0}</style>
-<main><strong>cinve.</strong><h1>Conecta tu asistente.</h1><p>Autoriza a <strong>${escape(app.name)}</strong> para conectar tus cuentas de cine y consultar precios con ellas.</p>
-<p>Después volverás al chat para elegir el cine y conectar tu cuenta. Cinve no necesita otra contraseña. Tu asistente no recibirá la contraseña del cine.</p>
-<form method="post" action="/oauth/authorize"><input type="hidden" name="request_id" value="${id}"><input type="hidden" name="csrf" value="${csrf}">
-<small>Solicitud de una aplicación registrada por terceros. Comprueba que reconoces el destino: <strong>${escape(new URL(redirect).origin)}</strong>.</small>
-<p>Esta aprobación crea una conexión privada nueva para este asistente. No comparte cuentas conectadas en otras aplicaciones. Permite consultar y desconectar las cuentas que conectes aquí; no comprar entradas.</p>
-<button name="decision" value="approve">Autorizar conexión</button> <button name="decision" value="deny">Cancelar</button></form><small>La solicitud caduca en 10 minutos. Si no iniciaste esta conexión, cancela.</small></main></html>`);
+        res.end(authorizationPage(app.name, new URL(redirect).origin, id, csrf));
         return true;
       }
       if (path === '/oauth/authorize' && req.method === 'POST') {
@@ -233,7 +226,7 @@ export class HostedOAuth {
       const status = error instanceof OAuthError ? error.status : 500;
       if (path === '/oauth/authorize') {
         res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end('<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Conexión no disponible · Cinve</title><main style="max-width:520px;margin:10vh auto;padding:24px;font:18px/1.5 system-ui"><h1>No se pudo autorizar la conexión.</h1><p>La solicitud puede haber caducado o no ser válida. Vuelve a tu asistente e inicia de nuevo la conexión de Cinve.</p><p>Si vuelve a ocurrir, inténtalo más tarde o comprueba que tu asistente admite la autorización de conexiones MCP.</p></main></html>');
+        res.end(authorizationErrorPage());
       } else send(status, { error: error instanceof OAuthError ? error.error : 'server_error' });
       return true;
     }
