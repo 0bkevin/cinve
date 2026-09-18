@@ -129,7 +129,7 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
   }
   server.registerTool('get_seats', {
     title: 'Consultar asientos y mapa ASCII',
-    description: 'Mapa real sin reservar: Cines Unidos requiere cinema_id, session_id y cuenta conectada; Cinepic requiere también movie_id, sin login. Usa IDs de get_showtimes. Devuelve filas, números, estados y ASCII completo. Cinex todavía no ofrece mapa verificable de solo lectura. No deduzcas disponibilidad cuando status no sea available. Sin caché local.',
+    description: 'Mapa real sin reservar: Cinex y Cines Unidos requieren cinema_id, session_id y cuenta conectada; Cinepic requiere también movie_id, sin login. Usa IDs de get_showtimes. Devuelve filas, números, estados y ASCII completo. No deduzcas disponibilidad cuando status no sea available. Sin caché local.',
     inputSchema: z.object({ provider, cinema_id: cinemaId, session_id: sessionId, movie_id: movieId.optional() }).strict().superRefine((q, ctx) => {
       if (q.provider === 'cinepic' && !q.movie_id) ctx.addIssue({ code: 'custom', path: ['movie_id'], message: 'Cinepic requiere movie_id de get_showtimes.' });
     }),

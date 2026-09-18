@@ -1,3 +1,4 @@
+import { load } from 'cheerio';
 import * as z from 'zod';
 import { DataError, Id, Provider, Source, Status, requireArg, text } from './core.js';
 import type { Query } from './core.js';
@@ -58,6 +59,45 @@ export function parseCinesUnidosSeats(data: unknown): SeatData[] {
     }))));
 }
 
+export function parseCinexSeats(html: string, q: Query): SeatData[] {
+  const $ = load(html);
+  // Cinex stores the chosen function in its PHP session. Check the back link
+  // in the SAME response so parallel reads cannot return another function's map.
+  const back = $('#btnasientosatras').attr('href');
+  const url = back ? new URL(back, 'https://www.cinex.com.ve/') : undefined;
+  if (!url || url.origin !== 'https://www.cinex.com.ve' || url.pathname !== '/boletosdev.php' ||
+      url.searchParams.getAll('cinemaid').length !== 1 || url.searchParams.getAll('sessionid').length !== 1 ||
+      url.searchParams.get('cinemaid') !== q.cinema_id || url.searchParams.get('sessionid') !== q.session_id) {
+    throw new DataError('unavailable', 'El mapa Cinex no corresponde a la sede y función solicitadas; repite la consulta.');
+  }
+  if (/error al obtener el mapa/i.test(html)) throw new DataError('unavailable', 'Cinex respondió con un error al cargar el mapa de esta función.');
+  const result: SeatData[] = [];
+  const freeClasses = new Set(['seat', 'seatestandar', 'seatvipbed', 'seatvipplus', 'seatvipstandar']);
+  $('#mapcontent .row').filter((_, r) => $(r).children('.rowletter').length === 1).each((rowIndex, r) => {
+    const row = $(r).children('.rowletter').text().trim();
+    $(r).children().not('.rowletter').each((columnIndex, el) => {
+      const seat = $(el);
+      const classes = (seat.attr('class') ?? '').split(/\s+/);
+      const occupied = classes.some(c => /^(?:seat|seatestandar|seatvipbed|seatvipplus|seatvipstandar)-occupied$/.test(c));
+      const id = seat.attr('id') ?? (occupied ? seat.attr('title') : undefined);
+      if (!id) {
+        if (!seat.hasClass('blankspace')) throw new DataError('error', 'Elemento desconocido en el mapa Cinex.');
+        return;
+      }
+      const call = (seat.attr('onclick') ?? '').match(/^javascript:decideAsientoNew\('([A-Za-z0-9]+)','(\d+)','(\d+)','(\d+)','([A-Za-z0-9]+)','(\d+)','([NS])'(?:,'([NS])')?\);?$/);
+      if (call && call[1] !== id) throw new DataError('error', 'Identificador de asiento Cinex inconsistente.');
+      const restricted = classes.some(c => /wheelchair|selected/.test(c)) || call?.[7] === 'S' || call?.[8] === 'S';
+      const available = call && seat.attr('alt') === '0' && classes.length === 1 && freeClasses.has(classes[0]);
+      result.push({ id, label: id, row, area: 'Sala', row_index: rowIndex, column_index: columnIndex,
+        status: occupied ? 'occupied' : restricted ? 'unavailable' : available ? 'available' : 'unknown',
+        provider_status: seat.attr('alt') ?? 'unknown', category: call?.[5] });
+    });
+  });
+  if (result.length !== $('#mapcontent [id], #mapcontent [class$="-occupied"]').length) throw new DataError('error', 'El mapa Cinex contiene asientos fuera de filas reconocidas.');
+  if (!result.length) throw new DataError('unavailable', 'Cinex no devolvió asientos para esta función.');
+  return validateSeats(result);
+}
+
 export function renderSeats(seats: SeatData[]): string {
   const symbols = { available: 'O', occupied: 'X', unavailable: '-', unknown: '?' };
   const lines = ['O libre | X ocupado | - restringido/no disponible | ? desconocido', 'Coordenadas del proveedor; orientacion de pantalla no verificada.'];
@@ -99,10 +139,13 @@ export async function getSeatMap(http: HttpClient, q: Query): Promise<z.infer<ty
       const url = `https://www.cinesunidos.com/api/seats?${new URLSearchParams({ theaterId: result.cinema_id, showTimeId: result.session_id })}`;
       result.seats = parseCinesUnidosSeats(JSON.parse(await c.authenticated('cinesunidos', url)));
       c.warnings.push('Los estados especiales se muestran restringidos; verifica sus condiciones en la web del cine.');
+    } else if (q.provider === 'cinex') {
+      if ((await c.authenticated('cinex', 'https://www.cinex.com.ve/checklogin.php')).trim() !== 'on') throw new DataError('auth_required', 'La sesión Cinex expiró; conecta de nuevo tu cuenta.');
+      await c.authenticated('cinex', `https://www.cinex.com.ve/boletosdev.php?${new URLSearchParams({ cinemaid: result.cinema_id, sessionid: result.session_id })}`);
+      result.seats = parseCinexSeats(await c.authenticated('cinex', 'https://www.cinex.com.ve/asientosdev.php'), q);
+      c.warnings.push('Cinex: mapa leído sin seleccionar boletos ni asientos. Las categorías especiales pueden requerir una tarifa específica.');
     } else {
-      throw new DataError('unavailable', q.provider === 'cinex'
-        ? 'Cinex no entregó un mapa verificable mediante consultas de lectura. Consulta los asientos en su web; no se crean reservas para obtenerlos.'
-        : 'Consulta de asientos no implementada para este proveedor.');
+      throw new DataError('unavailable', 'Consulta de asientos no implementada para este proveedor.');
     }
     result.available = result.seats.filter(s => s.status === 'available').length;
     result.ascii = renderSeats(result.seats);

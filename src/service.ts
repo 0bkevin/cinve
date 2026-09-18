@@ -8,7 +8,7 @@ import { cinepic, cinesunidos, cinex, trasnocho } from './providers.js';
 export const capabilities = {
   cinepic: { seats: 'public_page_data_ascii', cities: 'public', cinemas: 'public', movies: 'public_api', showtimes: 'public_api', prices: 'page_data_ves_and_derived_usd', concessions: 'public_api_empty_in_samples' },
   cinesunidos: { seats: 'authenticated_api_ascii', cities: 'public_api', cinemas: 'page_data', movies: 'page_data', showtimes: 'page_data', prices: 'authenticated_api', concessions: 'public_api' },
-  cinex: { seats: 'unavailable_read_only', cities: 'public_api', cinemas: 'html', movies: 'html_general_catalog', showtimes: 'html_requires_movie', prices: 'authenticated_html_requires_session', concessions: 'authenticated_html' },
+  cinex: { seats: 'authenticated_html_ascii', cities: 'public_api', cinemas: 'html', movies: 'html_general_catalog', showtimes: 'html_requires_movie', prices: 'authenticated_html_requires_session', concessions: 'authenticated_html' },
   trasnocho: { cities: 'not_implemented', cinemas: 'not_implemented', movies: 'blocked_in_samples', showtimes: 'not_implemented', prices: 'not_implemented', concessions: 'not_implemented' },
 };
 export class CinemaService {

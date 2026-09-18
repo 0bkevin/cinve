@@ -89,7 +89,7 @@ export function assertPrivateRead(p: AuthProviderId, value: string) {
   const cinexParams = params.length === expected.length && expected.every(key => u.searchParams.getAll(key).length === 1 && /^[A-Za-z0-9_-]{1,100}$/.test(u.searchParams.get(key) ?? ''));
   const route = p === 'cinesunidos'
     ? (u.hostname === 'www.cinesunidos.com' && u.pathname === '/api/seats' && params.length === 2 && ['theaterId', 'showTimeId'].every(key => u.searchParams.getAll(key).length === 1 && /^[A-Za-z0-9_-]{1,100}$/.test(u.searchParams.get(key) ?? ''))) || (u.hostname === 'gateway.cinesunidos.com' && /^\/tickets\/www\/theaters\/[\w-]+\/sessions\/[\w-]+\/$/.test(u.pathname) && !u.search)
-    : u.hostname === 'www.cinex.com.ve' && ['/checklogin.php', '/boletos.php', '/boletosdev.php', '/concesiones.php'].includes(u.pathname) && cinexParams;
+    : u.hostname === 'www.cinex.com.ve' && ['/checklogin.php', '/boletos.php', '/boletosdev.php', '/asientosdev.php', '/concesiones.php'].includes(u.pathname) && cinexParams;
   if (!safe || !route) throw new DataError('error', 'Ruta autenticada no permitida.');
 }
 

@@ -80,7 +80,7 @@ El servicio alojado permite autorizar el asistente desde el navegador mediante O
 | `list_movies` | Cinepic: `cinema_id`; Cines Unidos: `city`. Ambos admiten `date`, por defecto hoy. Cinex: catálogo general, `query` opcional. |
 | `get_showtimes` | Cinepic: `cinema_id`; Cines Unidos: `city`; Cinex: `movie_id`. Fecha opcional, por defecto hoy en Caracas. |
 | `get_ticket_prices` | Cinepic: `cinema_id`, `movie_id`, `session_id`. Cines Unidos: `cinema_id`, `session_id` y login. Cinex: `cinema_id`, `session_id` y login; sin función prueba el listado público, que puede no estar disponible. |
-| `get_seats` | Mapa ASCII: `cinema_id`, `session_id`; Cinepic también `movie_id`. Cines Unidos requiere cuenta conectada. |
+| `get_seats` | Mapa ASCII: `cinema_id`, `session_id`; Cinepic también `movie_id`. Cinex y Cines Unidos requieren cuenta conectada. |
 | `get_concessions` | Cinepic y Cines Unidos: solo `cinema_id`, por API pública. Cinex: `cinema_id`. |
 
 Todos salvo `list_providers` y `get_auth_status` requieren `provider`: `cinepic`, `cinesunidos`, `cinex` o `trasnocho`. Listados admiten `query` cuando corresponde, `offset` y `limit` (50 por defecto, máximo 100). Seguir `next_offset` hasta que sea `null`; `total` es el número de registros antes de paginar.
@@ -159,6 +159,6 @@ La [revisión adversarial del 12/09/2026](docs/reviews/adversarial-2026-09-12.md
 
 ### Asientos en ASCII
 
-`get_seats` consulta el mapa completo sin seleccionar asientos ni crear órdenes. Cines Unidos requiere `cinema_id`, `session_id` y cuenta conectada; Cinepic requiere además `movie_id` y no necesita login. Obtén los IDs de `get_showtimes`. Devuelve `seats`, `available`, `ascii`, fuentes y advertencias, sin caché local. Conserva posiciones y etiquetas del proveedor: `O` libre, `X` ocupado, `-` restringido/no disponible y `?` desconocido. La orientación de la pantalla no está verificada.
+`get_seats` consulta el mapa completo sin seleccionar asientos ni crear órdenes. Cinex y Cines Unidos requieren `cinema_id`, `session_id` y cuenta conectada; Cinepic requiere además `movie_id` y no necesita login. Obtén los IDs de `get_showtimes`. Devuelve `seats`, `available`, `ascii`, fuentes y advertencias, sin caché local. Conserva posiciones y etiquetas del proveedor: `O` libre, `X` ocupado, `-` restringido/no disponible y `?` desconocido. La orientación de la pantalla no está verificada.
 
-Cinex aún devuelve `unavailable` para asientos: la lectura directa probada no entregó un mapa verificable. En Cinepic, los cupos por tarifa pueden diferir del número de butacas libres; se advierte esa discrepancia. La caramelería de Cinepic devolvió catálogos vacíos en ambas sedes el 18/09/2026, sin demostrar ausencia de venta en taquilla.
+Cinex carga primero la función y después su mapa en `asientosdev.php`; se verifica la sede y función en el enlace de regreso del mapa para rechazar respuestas de otra función. En Cinepic, los cupos por tarifa pueden diferir del número de butacas libres; se advierte esa discrepancia. La caramelería de Cinepic devolvió catálogos vacíos en ambas sedes el 18/09/2026, sin demostrar ausencia de venta en taquilla.
