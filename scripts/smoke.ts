@@ -41,7 +41,8 @@ async function authenticatedTickets(provider: 'cinex' | 'cinesunidos', movies: Q
 try {
   await client.connect(transport);
   const tools = await client.listTools();
-  if (tools.tools.length !== 8) throw new Error('Expected 8 tools.');
+  const expectedTools = remoteUrl ? 10 : 8;
+  if (tools.tools.length !== expectedTools) throw new Error(`Expected ${expectedTools} tools.`);
   const auth = z.object({ providers: z.array(z.object({ provider: z.string(), status: z.string() })) }).parse((await client.callTool({ name: 'get_auth_status', arguments: {} })).structuredContent);
   console.log(JSON.stringify(auth));
   if (requireAuth && !auth.providers.every(p => p.status === 'configured')) throw new Error('Authenticated smoke requires both local accounts to be connected.');
