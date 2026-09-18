@@ -65,6 +65,8 @@ npm run logout -- cinesunidos
 
 Logout elimina la sesión local; no revoca automáticamente el token en el proveedor. Las consultas autenticadas no usan caché y releen la sesión al salir de la cola, antes de enviar el HTTP. Una consulta que ya se había enviado puede terminar.
 
+En el servicio alojado, las consultas públicas usan por defecto una caché compartida por la instancia del servidor: conserva los TTL normales de cada fuente y `refresh: true` la omite y solicita una lectura nueva. Las lecturas autenticadas y los mapas de asientos siguen sin caché. La caché pública es en memoria; no se garantiza persistencia ni coordinación entre varias instancias desplegadas.
+
 El servicio alojado permite autorizar el asistente desde el navegador mediante OAuth, sin pedir un token al operador. Ante `auth_required`, el agente llama `connect_account`: el cliente inicia la autorización si hace falta y después la herramienta devuelve un enlace privado de un solo uso para conectar el cine. Al terminar, consulta `get_auth_status` y repite la consulta original. Cada autorización crea una conexión independiente con sesiones cifradas; conectar otra aplicación requiere conectar de nuevo el cine. Se necesita un cliente MCP con OAuth, registro dinámico y PKCE. Los comandos locales anteriores no autentican el servicio alojado. Revisa [la guía del servicio alojado](docs/hosted.md) antes de desplegarlo; no compartas un token ni una cuenta de cine entre usuarios.
 
 ## Herramientas
@@ -78,7 +80,7 @@ El servicio alojado permite autorizar el asistente desde el navegador mediante O
 | `list_cities` | `provider`; ciudades del proveedor. |
 | `list_cinemas` | `provider`, `city` opcional; obligatorio para Cines Unidos. |
 | `list_movies` | Cinepic: `cinema_id`; Cines Unidos: `city`. Ambos admiten `date`, por defecto hoy. Cinex: catálogo general, `query` opcional. |
-| `get_showtimes` | Cinepic: `cinema_id`; Cines Unidos: `city`; Cinex: `movie_id`. Fecha opcional, por defecto hoy en Caracas. |
+| `get_showtimes` | Cinepic: `cinema_id`; Cines Unidos: `city`; Cinex: `cinema_id` para toda la sede o `movie_id` para una película concreta. Fecha opcional, por defecto hoy en Caracas. |
 | `get_ticket_prices` | Cinepic: `cinema_id`, `movie_id`, `session_id`. Cines Unidos: `cinema_id`, `session_id` y login. Cinex: `cinema_id`, `session_id` y login; sin función prueba el listado público, que puede no estar disponible. |
 | `get_seats` | Mapa ASCII: `cinema_id`, `session_id`; Cinepic también `movie_id`. Cinex y Cines Unidos requieren cuenta conectada. |
 | `get_concessions` | Cinepic y Cines Unidos: solo `cinema_id`, por API pública. Cinex: `cinema_id`. |
@@ -87,13 +89,13 @@ Todos salvo `list_providers` y `get_auth_status` requieren `provider`: `cinepic`
 
 Ejemplo de flujo para el agente:
 
-1. `list_providers({})` para conocer la cobertura.
+1. `list_providers({})` solo si aún no conoces la cobertura del servidor.
 2. `list_cinemas({"provider":"cinepic"})` para obtener IDs de sede.
 3. `get_showtimes({"provider":"cinepic","cinema_id":"123300","query":"coyote"})`.
 4. Pasar el `id` de la función como `session_id`, y su `movie_id`, a `get_ticket_prices`.
 5. Para caramelería: `get_concessions({"provider":"cinesunidos","cinema_id":"1005"})`. Obtener primero la sede con `list_cinemas`; el ejemplo es Sambil Caracas.
 
-No mezclar IDs entre proveedores ni entre las dos sedes Cinepic. En Cinex, `movie_id` es el slug de la ficha. En Cinex, Cines Unidos y Cinepic, las sedes con `code_status=verified` devuelven el código de consulta en `id` y `cinema_id` (puede ser numérico). Las sedes sin código conservan nombre, ciudad y enlace con `code_status=unverified`, sin `cinema_id`; su `id=directory-*` identifica únicamente la entrada y no sirve para consultar funciones, tarifas ni caramelería.
+No mezclar IDs entre proveedores ni entre las dos sedes Cinepic. En Cinex, `get_showtimes` con `cinema_id` consulta la página completa de la sede en una sola llamada de cartelera y asigna `movie_id` únicamente cuando el título coincide de forma inequívoca con el catálogo actual; usa `movie_id` si necesitas una ficha concreta. En Cinex, Cines Unidos y Cinepic, las sedes con `code_status=verified` devuelven el código de consulta en `id` y `cinema_id` (puede ser numérico). Las sedes sin código conservan nombre, ciudad y enlace con `code_status=unverified`, sin `cinema_id`; su `id=directory-*` identifica únicamente la entrada y no sirve para consultar funciones, tarifas ni caramelería.
 
 ## Datos y cobertura
 
@@ -112,7 +114,7 @@ Cada respuesta de consulta contiene:
 |---|---|---|
 | Cinepic | Dos sedes configuradas, películas/funciones por API, tarifas desde datos Next.js, consulta de caramelería por API de sede | Una falla de verificación de sede conserva su nombre y enlace con `code_status=unverified` y `partial`. No descubre sedes nuevas automáticamente. Se verificó en el JavaScript público que `precio` está en bolívares. Se expone VES y USD calculado con la tasa del proveedor (`basis: provider_conversion`); no es una cotización BCV independiente ni incluye necesariamente cargos finales. Caramelería vacía en las muestras; un catálogo nuevo se marca sin verificar. |
 | Cines Unidos | Ciudades por API; sedes, películas y funciones por datos Next.js; caramelería por API pública; tarifas USD/VES por API autenticada | Las sedes reconocibles sin código válido o con código contradictorio se conservan con `partial`; se procesan todos los bloques de directorio de la página. Requiere login local para tarifas. Se conservan restricciones de edad/canje y estado de venta; no se confirma el total de una compra. |
-| Cinex | Ciudades, sedes consultables, catálogo general, funciones por película; tarifas y caramelería por HTML autenticado | Las sedes sin código verificable se conservan con `partial` y `code_status=unverified`. `directory_status=not_listed` indica ausencia en el directorio recibido, no cierre. Tarifas por función incluyen desglose boleto/otros cargos en VES. Caramelería incluye combos con `options_required`; no se interpretan cantidades máximas como stock. |
+| Cinex | Ciudades, sedes consultables, catálogo general, funciones por sede o película; tarifas y caramelería por HTML autenticado | La cartelera de sede no publica slugs junto a cada bloque: los títulos se cruzan conservadoramente con el catálogo y los faltantes/ambiguos se omiten con `partial`. Las sedes sin código verificable se conservan con `partial` y `code_status=unverified`. `directory_status=not_listed` indica ausencia en el directorio recibido, no cierre. Tarifas por función incluyen desglose boleto/otros cargos en VES. Caramelería incluye combos con `options_required`; no se interpretan cantidades máximas como stock. |
 | Trasnocho | Comprobación de acceso al sitio | Devolvió 403. No hay parser validado de programación ni precios; si cambia el bloqueo, devuelve `unavailable` hasta implementarlo. |
 
 En Cines Unidos, si el catálogo no reconoce una ciudad escrita sin tilde, se reintenta con su nombre exacto del registro oficial. Un directorio vacío reconocido es distinto de un directorio defectuoso. En Cinepic, las películas con funciones pero sin ficha se conservan como referencias sin título confirmado y se marca `partial`.
@@ -143,7 +145,7 @@ No conecta cuentas reales ni modifica la configuración de servidores del usuari
 
 `npm run smoke -- --require-auth` exige que ambas cuentas estén configuradas, que se consulte una tarifa disponible de cada una y que responda la caramelería Cinex. Busca funciones entre hasta ocho películas; si no encuentra muestra, falla en lugar de dar por comprobada esa capacidad. Los bloqueos y las indisponibilidades publicados en los resultados siguen siendo límites reales aunque una ejecución termine sin errores de transporte.
 
-El servidor MCP solo realiza GET a orígenes permitidos; las rutas autenticadas y sus parámetros también están limitados. Las credenciales se envían únicamente al proveedor correspondiente. Cada lectura HTTP tiene un plazo de 15 segundos que incluye cola, conexión y cuerpo; hay dos consultas activas y hasta 32 en cola por origen. El cuerpo se limita a 4 MiB. La caché pública admite hasta 64 entradas y 16 MiB contabilizados conservadoramente como cadenas UTF-16: TTL de 2 minutos por defecto, 1 minuto para tarifas públicas y 1 hora para sedes. No persiste caché en disco. Solo sigue una migración autenticada de Cinex de `boletos.php` a `boletosdev.php`, en el mismo origen y con la misma sede/función; rechaza el resto de redirecciones. Las redirecciones reconocidas al login se informan como `auth_required`. El comando local de login sí sigue redirecciones del proveedor: plazo de 25 segundos por cadena y 60 segundos para el flujo HTTP completo, sin reenviar contraseñas entre orígenes.
+El servidor MCP solo realiza GET a orígenes permitidos; las rutas autenticadas y sus parámetros también están limitados. Las credenciales se envían únicamente al proveedor correspondiente. Cada lectura HTTP tiene un plazo de 15 segundos que incluye cola, conexión y cuerpo; hay dos consultas activas y hasta 32 en cola por origen. El cuerpo se limita a 4 MiB. La caché pública admite hasta 64 entradas y 16 MiB contabilizados conservadoramente como cadenas UTF-16: TTL de 2 minutos por defecto, 1 minuto para tarifas públicas y 1 hora para sedes. En alojado, esa caché es compartida por la instancia para lecturas públicas; `refresh` la omite, mientras que autenticación y asientos no usan caché. No persiste caché en disco ni se garantiza coordinación entre instancias. Sigue la migración autenticada de Cinex de `boletos.php` a `boletosdev.php` y los alias same-origin de páginas de sede, siempre con rutas y parámetros limitados; rechaza el resto de redirecciones. Las redirecciones reconocidas al login se informan como `auth_required`. El comando local de login sí sigue redirecciones del proveedor: plazo de 25 segundos por cadena y 60 segundos para el flujo HTTP completo, sin reenviar contraseñas entre orígenes.
 
 Los enlaces no HTTPS o con credenciales se omiten con advertencia. Los registros se validan antes de filtrar/paginar: importes no finitos, identificadores inutilizables o cambios de esquema no escapan como excepciones sin estructurar. Los datos Next.js se recorren con límites de profundidad/nodos y sin ejecutar scripts. Estas defensas no convierten los textos de los proveedores en instrucciones confiables para el agente.
 
@@ -156,6 +158,8 @@ La investigación original sigue en [docs/research/cinema-data-audit.md](docs/re
 La [segunda investigación sin navegador](docs/research/http-followup.md) corrigió la incertidumbre de moneda Cinepic y añadió la consulta directa de caramelería, sin requerir película ni función. El MCP sigue usando exclusivamente HTTP: no incorpora un navegador.
 
 La [revisión adversarial del 12/09/2026](docs/reviews/adversarial-2026-09-12.md) documenta los defectos reproducidos, sus correcciones y los fallos de proveedor que permanecieron durante la validación.
+
+La [revisión adversarial de rendimiento del 18/09/2026](docs/reviews/adversarial-performance-2026-09-18.md) resume la validación de caché, directorios, identidad de sedes, límites de recursos, proveedores y transporte HTTP.
 
 ### Asientos en ASCII
 
