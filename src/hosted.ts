@@ -1,3 +1,4 @@
+import { hostedAuthInstructions } from './hosted-auth-guidance.js';
 import { HostedOAuth } from './oauth.js';
 import { serveInstall } from './install.js';
 import { createServer as nodeServer } from 'node:http';
@@ -21,7 +22,7 @@ class AnonymousSessions extends SessionStore {
   override async save(): Promise<void> { throw new Error("Anonymous sessions cannot persist credentials."); }
   override async remove(): Promise<void> { throw new Error("Anonymous sessions cannot modify credentials."); }
   override async status(p: AuthProviderId) {
-    return { ...await super.status(p), login_command: "Usa connect_account para autorizar Cinve desde tu asistente y obtener el enlace privado del cine. No busques páginas de acceso en la web." };
+    return { ...await super.status(p), login_command: hostedAuthInstructions };
   }
 }
 
@@ -100,7 +101,7 @@ export async function createHostedApp(options: {
             parsed.params && typeof parsed.params === 'object' && 'name' in parsed.params &&
             ['connect_account', 'disconnect_account'].includes(String(parsed.params.name))) {
           res.setHeader('WWW-Authenticate', oauth.challenge());
-          throw new HttpError(401, 'Autoriza Cinve con la opción de autenticación de tu asistente y vuelve a intentar connect_account. No se necesitan tokens manuales ni credenciales en el chat.');
+          throw new HttpError(401, hostedAuthInstructions);
         }
         active.set(clientKey, (active.get(clientKey) ?? 0) + 1); totalActive++;
         const store = principal ? storeFor(principal.id) : new AnonymousSessions();

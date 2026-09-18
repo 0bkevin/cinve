@@ -36,9 +36,15 @@ requires reconnecting cinemas. There is no cross-app identity or account recover
 Public tools remain anonymous. Protected cinema queries return `auth_required`
 with instructions to call `connect_account`; that tool triggers authorization.
 Clients must support HTTP MCP OAuth, dynamic client registration, and S256 PKCE.
-If a client does not launch authorization on a tool-call 401, users should use
-its Authenticate/Connect option for Cinve. Clients without OAuth can still use
-public data. Never send users to search for a login page or paste tokens in chat.
+If a client does not launch authorization on a tool-call 401, the assistant should
+start the client's native OAuth action. In local Codex, it can run
+`codex mcp login cinve` (using the configured server name), present the generated
+URL and keep the process alive until the user approves. This must run against
+the user's own local installation, not an unrelated cloud terminal. It is
+assistant authorization, not the local cinema-password login. Settings instructions
+are a fallback only when neither the native action nor local CLI is accessible.
+Existing running clients may need to reconnect to load newly saved credentials.
+Clients without OAuth can still use public data. Never send users to search for a login page or paste tokens in chat.
 
 ### OAuth endpoints and lifecycle
 

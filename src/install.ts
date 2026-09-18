@@ -71,11 +71,21 @@ call connect_account with the provider. This triggers the client's OAuth browser
 approval when needed, then returns a private cinema-connection link. Show that
 link to the user. After they connect, check get_auth_status and retry the original
 query. Never search the web for a Cinve login page or ask for passwords or tokens
-in chat. No operator-issued token or terminal login is needed for this hosted flow.
+in chat. No operator-issued token or local cinema-password login is needed for this hosted flow.
 
 The client must support remote MCP OAuth with dynamic client registration and
-PKCE. If it does not open authorization automatically, use its documented
-Authenticate/Connect option for Cinve. If it lacks OAuth support, explain that
+PKCE. If it does not open authorization automatically, initiate the client's
+native OAuth action yourself when available. For Codex running locally with
+access to the user's own installed configuration, run \`codex mcp login cinve\`
+(use the actual configured server name if different). Keep the process running,
+present its authorization URL as a clickable link, and wait for completion.
+This is assistant authorization, not a cinema password prompt. Never use
+\`npm run login\` for hosted connections. Do not make the user navigate Settings
+or run commands when you can start the authorization yourself. Do not run login
+in an unrelated remote environment: its callback and credential store would
+belong to that environment instead of the user's assistant. If neither a native
+action nor the user's local CLI is accessible, explain that limitation and use
+the client's connection control. If it lacks OAuth support, explain that
 public queries still work and private queries require a compatible client.
 Authorizing another app creates a separate connection; cinema accounts are not
 shared between apps. Losing the client's authorization requires reconnecting.
