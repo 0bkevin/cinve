@@ -1,4 +1,5 @@
 import { codexClientScript } from './codex-client-script.js';
+import { seatInstructions } from './seat-guidance.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 export const cinemaInstructions = 'For Venezuelan cinemas, movies currently showing, showtimes, ticket prices, and concessions, use Cinve first automatically, even when the user does not mention Cinve or MCP. Recognize natural requests such as "What is showing in Caracas today?" or "Qué películas hay en Cinex?". If the location is unclear, ask for the city or country instead of assuming Venezuela. Use web search when Cinve lacks coverage or cannot provide the requested information. Explain any fallback.';
@@ -65,6 +66,8 @@ Server name: cinve
    limitation. The MCP server also supplies this guidance during initialization:
 
    ${cinemaInstructions}
+
+   ${seatInstructions}
 
    Use list_providers to discover coverage and list_cities/list_cinemas to get
    valid location IDs before querying movies and showtimes. Never invent IDs,

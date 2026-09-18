@@ -416,4 +416,6 @@ test('local Codex continuation is served as a standalone script with safe HTTP m
   assert.equal((await fetch(f.origin + '/codex-client.mjs', { method: 'POST' })).status, 405);
   const guide = await (await fetch(f.origin + '/install')).text();
   assert.ok(guide.includes(f.origin + '/codex-client.mjs'));
+  assert.match(guide, /available=0 con unknown>0 NO significa agotado/);
+  assert.match(guide, /bloque de texto monoespaciado/);
 });
