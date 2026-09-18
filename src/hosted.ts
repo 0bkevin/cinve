@@ -10,7 +10,9 @@ import { createMcpHandler } from '@modelcontextprotocol/server';
 import { toNodeHandler } from '@modelcontextprotocol/node';
 import { createServer } from './server.js';
 import { CinemaService } from './service.js';
+import { CinexCinemaCatalog } from './cinex-cinemas.js';
 import { HttpClient } from './http.js';
+import { HostedHttpClient } from './hosted-http.js';
 import { SessionStore, login } from './auth.js';
 import type { AuthSession, AuthProviderId } from './auth.js';
 import type { Operation, Query } from './core.js';
@@ -28,8 +30,9 @@ class AnonymousSessions extends SessionStore {
 }
 
 class HostedService extends CinemaService {
+  constructor(http: HttpClient, catalog: CinexCinemaCatalog) { super(http, catalog); }
   override async query(op: Operation, q: Query) {
-    const result = await super.query(op, { ...q, refresh: q.refresh ?? true });
+    const result = await super.query(op, q);
     if (result.status === 'auth_required') result.warnings = ['Conecta tu cuenta con connect_account. Introduce tus credenciales solo en el enlace privado, nunca en el chat.'];
     return result;
   }
@@ -54,6 +57,13 @@ export async function createHostedApp(options: {
   const oauth = new HostedOAuth(options.pool, () => origin);
   const users = new HostedUsers(options.pool);
   const links = new ConnectionLinks(options.pool);
+  // Public cache and in-flight deduplication live for this hosted app. The
+  // client is never used for authenticated reads; those remain request/user
+  // scoped below.
+  const publicHttp = new HttpClient(options.request ?? fetch, 15000);
+  // Catalog URL associations are public discovery state, bounded by the
+  // catalog itself; authenticated session state remains request-scoped.
+  const cinexCatalog = new CinexCinemaCatalog();
   // Process-level concurrency is an extra bound; rate budgets live in Postgres.
   const active = new Map<string, number>(); let totalActive = 0;
   const storeFor = (id: string) => new EncryptedSessionStore(options.pool, id, options.key);
@@ -107,7 +117,7 @@ export async function createHostedApp(options: {
         }
         active.set(clientKey, (active.get(clientKey) ?? 0) + 1); totalActive++;
         const store = principal ? storeFor(principal.id) : new AnonymousSessions();
-        const service = new HostedService(new HttpClient(options.request, 15000, store));
+        const service = new HostedService(new HostedHttpClient(options.request ?? fetch, 15000, store, publicHttp), cinexCatalog);
         const handler = createMcpHandler(() => createServer(service, principal ? {
           connect: async provider => {
             if (!await links.budget(`link:${principal.id}`, 12)) throw new Error('Demasiados enlaces. Inténtalo en un minuto.');

@@ -5,15 +5,46 @@ import type { DataItem, Operation, Query, QueryResult } from './core.js';
 import { HttpClient, ReadContext } from './http.js';
 import { cinepic, cinesunidos, cinex, trasnocho } from './providers.js';
 
+const resultWarningLimit = 64;
+const resultWarningCharacters = 8192;
+const resultWarningItemLength = 512;
+
+function boundedWarnings(warnings: string[]): string[] {
+  const output: string[] = [];
+  const seen = new Set<string>();
+  let characters = 0, omitted = 0;
+  for (const warning of warnings) {
+    const value = typeof warning === 'string' ? warning : String(warning);
+    const bounded = value.length > resultWarningItemLength ? `${value.slice(0, resultWarningItemLength - 1)}…` : value;
+    if (seen.has(bounded)) { omitted++; continue; }
+    seen.add(bounded);
+    const reserve = 160;
+    if (output.length >= resultWarningLimit - 1 || characters + bounded.length > resultWarningCharacters - reserve) {
+      omitted++;
+      continue;
+    }
+    output.push(bounded);
+    characters += bounded.length;
+  }
+  if (omitted) {
+    const aggregate = `Se omitieron ${omitted} advertencias repetidas o excedentes; consulta partial y los datos fuente.`;
+    while (output.length && (output.length >= resultWarningLimit || characters + aggregate.length > resultWarningCharacters)) {
+      characters -= output.pop()!.length;
+      omitted++;
+    }
+    output.push(aggregate);
+  }
+  return output;
+}
+
 export const capabilities = {
   cinepic: { seats: 'public_page_data_ascii', cities: 'public', cinemas: 'public', movies: 'public_api', showtimes: 'public_api', prices: 'page_data_ves_and_derived_usd', concessions: 'public_api_empty_in_samples' },
   cinesunidos: { seats: 'authenticated_api_ascii', cities: 'public_api', cinemas: 'page_data', movies: 'page_data', showtimes: 'page_data', prices: 'authenticated_api', concessions: 'public_api' },
-  cinex: { seats: 'authenticated_html_ascii', cities: 'public_api', cinemas: 'html', movies: 'html_general_catalog', showtimes: 'html_requires_movie', prices: 'authenticated_html_requires_session', concessions: 'authenticated_html' },
+  cinex: { seats: 'authenticated_html_ascii', cities: 'public_api', cinemas: 'html', movies: 'html_general_catalog', showtimes: 'html_requires_cinema_or_movie', prices: 'authenticated_html_requires_session', concessions: 'authenticated_html' },
   trasnocho: { cities: 'not_implemented', cinemas: 'not_implemented', movies: 'blocked_in_samples', showtimes: 'not_implemented', prices: 'not_implemented', concessions: 'not_implemented' },
 };
 export class CinemaService {
-  private cinexCatalog = new CinexCinemaCatalog();
-  constructor(private http = new HttpClient()) {}
+  constructor(private http = new HttpClient(), private cinexCatalog = new CinexCinemaCatalog()) {}
   async seats(q: Query) { return getSeatMap(this.http, q); }
   async authStatus() { return Promise.all((['cinex', 'cinesunidos'] as const).map(p => this.http.sessions.status(p))); }
   async query(op: Operation, q: Query): Promise<QueryResult> {
@@ -53,7 +84,7 @@ export class CinemaService {
     }
     result.sources = c.sources;
     result.partial = c.partial;
-    result.warnings = [...new Set(c.warnings)];
+    result.warnings = boundedWarnings(c.warnings);
     return Result.parse(result);
   }
 }

@@ -70,9 +70,11 @@ Server name: cinve
 
    ${seatInstructions}
 
-   Use list_providers to discover coverage and list_cities/list_cinemas to get
-   valid location IDs before querying movies and showtimes. Never invent IDs,
-   prices, or results. Report provider limitations and partial coverage.
+   Use list_providers once when coverage is unknown, then list_cities/list_cinemas
+   only when valid location IDs are needed. For Cinex, get_showtimes with a
+   verified cinema_id returns the whole cinema schedule and does not require a
+   preceding list_movies call; use movie_id for a movie-specific lookup. Never
+   invent IDs, prices, or results. Report provider limitations and partial coverage.
 
 4. Verify the saved configuration using the client's supported inspection tools.
    When Cinve tools are available, call list_providers to verify the connection.

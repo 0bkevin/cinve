@@ -64,7 +64,7 @@ const operationItemSchemas = {
     kind: z.literal('showtime'),
     id: Id.describe('Identificador de la función; úsalo como session_id al consultar tarifas.'),
     cinema_id: Item.shape.cinema_id.unwrap().describe('ID de sede que devuelve list_cinemas.'),
-    movie_id: Item.shape.movie_id.unwrap().describe('ID de película que devuelve list_movies.'),
+    movie_id: Item.shape.movie_id.unwrap().describe('ID de película confirmado por list_movies o por el catálogo Cinex al consultar una sede completa.'),
     date: Item.shape.date.unwrap().describe('Fecha comercial de la función en America/Caracas (YYYY-MM-DD).'),
     time: Item.shape.time.unwrap().describe('Hora local de inicio (HH:mm).'),
     starts_at: Item.shape.starts_at.describe('Marca de tiempo con zona horaria; puede faltar en funciones de trasnoche.'),

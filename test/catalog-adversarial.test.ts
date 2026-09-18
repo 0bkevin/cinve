@@ -51,8 +51,16 @@ test('Cinepic retains both known venues when one site fails or changes its confi
     assert.equal(r.items.find(i => i.id === '123301')?.code_status, 'verified');
     assert.equal(r.items.find(i => i.name === 'Cinepic Candelaria')?.code_status, 'unverified');
     const cities = await s.query('cities', { provider: 'cinepic' });
-    assert.equal(cities.items[0].name, 'Caracas'); assert.equal(cities.partial, true);
+    assert.equal(cities.items[0].name, 'Caracas'); assert.equal(cities.partial, false);
   }
+});
+
+test('Cinepic configured cities return without probing either cinema website', async () => {
+  let requests = 0;
+  const s = new CinemaService(new HttpClient(async () => { requests++; return new Response('unexpected'); }));
+  const result = await s.query('cities', { provider: 'cinepic' });
+  assert.equal(result.status, 'available'); assert.deepEqual(result.items.map(item => item.name), ['Caracas']);
+  assert.equal(requests, 0); assert.ok(result.warnings.some(w => /configurada/.test(w)));
 });
 test('Cinepic retains movie references when scheduled sessions lack movie metadata', async () => {
   const payload = structuredClone(cpSessions); payload.data.datos = [];

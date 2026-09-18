@@ -15,7 +15,8 @@ import { ConnectionLinks } from '../src/hosted-links.js';
 import { createRemoteServer } from '../src/remote.js';
 import type { login } from '../src/auth.js';
 
-async function fixture(t: { after(fn: () => Promise<void>): void }, authenticate?: typeof login) {
+async function fixture(t: { after(fn: () => Promise<void>): void }, authenticate?: typeof login,
+  request: typeof fetch = async () => new Response('["Caracas"]')) {
   const schema = 'test_' + randomBytes(12).toString('hex');
   const admin = new Pool({ connectionString: process.env.TEST_DATABASE_URL });
   await admin.query(`CREATE SCHEMA ${schema}`);
@@ -23,8 +24,7 @@ async function fixture(t: { after(fn: () => Promise<void>): void }, authenticate
 
   await pool.query(await migrationSql());
   const key = randomBytes(32);
-  const app = await createHostedApp({ publicUrl: 'http://127.0.0.1:0', allowLocal: true, pool, key, authenticate,
-    request: async () => new Response('["Caracas"]') });
+  const app = await createHostedApp({ publicUrl: 'http://127.0.0.1:0', allowLocal: true, pool, key, authenticate, request });
   await new Promise<void>(resolve => app.server.listen(0, '127.0.0.1', resolve));
   const address = app.server.address(); assert.ok(address && typeof address !== 'string');
   const origin = `http://127.0.0.1:${address.port}`;
@@ -97,6 +97,71 @@ test('hosted MCP authenticates every request; account links are one-use and sess
   assert.equal(await f.storeFor(f.alice.id).read('cinesunidos'), undefined);
   await f.users.revoke(f.alice.id);
   await assert.rejects(alice.callTool({ name: 'get_auth_status', arguments: {} }));
+});
+
+test('hosted app reuses public reads across users and honors explicit refresh', async t => {
+  let calls = 0;
+  let release!: () => void;
+  let started!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const firstRead = new Promise<void>(resolve => { started = resolve; });
+  const f = await fixture(t, undefined, async (_url, _init) => {
+    calls++;
+    if (calls === 1) { started(); await gate; }
+    if (calls === 3) return new Response('upstream failure', { status: 503 });
+    return new Response('["Caracas"]');
+  });
+  const anonymous = await f.client();
+  const alice = await f.client(f.alice.token);
+
+  const concurrent = Promise.all([
+    anonymous.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos' } }),
+    alice.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos' } }),
+  ]);
+  await firstRead;
+  assert.equal(calls, 1);
+  release();
+  const [first, second] = await concurrent;
+  assert.equal(calls, 1);
+  const concurrentSources = [Result.parse(first.structuredContent).sources[0], Result.parse(second.structuredContent).sources[0]];
+  assert.ok(concurrentSources.every(source => typeof source.cached === 'boolean'));
+  assert.ok(concurrentSources.some(source => source.cached === false), 'one request must receive the shared upstream result');
+  assert.equal(concurrentSources[0].fetched_at, concurrentSources[1].fetched_at);
+
+  const cached = await anonymous.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos' } });
+  assert.equal(calls, 1);
+  assert.equal(Result.parse(cached.structuredContent).sources[0].cached, true);
+
+  const refreshed = await alice.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos', refresh: true } });
+  assert.equal(calls, 2);
+  assert.equal(Result.parse(refreshed.structuredContent).sources[0].cached, false);
+  const failed = await anonymous.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos', refresh: true } });
+  assert.equal(calls, 3);
+  assert.equal(Result.parse(failed.structuredContent).status, 'error');
+  const afterFailure = await alice.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos' } });
+  assert.equal(calls, 4);
+  assert.equal(Result.parse(afterFailure.structuredContent).sources[0].cached, false);
+});
+
+test('hosted requests retain verified unlisted Cinex IDs across request-scoped services', async t => {
+  const requests: string[] = [];
+  const f = await fixture(t, undefined, async input => {
+    const url = new URL(String(input)); requests.push(url.pathname);
+    if (url.pathname === '/cines.html') return new Response('<a href="cinex-listed.html" title="Cinex Listed, Caracas"><h3>LISTED</h3><img src="assets/images/cinemas/xlisted.jpg"></a>');
+    if (url.pathname === '/cinex-metropolisbarquisimeto.html') return new Response(`<h3 class="title">METROPOLIS BARQUISIMETO</h3><div class="sessionslist"><h5 class="title">KNOWN</h5><button onclick="checkLogin('s1','MTB')" alt="1789751400"></button></div>`);
+    if (url.pathname === '/cartelera.html') return new Response(`<div class="poster" onclick="posterMovieClick('M','KNOWN','0','x','A','sinopsis-known.html','CARTELERA')" title="KNOWN"></div>`);
+    return new Response('missing', { status: 404 });
+  });
+  const discover = await f.client();
+  const cinemas = await discover.callTool({ name: 'list_cinemas', arguments: { provider: 'cinex', city: 'Barquisimeto' } });
+  const item = (cinemas.structuredContent as { items: Array<{ cinema_id?: string; directory_status?: string }> }).items[0];
+  assert.equal(item.cinema_id, 'MTB'); assert.equal(item.directory_status, 'not_listed');
+  const before = requests.length;
+  const separateRequest = await f.client();
+  const showtimes = await separateRequest.callTool({ name: 'get_showtimes', arguments: { provider: 'cinex', cinema_id: 'MTB', date: '2026-09-18', refresh: true } });
+  assert.equal((showtimes.structuredContent as { status: string; total: number }).status, 'available');
+  assert.equal((showtimes.structuredContent as { total: number }).total, 1);
+  assert.deepEqual(requests.slice(before), ['/cinex-metropolisbarquisimeto.html', '/cartelera.html']);
 });
 
 test('disconnect during upstream login prevents a late session from being saved', async t => {
