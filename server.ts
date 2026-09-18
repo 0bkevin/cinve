@@ -5,7 +5,7 @@ import { databasePool } from './src/hosted-store.js';
 let app: ReturnType<typeof createHostedApp> | undefined;
 export default async function handler(req: IncomingMessage, res: ServerResponse) {
   try {
-    if (serveInstall(req, res, process.env.CINEV_PUBLIC_URL ?? 'https://cinev-indol.vercel.app')) return;
+    if (serveInstall(req, res, process.env.CINEV_PUBLIC_URL ?? 'https://cinev.vercel.app')) return;
     if (!app) {
       const { CINEV_PUBLIC_URL, CINEV_ENCRYPTION_KEY } = process.env;
       if (!CINEV_PUBLIC_URL || !/^[a-f0-9]{64}$/.test(CINEV_ENCRYPTION_KEY ?? '')) throw new Error('Missing configuration');

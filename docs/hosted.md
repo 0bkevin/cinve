@@ -101,7 +101,7 @@ rate limits, and ciphertext tampering. Cinema credentials are synthetic.
 
 ## Current deployment
 
-Public MCP URL: https://cinev-indol.vercel.app/mcp
+Public MCP URL: https://cinev.vercel.app/mcp
 
-Live smoke: `npm run smoke -- --url https://cinev-indol.vercel.app/mcp`.
+Live smoke: `npm run smoke -- --url https://cinev.vercel.app/mcp`.
 This exercises anonymous retrieval and confirms protected routes request login.
