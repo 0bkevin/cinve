@@ -20,6 +20,9 @@ export const SeatResult = z.object({
   queried_at: z.string(), timezone: z.literal('America/Caracas'),
   sources: z.array(Source), warnings: z.array(z.string()),
   seats: z.array(Seat).max(10000), available: z.number().int().nonnegative(),
+  occupied: z.number().int().nonnegative(), unavailable: z.number().int().nonnegative(),
+  unknown: z.number().int().nonnegative(), total: z.number().int().nonnegative(),
+  availability_complete: z.boolean().describe('True only when a nonempty map has no unknown seat states. Does not promise purchase eligibility or a reservation.'),
   ascii: z.string(),
 });
 
@@ -51,9 +54,9 @@ export function parseCinesUnidosSeats(data: unknown): SeatData[] {
       return {
         id: `${area}:${row}:${text(s.id)}`, label: `${row}:${text(s.id)}`, row, area,
         row_index: Number(p.rowIndex), column_index: Number(p.columnIndex),
-        // Only ordinary status 0 is presented as freely available. Special
-        // selectable seats (7) retain their raw code, without assuming eligibility.
-        status: status === '0' ? 'available' : ['1', '2'].includes(status) ? 'occupied' : ['3', '4', '5', '6', '7'].includes(status) ? 'unavailable' : 'unknown',
+        // Official seat component renders and selects both 0 and 7 as free.
+        // Accessibility (3), selected (4), blocked/broken (5/6) are not free.
+        status: ['0', '7'].includes(status) ? 'available' : ['1', '2'].includes(status) ? 'occupied' : ['3', '4', '5', '6'].includes(status) ? 'unavailable' : 'unknown',
         provider_status: status, category: text(a.areaCategoryCode),
       } as SeatData;
     }))));
@@ -84,7 +87,9 @@ export function parseCinexSeats(html: string, q: Query): SeatData[] {
         if (!seat.hasClass('blankspace')) throw new DataError('error', 'Elemento desconocido en el mapa Cinex.');
         return;
       }
-      const call = (seat.attr('onclick') ?? '').match(/^javascript:decideAsientoNew\('([A-Za-z0-9]+)','(\d+)','(\d+)','(\d+)','([A-Za-z0-9]+)','(\d+)','([NS])'(?:,'([NS])')?\);?$/);
+      // Argument 6 is the selected-ticket count, not seat availability. Cinex
+      // emits an empty string in VIP rooms before any tickets are selected.
+      const call = (seat.attr('onclick') ?? '').match(/^javascript:decideAsientoNew\('([A-Za-z0-9]+)','(\d+)','(\d+)','(\d+)','([A-Za-z0-9]+)','(\d*)','([NS])'(?:,'([NS])')?\);?$/);
       if (call && call[1] !== id) throw new DataError('error', 'Identificador de asiento Cinex inconsistente.');
       const restricted = classes.some(c => /wheelchair|selected/.test(c)) || call?.[7] === 'S' || call?.[8] === 'S';
       const available = call && seat.attr('alt') === '0' && classes.length === 1 && freeClasses.has(classes[0]);
@@ -125,7 +130,7 @@ export async function getSeatMap(http: HttpClient, q: Query): Promise<z.infer<ty
   const result: z.infer<typeof SeatResult> = {
     provider: q.provider, cinema_id: requireArg(q, 'cinema_id'), session_id: requireArg(q, 'session_id'),
     status: 'unavailable', queried_at: new Date().toISOString(), timezone: 'America/Caracas',
-    sources: [], warnings: [], seats: [], available: 0, ascii: '',
+    sources: [], warnings: [], seats: [], available: 0, occupied: 0, unavailable: 0, unknown: 0, total: 0, availability_complete: false, ascii: '',
   };
   const c = new ReadContext(http, true);
   try {
@@ -148,12 +153,19 @@ export async function getSeatMap(http: HttpClient, q: Query): Promise<z.infer<ty
       throw new DataError('unavailable', 'Consulta de asientos no implementada para este proveedor.');
     }
     result.available = result.seats.filter(s => s.status === 'available').length;
+    result.occupied = result.seats.filter(s => s.status === 'occupied').length;
+    result.unavailable = result.seats.filter(s => s.status === 'unavailable').length;
+    result.unknown = result.seats.filter(s => s.status === 'unknown').length;
+    result.total = result.seats.length;
+    result.availability_complete = result.unknown === 0 && result.total > 0;
+    if (result.unknown) c.warnings.push(`Mapa parcialmente interpretado por Cinve: ${result.unknown} asientos con estado desconocido (?). Los ${result.available} libres son únicamente los confirmados; cero libres confirmados no significa agotado.`);
     result.ascii = renderSeats(result.seats);
     result.status = 'available';
     c.warnings.push('Lectura sin reserva, sin caché local. La disponibilidad puede cambiar; confirma en la web antes de comprar.');
   } catch (e) {
     result.status = e instanceof DataError ? e.status : 'error';
-    result.seats = []; result.available = 0; result.ascii = '';
+    result.seats = []; result.available = 0; result.occupied = 0; result.unavailable = 0;
+    result.unknown = 0; result.total = 0; result.availability_complete = false; result.ascii = '';
     c.warnings.push(e instanceof DataError ? e.message : 'No se pudo interpretar un mapa de asientos verificable.');
   }
   result.sources = c.sources; result.warnings = c.warnings;

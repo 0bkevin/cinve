@@ -15,8 +15,8 @@ test('Cinepic availability ignores seleccionada and preserves physical labels, g
   assert.throws(() => parseCinepicSeats({ butacas: [cp({ nombre_butaca: 'A\nFAKE' })] }));
 });
 test('Cines Unidos keeps special and unknown states separate from free seats', () => {
-  const data = { seats: { areas: [{ number: 1, areaCategoryCode: 'general', rows: [{ rowIndexZeroBased: 0, physicalName: 'P', seats: [0, 1, 2, 7, 99].map((status, columnIndex) => ({ id: String(columnIndex + 1), status, position: { areaNumber: 1, rowIndex: 0, columnIndex } })) }] }] } };
-  assert.deepEqual(parseCinesUnidosSeats(data).map(s => s.status), ['available', 'occupied', 'occupied', 'unavailable', 'unknown']);
+  const data = { seats: { areas: [{ number: 1, areaCategoryCode: 'general', rows: [{ rowIndexZeroBased: 0, physicalName: 'P', seats: [0, 1, 2, 3, 4, 5, 6, 7, 99].map((status, columnIndex) => ({ id: String(columnIndex + 1), status, position: { areaNumber: 1, rowIndex: 0, columnIndex } })) }] }] } };
+  assert.deepEqual(parseCinesUnidosSeats(data).map(s => s.status), ['available', 'occupied', 'occupied', 'unavailable', 'unavailable', 'unavailable', 'unavailable', 'available', 'unknown']);
   data.seats.areas[0].rows[0].seats[0].position.areaNumber = 2;
   assert.throws(() => parseCinesUnidosSeats(data));
 });
@@ -59,11 +59,53 @@ test('Cinex seat workflow uses only authenticated GETs and rejects an interleave
     return new Response(String(url).endsWith('checklogin.php') ? 'on' : String(url).endsWith('asientosdev.php') ? body : '<form id="frmboletos"></form>');
   }, 15000, sessions);
   const q = { provider: 'cinex' as const, cinema_id: 'SBC', session_id: 's1' };
-  assert.equal((await new CinemaService(http).seats(q)).available, 1);
+  const partial = await new CinemaService(http).seats(q);
+  assert.equal(partial.available, 1);
+  assert.equal(partial.occupied, 1); assert.equal(partial.unknown, 1);
+  assert.equal(partial.total, 3); assert.equal(partial.availability_complete, false);
+  assert.match(partial.warnings.join(' '), /cero libres confirmados no significa agotado/);
   assert.equal(urls.length, 3);
   body = cinexMap.replace('sessionid=s1', 'sessionid=other');
   const result = await new CinemaService(http).seats(q);
   assert.equal(result.status, 'unavailable'); assert.equal(result.ascii, '');
+  assert.equal(result.total, 0); assert.equal(result.availability_complete, false);
   assert.doesNotThrow(() => assertPrivateRead('cinex', 'https://www.cinex.com.ve/asientosdev.php'));
   assert.throws(() => assertPrivateRead('cinex', 'https://www.cinex.com.ve/asientosdev.php?extra=1'));
+});
+
+test('Cinex VIP availability accepts empty selected-ticket count without relaxing seat state checks', () => {
+  const q = { provider: 'cinex' as const, cinema_id: 'SBC', session_id: 's1' };
+  const vip = cinexMap.replaceAll('seatestandar', 'seatvipplus').replace("'0001','0','N','N'", "'0001','','N','N'");
+  assert.equal(parseCinexSeats(vip, q)[0].status, 'available');
+  assert.equal(parseCinexSeats(vip, q)[0].category, '0001');
+  assert.equal(parseCinexSeats(vip.replace("'0001','','N','N'", "'0001','','S','N'"), q)[0].status, 'unavailable');
+  assert.equal(parseCinexSeats(vip.replace("'0001','','N','N'", "'0001','','N','S'"), q)[0].status, 'unavailable');
+  assert.equal(parseCinexSeats(vip.replace('alt="0"', 'alt="1"'), q)[0].status, 'unknown');
+  assert.equal(parseCinexSeats(vip.replace("'0001','','N','N'", "'0001','garbage','N','N'"), q)[0].status, 'unknown');
+  assert.equal(parseCinexSeats(vip.replace('decideAsientoNew', 'unrecognized'), q)[0].status, 'unknown');
+  assert.throws(() => parseCinexSeats(vip.replace("('B1',", "('WRONG',"), q));
+});
+
+test('Cines Unidos reports confirmed and unknown counts independently, including selectable state 7', async () => {
+  let codes: unknown[] = [0, 7, 1, 2, 3, 4, 5, 6, 99, null];
+  const sessions = new class extends EmptySessionStore { override async headers() { return { Authorization: 'Bearer synthetic' }; } };
+  const http = new HttpClient(async (url, init) => {
+    assert.equal(String(url), 'https://www.cinesunidos.com/api/seats?theaterId=1005&showTimeId=s1');
+    assert.ok(!init?.method || init.method === 'GET');
+    return Response.json({ seats: { areas: [{ number: 1, areaCategoryCode: 'general', rows: [{ rowIndexZeroBased: 0, physicalName: 'G', seats: codes.map((status, columnIndex) => ({ id: String(columnIndex + 1), status, position: { areaNumber: 1, rowIndex: 0, columnIndex } })) }] }] } });
+  }, 15000, sessions);
+  const q = { provider: 'cinesunidos' as const, cinema_id: '1005', session_id: 's1' };
+  const result = await new CinemaService(http).seats(q);
+  assert.equal(result.status, 'available');
+  assert.deepEqual([result.available, result.occupied, result.unavailable, result.unknown, result.total], [2, 2, 4, 2, 10]);
+  assert.equal(result.availability_complete, false);
+  assert.match(result.ascii, /G:1O\s+G:2O\s+G:3X/);
+  codes = [7, 1];
+  const complete = await new CinemaService(http).seats(q);
+  assert.equal(complete.availability_complete, true); assert.equal(complete.available, 1);
+  codes = [99];
+  const unknown = await new CinemaService(http).seats(q);
+  assert.equal(unknown.available, 0); assert.equal(unknown.unknown, 1);
+  assert.equal(unknown.availability_complete, false);
+  assert.match(unknown.warnings.join(' '), /no significa agotado/);
 });
