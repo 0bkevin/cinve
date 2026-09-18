@@ -1,3 +1,4 @@
+import { getSeatMap } from './seats.js';
 import { CinexCinemaCatalog } from './cinex-cinemas.js';
 import { DataError, folded, operationItemSchema, PublicUrl, Result, today, Id } from './core.js';
 import type { DataItem, Operation, Query, QueryResult } from './core.js';
@@ -5,14 +6,15 @@ import { HttpClient, ReadContext } from './http.js';
 import { cinepic, cinesunidos, cinex, trasnocho } from './providers.js';
 
 export const capabilities = {
-  cinepic: { cities: 'public', cinemas: 'public', movies: 'public_api', showtimes: 'public_api', prices: 'page_data_ves_and_derived_usd', concessions: 'public_api_empty_in_samples' },
-  cinesunidos: { cities: 'public_api', cinemas: 'page_data', movies: 'page_data', showtimes: 'page_data', prices: 'authenticated_api', concessions: 'public_api' },
-  cinex: { cities: 'public_api', cinemas: 'html', movies: 'html_general_catalog', showtimes: 'html_requires_movie', prices: 'authenticated_html_requires_session', concessions: 'authenticated_html' },
+  cinepic: { seats: 'public_page_data_ascii', cities: 'public', cinemas: 'public', movies: 'public_api', showtimes: 'public_api', prices: 'page_data_ves_and_derived_usd', concessions: 'public_api_empty_in_samples' },
+  cinesunidos: { seats: 'authenticated_api_ascii', cities: 'public_api', cinemas: 'page_data', movies: 'page_data', showtimes: 'page_data', prices: 'authenticated_api', concessions: 'public_api' },
+  cinex: { seats: 'unavailable_read_only', cities: 'public_api', cinemas: 'html', movies: 'html_general_catalog', showtimes: 'html_requires_movie', prices: 'authenticated_html_requires_session', concessions: 'authenticated_html' },
   trasnocho: { cities: 'not_implemented', cinemas: 'not_implemented', movies: 'blocked_in_samples', showtimes: 'not_implemented', prices: 'not_implemented', concessions: 'not_implemented' },
 };
 export class CinemaService {
   private cinexCatalog = new CinexCinemaCatalog();
   constructor(private http = new HttpClient()) {}
+  async seats(q: Query) { return getSeatMap(this.http, q); }
   async authStatus() { return Promise.all((['cinex', 'cinesunidos'] as const).map(p => this.http.sessions.status(p))); }
   async query(op: Operation, q: Query): Promise<QueryResult> {
     // One commercial date for the entire operation, including midnight boundaries.

@@ -1,6 +1,6 @@
 # Cinev MCP
 
-Servidor MCP de consulta de cines venezolanos, pensado para agentes. Expone ocho herramientas sobre `stdio` usando el SDK oficial MCP de TypeScript v2. Compatible también con la negociación de protocolo MCP 2025 mediante `serveStdio`. Las consultas y los logins funcionan por HTTP, sin navegador.
+Servidor MCP de consulta de cines venezolanos, pensado para agentes. Expone nueve herramientas sobre `stdio` usando el SDK oficial MCP de TypeScript v2. Compatible también con la negociación de protocolo MCP 2025 mediante `serveStdio`. Las consultas y los logins funcionan por HTTP, sin navegador.
 
 ## Servicio alojado
 
@@ -80,6 +80,7 @@ El servicio alojado permite autorizar el asistente desde el navegador mediante O
 | `list_movies` | Cinepic: `cinema_id`; Cines Unidos: `city`. Ambos admiten `date`, por defecto hoy. Cinex: catálogo general, `query` opcional. |
 | `get_showtimes` | Cinepic: `cinema_id`; Cines Unidos: `city`; Cinex: `movie_id`. Fecha opcional, por defecto hoy en Caracas. |
 | `get_ticket_prices` | Cinepic: `cinema_id`, `movie_id`, `session_id`. Cines Unidos: `cinema_id`, `session_id` y login. Cinex: `cinema_id`, `session_id` y login; sin función prueba el listado público, que puede no estar disponible. |
+| `get_seats` | Mapa ASCII: `cinema_id`, `session_id`; Cinepic también `movie_id`. Cines Unidos requiere cuenta conectada. |
 | `get_concessions` | Cinepic y Cines Unidos: solo `cinema_id`, por API pública. Cinex: `cinema_id`. |
 
 Todos salvo `list_providers` y `get_auth_status` requieren `provider`: `cinepic`, `cinesunidos`, `cinex` o `trasnocho`. Listados admiten `query` cuando corresponde, `offset` y `limit` (50 por defecto, máximo 100). Seguir `next_offset` hasta que sea `null`; `total` es el número de registros antes de paginar.
@@ -142,7 +143,7 @@ No conecta cuentas reales ni modifica la configuración de servidores del usuari
 
 `npm run smoke -- --require-auth` exige que ambas cuentas estén configuradas, que se consulte una tarifa disponible de cada una y que responda la caramelería Cinex. Busca funciones entre hasta ocho películas; si no encuentra muestra, falla en lugar de dar por comprobada esa capacidad. Los bloqueos y las indisponibilidades publicados en los resultados siguen siendo límites reales aunque una ejecución termine sin errores de transporte.
 
-El servidor MCP solo realiza GET a orígenes permitidos; las rutas autenticadas y sus parámetros también están limitados. Las credenciales se envían únicamente al proveedor correspondiente. Cada lectura HTTP tiene un plazo de 15 segundos que incluye cola, conexión y cuerpo; hay dos consultas activas y hasta 32 en cola por origen. El cuerpo se limita a 4 MiB. La caché pública admite hasta 64 entradas y 16 MiB contabilizados conservadoramente como cadenas UTF-16: TTL de 2 minutos por defecto, 1 minuto para tarifas públicas y 1 hora para sedes. No persiste caché en disco ni sigue redirecciones. Las redirecciones reconocidas al login se informan como `auth_required`. El comando local de login sí sigue redirecciones del proveedor: plazo de 25 segundos por cadena y 60 segundos para el flujo HTTP completo, sin reenviar contraseñas entre orígenes.
+El servidor MCP solo realiza GET a orígenes permitidos; las rutas autenticadas y sus parámetros también están limitados. Las credenciales se envían únicamente al proveedor correspondiente. Cada lectura HTTP tiene un plazo de 15 segundos que incluye cola, conexión y cuerpo; hay dos consultas activas y hasta 32 en cola por origen. El cuerpo se limita a 4 MiB. La caché pública admite hasta 64 entradas y 16 MiB contabilizados conservadoramente como cadenas UTF-16: TTL de 2 minutos por defecto, 1 minuto para tarifas públicas y 1 hora para sedes. No persiste caché en disco. Solo sigue una migración autenticada de Cinex de `boletos.php` a `boletosdev.php`, en el mismo origen y con la misma sede/función; rechaza el resto de redirecciones. Las redirecciones reconocidas al login se informan como `auth_required`. El comando local de login sí sigue redirecciones del proveedor: plazo de 25 segundos por cadena y 60 segundos para el flujo HTTP completo, sin reenviar contraseñas entre orígenes.
 
 Los enlaces no HTTPS o con credenciales se omiten con advertencia. Los registros se validan antes de filtrar/paginar: importes no finitos, identificadores inutilizables o cambios de esquema no escapan como excepciones sin estructurar. Los datos Next.js se recorren con límites de profundidad/nodos y sin ejecutar scripts. Estas defensas no convierten los textos de los proveedores en instrucciones confiables para el agente.
 
@@ -155,3 +156,9 @@ La investigación original sigue en [docs/research/cinema-data-audit.md](docs/re
 La [segunda investigación sin navegador](docs/research/http-followup.md) corrigió la incertidumbre de moneda Cinepic y añadió la consulta directa de caramelería, sin requerir película ni función. El MCP sigue usando exclusivamente HTTP: no incorpora un navegador.
 
 La [revisión adversarial del 12/09/2026](docs/reviews/adversarial-2026-09-12.md) documenta los defectos reproducidos, sus correcciones y los fallos de proveedor que permanecieron durante la validación.
+
+### Asientos en ASCII
+
+`get_seats` consulta el mapa completo sin seleccionar asientos ni crear órdenes. Cines Unidos requiere `cinema_id`, `session_id` y cuenta conectada; Cinepic requiere además `movie_id` y no necesita login. Obtén los IDs de `get_showtimes`. Devuelve `seats`, `available`, `ascii`, fuentes y advertencias, sin caché local. Conserva posiciones y etiquetas del proveedor: `O` libre, `X` ocupado, `-` restringido/no disponible y `?` desconocido. La orientación de la pantalla no está verificada.
+
+Cinex aún devuelve `unavailable` para asientos: la lectura directa probada no entregó un mapa verificable. En Cinepic, los cupos por tarifa pueden diferir del número de butacas libres; se advierte esa discrepancia. La caramelería de Cinepic devolvió catálogos vacíos en ambas sedes el 18/09/2026, sin demostrar ausencia de venta en taquilla.

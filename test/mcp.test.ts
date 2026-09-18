@@ -7,6 +7,7 @@ import { createMcpHandler, InMemoryTransport, McpServer } from '@modelcontextpro
 import { toNodeHandler } from '@modelcontextprotocol/node';
 import * as z from 'zod';
 import { Result } from '../src/core.js';
+import { SeatResult } from '../src/seats.js';
 import { createServer } from '../src/server.js';
 import { CinemaService } from '../src/service.js';
 import { createRemoteServer } from '../src/remote.js';
@@ -17,7 +18,7 @@ test('official MCP client discovers tools, validates arguments and reads structu
   try {
     await client.connect(transport);
     const list = await client.listTools();
-    assert.equal(list.tools.length, 8);
+    assert.equal(list.tools.length, 9);
     assert.ok(list.tools.every(t => t.annotations?.readOnlyHint && t.outputSchema));
     assert.ok(list.tools.every(t => t.title));
     const movies = list.tools.find(t => t.name === 'list_movies');
@@ -37,6 +38,11 @@ test('official MCP client discovers tools, validates arguments and reads structu
     const authRequired = await client.callTool({ name: 'get_ticket_prices', arguments: { provider: 'cinesunidos', cinema_id: '1002', session_id: 's1' } });
     assert.equal(authRequired.isError, true);
     assert.equal(Result.parse(authRequired.structuredContent).status, 'auth_required');
+    const seats = await client.callTool({ name: 'get_seats', arguments: { provider: 'cinepic', cinema_id: '123300', session_id: 'f1', movie_id: 'p1' } });
+    assert.equal(SeatResult.parse(seats.structuredContent).available, 1);
+    assert.match(SeatResult.parse(seats.structuredContent).ascii, /A:1O/);
+    const privateSeats = await client.callTool({ name: 'get_seats', arguments: { provider: 'cinesunidos', cinema_id: '1005', session_id: 's1' } });
+    assert.equal(SeatResult.parse(privateSeats.structuredContent).status, 'auth_required');
     const blocked = await client.callTool({ name: 'list_movies', arguments: { provider: 'trasnocho' } });
     assert.equal(blocked.isError, true);
     assert.equal(Result.parse(blocked.structuredContent).status, 'blocked');

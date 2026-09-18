@@ -1,3 +1,4 @@
+import { SeatResult } from './seats.js';
 import { hostedAuthInstructions } from './hosted-auth-guidance.js';
 import { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod';
@@ -88,7 +89,7 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
     outputSchema: z.object({ version: z.string(), capability_audit_date: z.string(), live_health_check: z.literal(false), providers: z.array(z.object({ id: Provider, capabilities: z.record(z.string(), z.string()) })) }),
     annotations: { ...annotations, openWorldHint: false },
   }, async () => {
-    const data = { version: '0.1.0', capability_audit_date: '2026-09-11', live_health_check: false as const, providers: Object.entries(capabilities).map(([id, capabilities]) => ({ id, capabilities })) };
+    const data = { version: '0.1.0', capability_audit_date: '2026-09-18', live_health_check: false as const, providers: Object.entries(capabilities).map(([id, capabilities]) => ({ id, capabilities })) };
     return { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data };
   });
   if (accounts || publicHosted) {
@@ -126,6 +127,18 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
       }
     });
   }
+  server.registerTool('get_seats', {
+    title: 'Consultar asientos y mapa ASCII',
+    description: 'Mapa real sin reservar: Cines Unidos requiere cinema_id, session_id y cuenta conectada; Cinepic requiere también movie_id, sin login. Usa IDs de get_showtimes. Devuelve filas, números, estados y ASCII completo. Cinex todavía no ofrece mapa verificable de solo lectura. No deduzcas disponibilidad cuando status no sea available. Sin caché local.',
+    inputSchema: z.object({ provider, cinema_id: cinemaId, session_id: sessionId, movie_id: movieId.optional() }).strict().superRefine((q, ctx) => {
+      if (q.provider === 'cinepic' && !q.movie_id) ctx.addIssue({ code: 'custom', path: ['movie_id'], message: 'Cinepic requiere movie_id de get_showtimes.' });
+    }),
+    outputSchema: SeatResult, annotations,
+  }, async args => {
+    const data = await service.seats(args);
+    if (publicHosted && data.status === 'auth_required') data.warnings = ['Conecta tu cuenta mediante connect_account y repite get_seats. ' + hostedAuthInstructions];
+    return { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data, isError: data.status !== 'available' };
+  });
   const tools: Array<[string, Operation, string]> = [
     ['list_cities', 'cities', 'Lista ciudades del proveedor. Usa sus nombres al consultar Cines Unidos.'],
     ['list_cinemas', 'cinemas', 'Lista sedes e IDs. Cines Unidos requiere city; Cinepic verifica las sedes configuradas Candelaria y VVIP Lido. Los proveedores conservan sedes conocidas sin código verificado (code_status=unverified). Cinex admite city opcional e incluye sedes conocidas ausentes del directorio actual (directory_status=not_listed); ninguna condición indica cierre.'],

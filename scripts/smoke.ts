@@ -41,7 +41,7 @@ async function authenticatedTickets(provider: 'cinex' | 'cinesunidos', movies: Q
 try {
   await client.connect(transport);
   const tools = await client.listTools();
-  const expectedTools = remoteUrl ? 10 : 8;
+  const expectedTools = remoteUrl ? 11 : 9;
   if (tools.tools.length !== expectedTools) throw new Error(`Expected ${expectedTools} tools.`);
   const auth = z.object({ providers: z.array(z.object({ provider: z.string(), status: z.string() })) }).parse((await client.callTool({ name: 'get_auth_status', arguments: {} })).structuredContent);
   console.log(JSON.stringify(auth));

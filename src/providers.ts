@@ -23,7 +23,7 @@ function movieCP(r: Obj, site: string): DataItem {
     duration_minutes: number(r.peliculas_duracion), genre: text(r.peliculas_genero), rating: text(r.peliculas_clasificacion),
     format: text(r.peliculas_tipo), image_url: text(r.imagen), url: `${site}/es-AR/programacion/${encodeURIComponent(text(r.peliculas_codigo))}` };
 }
-async function cpBuy(q: Query, c: ReadContext) {
+export async function cpBuy(q: Query, c: ReadContext) {
   const site = cpSite(q);
   const url = `${site.host}/es-AR/compra?${new URLSearchParams({ cid: requireArg(q, 'cinema_id'), fid: requireArg(q, 'session_id'), pid: requireArg(q, 'movie_id') })}`;
   const html = await c.get(url, 60000), records = flight(html);
