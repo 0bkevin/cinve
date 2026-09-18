@@ -76,6 +76,11 @@ export class ConnectionLinks {
     return rows[0].count <= limit;
   }
   async cleanup() {
+    await this.pool.query('DELETE FROM cinev_oauth_requests WHERE expires_at<=now()');
+    // Keep consumed refresh tokens until the grant expires to detect replay.
+    await this.pool.query("DELETE FROM cinev_oauth_tokens WHERE kind='access' AND expires_at<=now()");
+    await this.pool.query(`DELETE FROM cinev_clients c USING cinev_oauth_grants g
+      WHERE c.id=g.user_id AND (g.expires_at<=now() OR c.revoked_at IS NOT NULL)`);
     await this.pool.query('DELETE FROM cinev_links WHERE expires_at<=now()');
     await this.pool.query('DELETE FROM cinev_budgets WHERE expires_at<=now()');
     await this.pool.query('DELETE FROM cinev_sessions WHERE expires_at<=now()');

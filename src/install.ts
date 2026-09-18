@@ -66,10 +66,19 @@ Server name: cinve
    this session, explain how to restart or reconnect this client, then verify.
    Do not report installation as complete if required steps remain unfinished.
 
-Public queries do not require login. This service currently does not implement
-automatic OAuth enrollment. Some private cinema queries require a separately
-issued Cinve access token and account connection. Only explain that setup if
-needed; never ask for passwords or tokens in chat.
+Public queries do not require login. For private prices or Cinex concessions,
+call connect_account with the provider. This triggers the client's OAuth browser
+approval when needed, then returns a private cinema-connection link. Show that
+link to the user. After they connect, check get_auth_status and retry the original
+query. Never search the web for a Cinve login page or ask for passwords or tokens
+in chat. No operator-issued token or terminal login is needed for this hosted flow.
+
+The client must support remote MCP OAuth with dynamic client registration and
+PKCE. If it does not open authorization automatically, use its documented
+Authenticate/Connect option for Cinve. If it lacks OAuth support, explain that
+public queries still work and private queries require a compatible client.
+Authorizing another app creates a separate connection; cinema accounts are not
+shared between apps. Losing the client's authorization requires reconnecting.
 
 Example requests after connecting:
 "What movies are showing in Caracas today?"
