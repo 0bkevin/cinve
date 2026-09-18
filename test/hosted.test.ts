@@ -163,7 +163,7 @@ test('stdio bridge forwards tools to authenticated hosted MCP with fresh retriev
   assert.equal(hostedTools.tools.length, 10);
   assert.ok(hostedTools.tools.every(tool => tool.title));
   assert.match(client.getInstructions() ?? '', /Servidor alojado/);
-  assert.deepEqual(client.getServerVersion(), { name: 'cinev-hosted-bridge', version: '0.1.0' });
+  assert.deepEqual(client.getServerVersion(), { name: 'cinve', version: '0.1.0' });
   const result = await client.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos' } });
   assert.equal(Result.parse(result.structuredContent).status, 'available');
   assert.ok(!JSON.stringify(result).includes(f.alice.token));

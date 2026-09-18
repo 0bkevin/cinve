@@ -95,5 +95,5 @@ test('stdio bridge forwards application metadata but keeps its own server identi
   });
   const result = await client.callTool({ name: 'metadata_fixture', arguments: {} });
   assert.equal((result._meta as Record<string, unknown>)['fixture-key'], 'preserved');
-  assert.equal(client.getServerVersion()?.name, 'cinev-hosted-bridge');
+  assert.equal(client.getServerVersion()?.name, 'cinve');
 });

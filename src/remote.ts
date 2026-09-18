@@ -20,7 +20,7 @@ export async function createRemoteServer(config: { url: string; token: string })
   // Preserve the upstream usage guidance so a stdio client receives the same
   // account and data handling instructions as a direct hosted client.
   const instructions = client.getInstructions();
-  const server = new Server({ name: 'cinev-hosted-bridge', version: '0.1.0' }, {
+  const server = new Server({ name: 'cinve', version: '0.1.0' }, {
     capabilities: { tools: {} },
     ...(instructions ? { instructions } : {}),
   });
