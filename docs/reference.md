@@ -110,6 +110,6 @@ consulta fuentes reales y sus resultados pueden cambiar. Con
 `npm run smoke -- --require-auth` también se exigen muestras autenticadas de
 Cinex y Cines Unidos.
 
-Las investigaciones fechadas y las revisiones adversariales permanecen en
-[`docs/research`](research/) y [`docs/reviews`](reviews/). Son evidencia de una
-fecha concreta, no datos en vivo ni garantías del servicio.
+Las decisiones vigentes deben quedar reflejadas en esta referencia, en el código
+y en las pruebas. Las observaciones puntuales de proveedores no se presentan como
+datos actuales ni como garantías del servicio.

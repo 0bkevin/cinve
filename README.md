@@ -8,11 +8,17 @@ Consulta la cartelera de cine de Venezuela desde un asistente compatible con
 [Reportar un problema](https://github.com/0bkevin/cinve/issues/new/choose)
 
 Cinve reúne películas, horarios, precios, caramelería y disponibilidad de
-asientos publicada por distintos cines venezolanos. El proyecto es gratuito,
-independiente y no está afiliado con las cadenas consultadas.
+asientos publicada por distintos cines venezolanos.
 
-> Cinve solo consulta información. No compra entradas, no reserva asientos y la
-> disponibilidad puede cambiar antes de completar una compra.
+> **Cinve es un proyecto independiente, gratuito y sin fines de lucro.** No está
+> afiliado, asociado, patrocinado ni respaldado por Cinex, Cines Unidos,
+> Cinepic, Trasnocho ni por ninguna otra cadena de cines. Sus responsables no
+> reciben pagos, comisiones, contraprestaciones ni beneficios económicos de los
+> cines o proveedores consultados.
+
+Cinve solo consulta y organiza información. No compra entradas, no reserva
+asientos y no interviene en pagos o transacciones. La disponibilidad puede
+cambiar antes de completar una compra.
 
 ## Qué puedes consultar
 
@@ -145,6 +151,24 @@ de asientos.
 Los datos de terceros pertenecen a sus respectivos titulares. Cinve no garantiza
 disponibilidad, exactitud ni precios finales; confirma la información con el cine
 antes de comprar.
+
+## Independencia y uso no comercial
+
+Cinve no representa a las cadenas de cines ni actúa en su nombre. Los nombres,
+marcas, logotipos y demás elementos identificativos mencionados pertenecen a sus
+respectivos titulares y se utilizan únicamente para indicar la fuente de la
+información consultada.
+
+El proyecto no vende datos, publicidad, entradas ni servicios de intermediación;
+no cobra suscripciones o comisiones y no obtiene lucro de las consultas. Su
+finalidad es facilitar el acceso a información de cartelera mediante software
+abierto.
+
+Las consultas se limitan a información publicada por los proveedores o a datos
+que el propio usuario autoriza a consultar mediante su sesión. Cinve no elude
+pagos, no realiza compras, no modifica cuentas y no reserva asientos. Cada
+persona sigue siendo responsable de respetar las condiciones aplicables y de
+confirmar directamente con el cine cualquier precio, disponibilidad o compra.
 
 ## Comunidad
 
