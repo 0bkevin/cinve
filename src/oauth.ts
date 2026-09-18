@@ -170,7 +170,13 @@ export class HostedOAuth {
         await this.pool.query(`INSERT INTO cinev_oauth_requests(id,app_id,redirect_uri,resource,state,challenge,csrf_hash,expires_at)
           VALUES($1,$2,$3,$4,$5,$6,$7,now()+interval '10 minutes')`, [id, app.id, redirect, this.resource, p.get('state'), p.get('code_challenge'), digest(csrf)]);
         res.setHeader('Set-Cookie', `cinve_approval_${id}=${csrf}; HttpOnly; SameSite=Lax; Path=/oauth/authorize; Max-Age=600${origin.startsWith('https:') ? '; Secure' : ''}`);
-        res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
+        // A native form POST inherits this policy. no-referrer makes browsers
+        // send Origin: null, which our same-origin CSRF check correctly rejects.
+        // Keep referrers private across origins, including the assistant callback.
+        res.setHeader('Referrer-Policy', 'same-origin');
+        // Chromium also checks form-action against the POST's redirect target.
+        // Only allow the already-validated callback origin, never arbitrary sites.
+        res.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline'; form-action 'self' ${new URL(redirect).origin}; frame-ancestors 'none'; base-uri 'none'`);
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(`<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Conectar tu asistente · Cinve</title>
 <style>body{font:17px/1.5 system-ui;margin:0;background:#f5f3ee;color:#202522}main{max-width:520px;margin:8vh auto;padding:28px}h1{line-height:1.2}form{background:white;padding:24px;border-radius:18px}button{font:inherit;border:0;border-radius:8px;padding:12px 18px;cursor:pointer;background:#244d3b;color:white}button[value=deny]{background:#eee;color:#333}small{display:block;overflow-wrap:anywhere;color:#59615a;margin:16px 0}</style>

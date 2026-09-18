@@ -73,6 +73,11 @@ Clients without OAuth can still use public data. Never send users to search for 
 - `GET /oauth/authorize` presents explicit approval with the app name and callback
   origin. `POST` requires a same-origin form and a browser-bound, single-use CSRF
   token. Client names are unverified and HTML-escaped. No approval happens on GET.
+  The approval page uses `Referrer-Policy: same-origin`: `no-referrer` would make
+  native form submissions send `Origin: null` and fail the origin check.
+  Its CSP `form-action` permits only self and the validated callback origin,
+  because Chromium also applies this directive to the POST's redirect.
+  The redirect response and other pages retain `no-referrer`.
 - `POST /oauth/token` accepts form-encoded authorization-code and refresh grants.
   S256 PKCE, exact redirect matching, client binding, and the `/mcp` resource
   indicator are mandatory. Codes last five minutes; pending approvals last ten.
