@@ -10,6 +10,14 @@ las credenciales del cine en una página privada. La configuración para Vercel,
 las migraciones y los límites actuales del alta de clientes están en
 [la guía del servicio alojado](docs/hosted.md).
 
+## Instalación guiada para Codex
+
+Comparte con Codex: `Instala Cinev siguiendo https://cinev-indol.vercel.app/install`.
+La ruta `/install` devuelve texto plano con los pasos para configurar el MCP
+público y verificar la conexión. Usa el dominio configurado en `CINEV_PUBLIC_URL`.
+Puede ser necesario reiniciar Codex para cargar las herramientas recién añadidas.
+Las consultas públicas no requieren cuenta ni clonar este repositorio.
+
 ## Ejecutar y conectar
 
 Requiere Node.js 22 o posterior y acceso a Internet para consultar los cines.
