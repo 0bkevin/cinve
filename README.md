@@ -131,6 +131,11 @@ npm run build
 npm run smoke
 ```
 
+Para verificar también el cliente Codex instalado: `npm run test:codex-auth`.
+Esta prueba opcional usa Postgres local, cuentas sintéticas y un servidor MCP
+temporal; comprueba OAuth nativo, la recarga tras login por CLI y la cancelación.
+No conecta cuentas reales ni modifica la configuración de servidores del usuario.
+
 `npm run check` comprueba tipos de código, pruebas y scripts. `npm test` usa respuestas sintéticas y un cliente MCP real sobre stdio; no consulta Internet. Incluye casos adversariales de autenticación, salida, límites de recursos y parsers. La prueba de terminal POSIX requiere Python 3 para crear un PTY; si no está disponible, esa prueba se marca omitida. La comprobación de archivos especiales usa `mkfifo`.
 
 `npm run smoke` usa el servidor compilado y un cliente oficial para consultar las webs en vivo. Usa sesiones locales existentes para tarifas Cinex/Cines Unidos y caramelería Cinex; sin ellas informa `auth_required`. No hace compras, reservas ni login. Las cantidades de resultados cambian; el script informa los estados y falla ante errores de transporte/interpretación. Si no hay funciones futuras ese día, omite su consulta de tarifas.

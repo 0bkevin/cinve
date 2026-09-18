@@ -71,11 +71,11 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
     title: 'Estado de autenticación',
     description: 'Estado de las sesiones Cinex y Cines Unidos y siguiente paso de conexión. No devuelve datos personales ni secretos. configured no garantiza que el proveedor no haya revocado la sesión.',
     inputSchema: z.object({}).strict(),
-    outputSchema: z.object({ providers: z.array(z.object({ provider: z.enum(['cinex', 'cinesunidos']), status: z.string(), expires_at: z.string().nullable(), login_command: z.string(), remote_validity_checked: z.literal(false) })) }),
+    outputSchema: z.object({ connection: z.object({ mode: z.enum(['local', 'hosted']), client_authorized: z.boolean() }), providers: z.array(z.object({ provider: z.enum(['cinex', 'cinesunidos']), status: z.string(), expires_at: z.string().nullable(), login_command: z.string(), remote_validity_checked: z.literal(false) })) }),
     annotations: { ...annotations, openWorldHint: false },
   }, async () => {
     try {
-      const data = { providers: await service.authStatus() };
+      const data = { connection: { mode: (publicHosted || accounts ? 'hosted' : 'local') as 'hosted' | 'local', client_authorized: !publicHosted }, providers: await service.authStatus() };
       return { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data };
     } catch {
       throw new Error('No se pudo leer el estado de autenticación. Inténtalo de nuevo más tarde.');
