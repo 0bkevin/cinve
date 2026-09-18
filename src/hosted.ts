@@ -1,3 +1,4 @@
+import { serveInstall } from './install.js';
 import { createServer as nodeServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Pool } from 'pg';
@@ -59,6 +60,7 @@ export async function createHostedApp(options: {
     if (publicUrl.protocol === 'https:') res.setHeader('Strict-Transport-Security', 'max-age=31536000');
     const send = (status: number, data: unknown) => { if (!res.headersSent) { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(data)); } };
     try {
+      if (serveInstall(req, res, origin)) return;
       if (req.method === 'GET' && req.url === '/health') { send(200, { status: 'ok' }); return; }
       if (req.headers.host !== publicUrl.host || (req.headers.origin && req.headers.origin !== origin)) throw new HttpError(403, 'Origen no permitido.');
       if (req.method === 'GET' && req.url === '/internal/cleanup') {
