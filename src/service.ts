@@ -1,4 +1,4 @@
-import { DataError, folded, Item, PublicUrl, Result, today, Id } from './core.js';
+import { DataError, folded, operationItemSchema, PublicUrl, Result, today, Id } from './core.js';
 import type { DataItem, Operation, Query, QueryResult } from './core.js';
 import { HttpClient, ReadContext } from './http.js';
 import { cinepic, cinesunidos, cinex, trasnocho } from './providers.js';
@@ -29,7 +29,7 @@ export class CinemaService {
           }
         }
         // Validate inside the guarded path, before filtering/pagination can hide a bad record.
-        const item = Item.parse(candidate);
+        const item = operationItemSchema(op).parse(candidate) as DataItem;
         if (['movie', 'showtime', 'cinema'].includes(item.kind)) Id.parse(item.id);
         if (op === 'movies' && q.movie_id && item.id !== q.movie_id) continue;
         if (!q.query || folded(item.name).includes(folded(q.query))) unique.set(`${item.kind}:${item.cinema_id ?? ''}:${item.id}`, item);

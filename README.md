@@ -95,6 +95,8 @@ Cada respuesta de consulta contiene:
 - `items`: registros normalizados y seleccionados; no se expone la configuración completa de los sitios.
 - `sources`: URL, `fetched_at` y `cached` por lectura exitosa. Una página en caché conserva su fecha de obtención original.
 - `queried_at`, `timezone: America/Caracas`, `warnings`, `partial`, `total` y `next_offset`.
+- La llamada MCP marca `isError: true` cuando `status` es `unavailable`, `auth_required`, `blocked`, `rate_limited` o `error`; `available` y `empty` son resultados de negocio válidos.
+- El esquema de salida de cada herramienta fija `items[].kind` a su registro (`city`, `cinema`, `movie`, `showtime`, `ticket_price` o `concession`) y conserva como opcionales solo los campos que ese registro puede aportar.
 
 `empty` indica una lista vacía del proveedor o sin coincidencias para el filtro. No significa servicio inexistente ni precio cero. `partial: true` indica que se omitieron registros por falta de identificadores verificables. Un fallo HTTP o cambio de estructura no se convierte en una cartelera vacía. No se ofrecen datos históricos del informe como respaldo en vivo.
 
