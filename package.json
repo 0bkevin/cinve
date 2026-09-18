@@ -2,8 +2,17 @@
   "name": "cinev-mcp",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "description": "MCP de consulta de cartelera, funciones y precios de cines venezolanos",
+  "homepage": "https://cinve.kevinbravo.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/0bkevin/cinve.git"
+  },
+  "bugs": {
+    "url": "https://github.com/0bkevin/cinve/issues"
+  },
   "engines": {
     "node": ">=22"
   },

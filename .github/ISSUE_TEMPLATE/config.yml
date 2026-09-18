@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Reportar una vulnerabilidad
+    url: https://github.com/0bkevin/cinve/security/advisories/new
+    about: Usa el canal privado y no publiques información sensible en un issue.
+  - name: Guía de soporte
+    url: https://github.com/0bkevin/cinve/blob/main/SUPPORT.md
+    about: Revisa qué información incluir y dónde pedir ayuda.
