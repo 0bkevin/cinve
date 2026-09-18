@@ -1,0 +1,42 @@
+name: Proponer una mejora
+description: Sugiere una mejora pequeña y alineada con el alcance de Cinve.
+title: "[Propuesta]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Explica primero el problema. Las propuestas grandes deben discutirse antes de comenzar una implementación.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Comprobaciones previas
+      options:
+        - label: Busqué propuestas similares en los issues.
+          required: true
+        - label: La propuesta mantiene el alcance de consulta de cines venezolanos.
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problema
+      description: ¿Qué necesidad no está cubierta actualmente?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Solución propuesta
+      description: Describe el comportamiento, no solo la implementación.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternativas consideradas
+      description: Opcional. ¿Hay una solución más pequeña o un flujo existente?

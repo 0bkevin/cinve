@@ -1,0 +1,73 @@
+name: Reportar un error
+description: Informa un comportamiento incorrecto o una consulta que falla.
+title: "[Error]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Gracias por ayudar a mejorar Cinve. No incluyas contraseñas, cookies, tokens ni datos personales.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Comprobaciones previas
+      options:
+        - label: Busqué en los issues y no encontré el mismo problema.
+          required: true
+        - label: Eliminé cualquier credencial o dato personal del reporte.
+          required: true
+
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Proveedor
+      options:
+        - Cinepic
+        - Cines Unidos
+        - Cinex
+        - Trasnocho
+        - Servicio MCP o autenticación
+        - No aplica / no lo sé
+    validations:
+      required: true
+
+  - type: input
+    id: location
+    attributes:
+      label: Ciudad o sede
+      description: Déjalo vacío si no aplica. No incluyas datos de tu cuenta.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Qué ocurrió
+      description: Explica el resultado observado y el que esperabas.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Cómo reproducirlo
+      description: Incluye la consulta, fecha y pasos mínimos.
+      placeholder: |
+        1. Consulté…
+        2. Cinve respondió…
+        3. Esperaba…
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Versión o commit
+      placeholder: main, 0.1.0 o hash del commit
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs o contexto adicional
+      description: Adjunta solo información anonimizada.
+      render: shell
