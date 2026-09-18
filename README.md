@@ -85,7 +85,7 @@ Ejemplo de flujo para el agente:
 4. Pasar el `id` de la función como `session_id`, y su `movie_id`, a `get_ticket_prices`.
 5. Para caramelería: `get_concessions({"provider":"cinesunidos","cinema_id":"1005"})`. Obtener primero la sede con `list_cinemas`; el ejemplo es Sambil Caracas.
 
-No mezclar IDs entre proveedores ni entre las dos sedes Cinepic. En Cinex, `movie_id` es el slug de la ficha e `id` de la sede es su código de consulta.
+No mezclar IDs entre proveedores ni entre las dos sedes Cinepic. En Cinex, `movie_id` es el slug de la ficha. En Cinex, Cines Unidos y Cinepic, las sedes con `code_status=verified` devuelven el código de consulta en `id` y `cinema_id` (puede ser numérico). Las sedes sin código conservan nombre, ciudad y enlace con `code_status=unverified`, sin `cinema_id`; su `id=directory-*` identifica únicamente la entrada y no sirve para consultar funciones, tarifas ni caramelería.
 
 ## Datos y cobertura
 
@@ -102,12 +102,16 @@ Cada respuesta de consulta contiene:
 
 | Proveedor | Implementado | Límite actual |
 |---|---|---|
-| Cinepic | Dos sedes, películas/funciones por API, tarifas desde datos Next.js, consulta de caramelería por API de sede | Se verificó en el JavaScript público que `precio` está en bolívares. Se expone VES y USD calculado con la tasa del proveedor (`basis: provider_conversion`); no es una cotización BCV independiente ni incluye necesariamente cargos finales. Caramelería vacía en las muestras; un catálogo nuevo se marca sin verificar. |
-| Cines Unidos | Ciudades por API; sedes, películas y funciones por datos Next.js; caramelería por API pública; tarifas USD/VES por API autenticada | Requiere login local para tarifas. Se conservan restricciones de edad/canje y estado de venta; no se confirma el total de una compra. |
-| Cinex | Ciudades, sedes consultables, catálogo general, funciones por película; tarifas y caramelería por HTML autenticado | Algunas sedes no exponen un código verificable; se omiten con `partial`. Tarifas por función incluyen desglose boleto/otros cargos en VES. Caramelería incluye combos con `options_required`; no se interpretan cantidades máximas como stock. |
+| Cinepic | Dos sedes configuradas, películas/funciones por API, tarifas desde datos Next.js, consulta de caramelería por API de sede | Una falla de verificación de sede conserva su nombre y enlace con `code_status=unverified` y `partial`. No descubre sedes nuevas automáticamente. Se verificó en el JavaScript público que `precio` está en bolívares. Se expone VES y USD calculado con la tasa del proveedor (`basis: provider_conversion`); no es una cotización BCV independiente ni incluye necesariamente cargos finales. Caramelería vacía en las muestras; un catálogo nuevo se marca sin verificar. |
+| Cines Unidos | Ciudades por API; sedes, películas y funciones por datos Next.js; caramelería por API pública; tarifas USD/VES por API autenticada | Las sedes reconocibles sin código válido o con código contradictorio se conservan con `partial`; se procesan todos los bloques de directorio de la página. Requiere login local para tarifas. Se conservan restricciones de edad/canje y estado de venta; no se confirma el total de una compra. |
+| Cinex | Ciudades, sedes consultables, catálogo general, funciones por película; tarifas y caramelería por HTML autenticado | Las sedes sin código verificable se conservan con `partial` y `code_status=unverified`. `directory_status=not_listed` indica ausencia en el directorio recibido, no cierre. Tarifas por función incluyen desglose boleto/otros cargos en VES. Caramelería incluye combos con `options_required`; no se interpretan cantidades máximas como stock. |
 | Trasnocho | Comprobación de acceso al sitio | Devolvió 403. No hay parser validado de programación ni precios; si cambia el bloqueo, devuelve `unavailable` hasta implementarlo. |
 
+En Cines Unidos, si el catálogo no reconoce una ciudad escrita sin tilde, se reintenta con su nombre exacto del registro oficial. Un directorio vacío reconocido es distinto de un directorio defectuoso. En Cinepic, las películas con funciones pero sin ficha se conservan como referencias sin título confirmado y se marca `partial`.
+
 Los formatos/salas/idiomas solo se devuelven cuando se reconocen en la respuesta. Cinepic `no_subtitulada` no se convierte automáticamente a un idioma. Las funciones marcadas como trasnoche conservan fecha comercial y hora, pero omiten `starts_at` hasta verificar el día calendario. Los precios incluyen `final_total_verified: false`.
+
+El listado Cinex valida códigos de imágenes contra nombre y `siglas` de la API oficial; si no los confirma, busca códigos en funciones de la página individual. Conserva hasta 100 páginas conocidas en memoria por instancia del servicio (no persisten tras reiniciar). Metrópolis Barquisimeto tiene una URL oficial de descubrimiento predefinida y requiere confirmar el nombre en su página antes de incorporarse por primera vez; no se le asigna un código fijo. Las sedes conocidas ausentes del directorio se marcan pendientes de verificar. Esto no certifica apertura, cierre ni disponibilidad de venta.
 
 Cinex puede devolver importes con más de dos decimales; se conserva su valor y los componentes visibles redondeados de la página. No se calcula automáticamente USD para Cinex. Su catálogo incluye productos y grupos de opciones, no un inventario completo de variantes. Los precios publicados de combos pueden depender de la selección final.
 

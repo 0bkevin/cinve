@@ -53,11 +53,14 @@ test('operation schemas strip fields belonging to another operation and allow ov
   assert.equal(overnight.starts_at, undefined);
 });
 
-test('service turns a malformed reusable catalog ID into a structured error before pagination', async () => {
+test('service preserves a named cinema with malformed code as a nonqueryable directory entry', async () => {
   const http = new HttpClient(async () => new Response(page({ theaters: [{ id: '../secret', name: 'Cinema' }] })), 15000, new EmptySessionStore());
   const result = await new CinemaService(http).query('cinemas', { provider: 'cinesunidos', city: 'Caracas' });
-  assert.equal(result.status, 'error');
-  assert.deepEqual(result.items, []);
-  assert.equal(result.total, 0);
-  assert.equal(result.warnings[0], 'Falló la interpretación de la respuesta del proveedor.');
+  assert.equal(result.status, 'available');
+  assert.equal(result.partial, true);
+  assert.equal(result.items[0].code_status, 'unverified');
+  assert.equal(result.items[0].cinema_id, undefined);
+  assert.match(result.items[0].id, /^directory-/);
+  assert.equal(result.total, 1);
+  assert.match(result.warnings[0], /sede conservada/);
 });

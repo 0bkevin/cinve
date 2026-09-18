@@ -1,8 +1,10 @@
+import { parseCinemaDirectory } from './cinema-directory.js';
+import { CinexCinemaCatalog } from './cinex-cinemas.js';
 import { load } from 'cheerio';
-import { DataError, DateInput, folded, number, requireArg, text, today } from './core.js';
+import { DataError, DateInput, folded, Id, number, requireArg, text, today } from './core.js';
 import type { DataItem, Operation, Query } from './core.js';
 import { ReadContext } from './http.js';
-import { decodeLabel, findField, flight, object, objects, requiredText, rows } from './parsers.js';
+import { decodeLabel, findField, pageFields, flight, object, objects, requiredText, rows } from './parsers.js';
 import type { Obj } from './parsers.js';
 import { parseCinesUnidosPrices, parseCinexPrices, parseCinexConcessions } from './authenticated-parsers.js';
 
@@ -37,19 +39,28 @@ async function cpBuy(q: Query, c: ReadContext) {
 }
 export async function cinepic(op: Operation, q: Query, c: ReadContext): Promise<DataItem[]> {
   if (op === 'cities') {
-    await c.get(`${CP['123300'].host}/es-AR`, 3600000);
+    await cinepic('cinemas', { ...q, city: undefined }, c);
     return [{ kind: 'city', id: 'Caracas', name: 'Caracas' }];
   }
   if (op === 'cinemas') {
     if (q.city && folded(q.city) !== 'caracas') return [];
+    c.warnings.push('Cobertura Cinepic: dos sedes configuradas, Candelaria y VVIP; no hay descubrimiento automático de nuevas sedes.');
     return Promise.all(Object.entries(CP).map(async ([id, site]) => {
       const url = `${site.host}/es-AR`;
-      const records = flight(await c.get(url, 3600000));
-      // The same public configuration is nested in page props; select fields only.
-      const configs = [...objects(records)].filter(r => text(r.idUltracine) === id && text(r.nombre));
-      const config = configs[0];
-      if (!config) throw new DataError('error', 'Cambió la configuración pública de sede Cinepic.');
-      return { kind: 'cinema' as const, id, name: text(config.nombre), city: 'Caracas', address: text(config.direccion), url };
+      try {
+        const records = flight(await c.get(url, 3600000));
+        const configs = [...objects(records)].filter(r => text(r.idUltracine) === id && text(r.nombre));
+        const config = configs[0];
+        if (!config || text(config.nombre).length > 512 || configs.some(r => text(r.nombre) !== text(config.nombre))) {
+          throw new DataError('error', 'Configuración pública de sede ausente o contradictoria.');
+        }
+        return { kind: 'cinema' as const, id, cinema_id: id, code_status: 'verified' as const,
+          name: text(config.nombre), city: 'Caracas', address: text(config.direccion), url };
+      } catch (error) {
+        c.partial = true;
+        c.warnings.push(`${site.name}: no se pudo verificar la configuración actual; se conserva la sede conocida y su enlace. Esto no indica cierre. ${error instanceof DataError ? error.message : ''}`);
+        return { kind: 'cinema' as const, id: `directory-cinepic-${id}`, code_status: 'unverified' as const, name: site.name, city: 'Caracas', url };
+      }
     }));
   }
   if (op === 'concessions') {
@@ -88,8 +99,15 @@ export async function cinepic(op: Operation, q: Query, c: ReadContext): Promise<
   const movies = rows(data.datos, 'data.datos'), sessions = rows(data.funciones, 'data.funciones');
   const names = new Map(movies.map(r => [text(r.peliculas_codigo), r]));
   if (op === 'movies') {
-    const scheduled = new Set(sessions.map(r => text(r.codPelicula)));
-    return movies.filter(r => scheduled.has(text(r.peliculas_codigo))).map(r => ({ ...movieCP(r, site.host), cinema_id: q.cinema_id }));
+    const scheduled = new Set(sessions.map(r => Id.parse(requiredText(r, 'codPelicula'))));
+    return [...scheduled].map(mid => {
+      const movie = names.get(mid);
+      if (movie && text(movie.peliculas_nombre)) return { ...movieCP(movie, site.host), cinema_id: q.cinema_id };
+      c.partial = true;
+      c.warnings.push(`Película ${mid}: hay funciones pero no se recibió una ficha con título; se conserva la referencia.`);
+      return { kind: 'movie', id: mid, name: `Película ${mid}`, cinema_id: q.cinema_id,
+        url: `${site.host}/es-AR/programacion/${encodeURIComponent(mid)}` };
+    });
   }
   return sessions.filter(r => !q.movie_id || text(r.codPelicula) === q.movie_id).map(r => {
     const id = requiredText(r, '_id'), mid = requiredText(r, 'codPelicula'), movie = names.get(mid);
@@ -97,7 +115,7 @@ export async function cinepic(op: Operation, q: Query, c: ReadContext): Promise<
     if (!/^\d{2}:\d{2}$/.test(time) || Number(time.slice(0, 2)) > 23 || Number(time.slice(3)) > 59) throw new DataError('error', 'Horario Cinepic inválido.');
     const overnight = text(r.trasnoche) !== '0';
     if (overnight) c.warnings.push(`Función ${id}: trasnoche; fecha comercial recibida, fecha calendario sin confirmar.`);
-    if (!movie) c.warnings.push(`Función ${id}: no se recibió ficha de la película ${mid}.`);
+    if (!movie || !text(movie.peliculas_nombre)) { c.partial = true; c.warnings.push(`Función ${id}: no se recibió ficha con título de la película ${mid}.`); }
     return { kind: 'showtime', id, name: text(movie?.peliculas_nombre) || `Película ${mid}`, cinema_id: q.cinema_id, movie_id: mid,
       date, time, starts_at: overnight ? undefined : `${date}T${time}:00-04:00`,
       format: text(r.formato), language: text(r.subtitulada) === '1' ? 'subtitulada' : 'no_subtitulada',
@@ -133,13 +151,25 @@ export async function cinesunidos(op: Operation, q: Query, c: ReadContext): Prom
         category: text(r.itemClassDescription), stock: number(r.itemStock), prices, final_total_verified: false, image_url: text(r.itemImageUrl), url: `${CU}/carameleria` };
     });
   }
-  const city = requireArg(q, 'city');
-  const url = `${CU}/${op === 'cinemas' ? 'cines' : 'cartelera'}?${new URLSearchParams({ city })}`;
-  const records = flight(await c.get(url, op === 'cinemas' ? 3600000 : 120000));
-  if (op === 'cinemas') return rows(findField(records, 'theaters'), 'theaters').map(r => ({
-    kind: 'cinema', id: requiredText(r, 'id'), name: requiredText(r, 'name'), city, address: text(r.address), url,
-  }));
-  const movies = rows(findField(records, 'movies'), 'movies');
+  let city = requireArg(q, 'city');
+  const key = op === 'cinemas' ? 'theaters' : 'movies';
+  let url = `${CU}/${op === 'cinemas' ? 'cines' : 'cartelera'}?${new URLSearchParams({ city })}`;
+  let fields = pageFields(flight(await c.get(url, op === 'cinemas' ? 3600000 : 120000)), key);
+  if (!fields.length) {
+    // The provider's city filter is accent-sensitive. Retry only with a name
+    // actually returned by its official city registry, never guess a city.
+    const cities = await cinesunidos('cities', q, c);
+    const canonical = cities.find(r => folded(r.name) === folded(city))?.name;
+    if (!canonical) throw new DataError('unavailable', 'Ciudad no reconocida por Cines Unidos; consulta list_cities.');
+    if (canonical !== city) {
+      city = canonical;
+      url = `${CU}/${op === 'cinemas' ? 'cines' : 'cartelera'}?${new URLSearchParams({ city })}`;
+      fields = pageFields(flight(await c.get(url, op === 'cinemas' ? 3600000 : 120000)), key);
+    }
+  }
+  if (!fields.length) throw new DataError('error', `No se reconoció el catálogo Cines Unidos: ${key}.`);
+  if (op === 'cinemas') return parseCinemaDirectory(fields, city, url, c);
+  const movies = fields.flatMap(field => rows(field, 'movies'));
   const items: DataItem[] = [];
   for (const m of movies) {
     const mid = requiredText(m, 'vistaId');
@@ -197,36 +227,12 @@ export function parseCinexShowtimes(html: string, movieId: string, date: string)
   });
   return [...items.values()];
 }
-export async function cinex(op: Operation, q: Query, c: ReadContext): Promise<DataItem[]> {
+export async function cinex(op: Operation, q: Query, c: ReadContext, catalog = new CinexCinemaCatalog()): Promise<DataItem[]> {
   if (op === 'cities') {
     const data = object(await c.json(cxSource('getcinemacitieslist')));
     return rows(data.data, 'cities.data').map(r => ({ kind: 'city', id: decodeLabel(r.cinema_city), name: decodeLabel(r.cinema_city) }));
   }
-  if (op === 'cinemas') {
-    const url = `${CX}/cines.html`, $ = load(await c.get(url, 3600000));
-    const tasks = $('a[href^="cinex-"]').toArray().map(async e => {
-      const href = $(e).attr('href') ?? '', label = decodeLabel($(e).attr('title'));
-      if (!/^cinex-[A-Za-z0-9_-]+\.html$/.test(href)) { c.partial = true; c.warnings.push('Enlace de sede Cinex no reconocido; se omitió sin seguirlo.'); return undefined; }
-      const city = label.split(',').slice(1).join(',').trim();
-      if (q.city && folded(city) !== folded(q.city)) return undefined;
-      // Public image names encode the same short cinema code used by sessions.
-      const image = $(e).find('img').attr('src') ?? '';
-      let code = image.match(/\/cinemas\/(?:\d+x\d+x|x)?([a-z]{3})\.(?:jpg|png|webp)/i)?.[1]?.toUpperCase();
-      if (!code) {
-        try {
-          const detail = await c.get(`${CX}/${href}`, 3600000);
-          const codes = new Set([...detail.matchAll(/checkLogin\('[^']+','([^']+)'\)/g)].map(m => m[1]));
-          if (codes.size === 1) code = [...codes][0];
-        } catch (error) {
-          c.warnings.push(error instanceof DataError ? error.message : `No se pudo leer ${label}.`);
-        }
-      }
-      if (!code) { c.partial = true; c.warnings.push(`Sin código verificable para ${label || href}; sede omitida.`); return undefined; }
-      return { kind: 'cinema' as const, id: code, name: decodeLabel($(e).find('h3').text()) || label, city, url: `${CX}/${href}` };
-    });
-    if (!$('a[href^="cinex-"]').length) throw new DataError('error', 'No se reconoció el listado de cines Cinex.');
-    return (await Promise.all(tasks)).filter((r): r is NonNullable<typeof r> => r !== undefined);
-  }
+  if (op === 'cinemas') return catalog.list(q, c);
   if (op === 'prices') {
     if (q.session_id) {
       if ((await c.authenticated('cinex', `${CX}/checklogin.php`)).trim() !== 'on') throw new DataError('auth_required', 'La sesión Cinex expiró. Ejecuta npm run login -- cinex en una terminal local.');
