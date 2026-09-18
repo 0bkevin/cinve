@@ -264,14 +264,17 @@ test('anonymous MCP client authorizes in the browser, connects a cinema, refresh
 async function approve(origin: string, authorization: URL, decision = 'approve') {
   const page = await fetch(authorization);
   assert.equal(page.status, 200);
+  assert.equal(page.headers.get('referrer-policy'), 'same-origin');
   assert.match(page.headers.get('content-security-policy')!, /form-action 'self'/);
   const html = await page.text();
+  assert.ok(page.headers.get('content-security-policy')!.includes(`form-action 'self' ${new URL(authorization.searchParams.get('redirect_uri')!).origin};`));
   const request_id = html.match(/name="request_id" value="([^"]+)"/)![1];
   const csrf = html.match(/name="csrf" value="([^"]+)"/)![1];
   const cookie = page.headers.get('set-cookie')!.split(';')[0];
   const result = await fetch(origin + '/oauth/authorize', { method: 'POST', redirect: 'manual',
     headers: { Origin: origin, Cookie: cookie }, body: new URLSearchParams({ request_id, csrf, decision }) });
   assert.equal(result.status, 303);
+  assert.equal(result.headers.get('referrer-policy'), 'no-referrer');
   return new URL(result.headers.get('location')!);
 }
 async function register(origin: string) {
@@ -311,6 +314,11 @@ test('OAuth rejects redirect injection, missing PKCE, wrong resource, CSRF, and 
   const body = new URLSearchParams({ request_id, csrf, decision: 'approve' });
   assert.equal((await fetch(f.origin + '/oauth/authorize', { method: 'POST', headers: { Origin: f.origin }, body })).status, 403);
   assert.equal((await fetch(f.origin + '/oauth/authorize', { method: 'POST', headers: { Origin: 'https://evil.example', Cookie: page.headers.get('set-cookie')!.split(';')[0] }, body })).status, 403);
+  for (const origin of [undefined, 'null']) {
+    assert.equal((await fetch(f.origin + '/oauth/authorize', { method: 'POST', headers: {
+      Cookie: page.headers.get('set-cookie')!.split(';')[0], ...(origin ? { Origin: origin } : {}),
+    }, body })).status, 403);
+  }
   const denied = await approve(f.origin, a.url, 'deny');
   assert.equal(denied.searchParams.get('error'), 'access_denied'); assert.equal(denied.searchParams.get('state'), 'state123');
   assert.equal(denied.searchParams.get('code'), null);
