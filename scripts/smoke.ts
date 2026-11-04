@@ -81,9 +81,6 @@ try {
   await authenticatedTickets('cinex', cx);
   const candy = await call('get_concessions', { provider: 'cinex', cinema_id: 'TLN', limit: 2 }, requireAuth ? ['available'] : ['available', 'auth_required']);
   if (requireAuth && candy.status !== 'available') failed = true;
-  // Trasnocho currently refuses automated clients; the server must say so
-  // explicitly rather than report an empty programme.
-  await call('list_movies', { provider: 'trasnocho' }, ['blocked', 'unavailable']);
   console.log(JSON.stringify({ verification: failed ? 'failed' : 'passed', scope: requireAuth ? 'public_and_authenticated' : 'public_with_auth_limitations', date: day }));
 } finally { await client.close(); }
 if (failed) process.exitCode = 1;

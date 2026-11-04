@@ -56,13 +56,11 @@ test('mismatched function/movie cannot return another ticket price', async () =>
   const result = await service().query('prices', { provider: 'cinepic', cinema_id: '123300', session_id: 'other', movie_id: 'p1' });
   assert.equal(result.status, 'unavailable'); assert.deepEqual(result.items, []);
 });
-test('empty candy is distinct from auth-required and blocked providers', async () => {
+test('empty candy is distinct from auth-required providers', async () => {
   const s = service();
   const empty = await s.query('concessions', { provider: 'cinepic', cinema_id: '123300' });
   const auth = await s.query('prices', { provider: 'cinesunidos', cinema_id: '1002', session_id: 's1' });
-  const blocked = await s.query('movies', { provider: 'trasnocho' });
-  assert.equal(empty.status, 'empty'); assert.equal(auth.status, 'auth_required'); assert.equal(blocked.status, 'blocked');
-  assert.equal(blocked.sources.length, 0);
+  assert.equal(empty.status, 'empty'); assert.equal(auth.status, 'auth_required');
   assert.equal(empty.sources.length, 1);
   assert.equal(empty.sources[0].url, 'https://api.cinexo.com.ar/api/complejo/123300/candy');
 });

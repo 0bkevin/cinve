@@ -12,7 +12,7 @@ asientos publicada por distintos cines venezolanos.
 
 > **Cinve es un proyecto independiente, gratuito y sin fines de lucro.** No está
 > afiliado, asociado, patrocinado ni respaldado por Cinex, Cines Unidos,
-> Cinepic, Trasnocho ni por ninguna otra cadena de cines. Sus responsables no
+> Cinepic ni por ninguna otra cadena de cines. Sus responsables no
 > reciben pagos, comisiones, contraprestaciones ni beneficios económicos de los
 > cines o proveedores consultados.
 
@@ -25,9 +25,7 @@ cambiar antes de completar una compra.
 - Ciudades, sedes, películas y funciones.
 - Precios de entradas y caramelería cuando el proveedor los publica.
 - Mapas de asientos de Cinex, Cines Unidos y Cinepic.
-- Datos de Cinepic, Cines Unidos y Cinex. Trasnocho tiene cobertura limitada:
-  su sitio exige un desafío anti-bots que Cinve no evade, y no publica otra
-  fuente de programación consultable.
+- Datos de Cinepic, Cines Unidos y Cinex.
 
 Algunas consultas de Cinex y Cines Unidos requieren que conectes tu cuenta del
 cine. Las credenciales se introducen únicamente en el formulario privado; no se

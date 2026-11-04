@@ -492,7 +492,6 @@ test('public pages use the configured origin and serve local fonts under the aut
   const html = await home.text();
   assert.ok(html.includes(`Instala Cinve siguiendo ${f.origin}/install`));
   assert.ok(html.includes('lang="es"'));
-  assert.ok(!html.includes('Trasnocho Cultural'));
   assert.ok(html.includes(`property="og:image" content="${f.origin}/og.png?v=2"`));
   assert.ok(html.includes('name="twitter:card" content="summary_large_image"'));
   const social = await fetch(f.origin + '/og.png?v=2');

@@ -468,7 +468,3 @@ export async function cinex(op: Operation, q: Query, c: ReadContext, catalog = n
   return parseCinexCinemaShowtimes(page.body, movies, cinemaId, date, c, venue.url);
 }
 
-export async function trasnocho(_op: Operation, _q: Query, c: ReadContext): Promise<DataItem[]> {
-  await c.get('https://www.trasnochocultural.com/cine/');
-  throw new DataError('unavailable', 'El sitio es accesible, pero aún no hay un parser de programación validado. No se usan fichas indexadas antiguas como datos actuales.');
-}

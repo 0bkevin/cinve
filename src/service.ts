@@ -3,7 +3,7 @@ import { CinexCinemaCatalog } from './cinex-cinemas.js';
 import { DataError, folded, operationItemSchema, PublicUrl, Result, today, Id } from './core.js';
 import type { DataItem, Operation, Query, QueryResult } from './core.js';
 import { HttpClient, ReadContext } from './http.js';
-import { cinepic, cinesunidos, cinex, trasnocho } from './providers.js';
+import { cinepic, cinesunidos, cinex } from './providers.js';
 
 const resultWarningLimit = 64;
 const resultWarningCharacters = 8192;
@@ -41,7 +41,6 @@ export const capabilities = {
   cinepic: { seats: 'public_page_data_ascii', cities: 'public', cinemas: 'public', movies: 'public_api', showtimes: 'public_api', prices: 'page_data_ves_and_derived_usd', concessions: 'public_api_empty_in_samples' },
   cinesunidos: { seats: 'authenticated_api_ascii', cities: 'public_api', cinemas: 'page_data', movies: 'page_data', showtimes: 'page_data', prices: 'authenticated_api', concessions: 'public_api' },
   cinex: { seats: 'authenticated_html_ascii', cities: 'public_api', cinemas: 'html', movies: 'html_general_catalog', showtimes: 'html_requires_cinema_or_movie', prices: 'authenticated_html_requires_session', concessions: 'authenticated_html' },
-  trasnocho: { seats: 'not_implemented', cities: 'blocked_bot_challenge', cinemas: 'blocked_bot_challenge', movies: 'blocked_bot_challenge', showtimes: 'blocked_bot_challenge', prices: 'blocked_bot_challenge', concessions: 'blocked_bot_challenge' },
 };
 export class CinemaService {
   constructor(private http = new HttpClient(), private cinexCatalog = new CinexCinemaCatalog()) {}
@@ -55,7 +54,7 @@ export class CinemaService {
     try {
       if (q.cinema_id?.startsWith('directory-')) throw new DataError('unavailable', 'Esta sede no tiene código de consulta verificado. Consulta el enlace oficial devuelto por list_cinemas; el ID directory- solo identifica la sede conocida.');
       const data = q.provider === 'cinex' ? await cinex(op, q, c, this.cinexCatalog)
-        : await ({ cinepic, cinesunidos, trasnocho })[q.provider](op, q, c);
+        : await ({ cinepic, cinesunidos })[q.provider](op, q, c);
       const unique = new Map<string, DataItem>();
       // A function ID drives price and seat lookups. If the provider reports the
       // same ID with a different film, date, time or room, neither copy is
