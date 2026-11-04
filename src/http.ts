@@ -243,9 +243,19 @@ export class HttpClient {
   }
   private async read(url: string, origin: string, authorize?: (target: string) => Promise<Record<string, string>>, refresh = false,
     onPublicRedirect?: (alias: string, canonical: string) => void): Promise<Page> {
+    // AbortSignal.timeout() uses an unreferenced timer: when the only pending
+    // work is a stalled promise (a hung transport, session store or body
+    // reader), Node may exit or drop the task before the deadline fires. A
+    // referenced timer, always cleared, makes the deadline deterministic.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(new DOMException('The operation timed out.', 'TimeoutError')), this.timeout);
+    try { return await this.readUntil(controller.signal, url, origin, authorize, refresh, onPublicRedirect); }
+    finally { clearTimeout(timer); }
+  }
+  private async readUntil(signal: AbortSignal, url: string, origin: string, authorize?: (target: string) => Promise<Record<string, string>>, refresh = false,
+    onPublicRedirect?: (alias: string, canonical: string) => void): Promise<Page> {
     const requested = url;
     const deadline = Date.now() + this.timeout;
-    const signal = AbortSignal.timeout(this.timeout);
     const release = await this.acquire(origin, signal, deadline);
     try {
       // Reload after queue admission: logout/account changes affect requests not yet sent.

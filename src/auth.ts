@@ -106,34 +106,39 @@ export class LoginHttp {
   }
   async read(value: string, init: RequestInit = {}): Promise<{ url: string; body: string }> {
     let url = this.allowed(value).href, method = init.method ?? 'GET', body = init.body;
-    const signal = AbortSignal.timeout(Math.max(1, Math.min(25000, this.deadline - Date.now())));
-    for (let step = 0; step < 12; step++) {
-      signal.throwIfAborted();
-      const headers = new Headers(init.headers);
-      headers.delete('Cookie'); headers.delete('Authorization');
-      headers.set('User-Agent', 'cinev-mcp/0.1');
-      const cookie = await this.jar.getCookieString(url);
-      if (cookie) headers.set('Cookie', cookie);
-      const r = await this.request(url, { method, body, headers, redirect: 'manual', signal });
-      for (const c of r.headers.getSetCookie()) await this.jar.setCookie(c, url);
-      if ([301, 302, 303, 307, 308].includes(r.status)) {
-        const location = r.headers.get('location'); await r.body?.cancel();
-        if (!location) throw new Error('Redirección de login incompleta.');
-        const next = this.allowed(new URL(location, url).href);
-        if (r.status === 303 || ((r.status === 301 || r.status === 302) && method === 'POST')) { method = 'GET'; body = undefined; }
-        if (body && next.origin !== new URL(url).origin) throw new Error('No se reenvían credenciales entre orígenes.');
-        url = next.href; continue;
+    // Referenced, always-cleared timer: see HttpClient.read for why
+    // AbortSignal.timeout() alone is not a reliable deadline.
+    const controller = new AbortController(), signal = controller.signal;
+    const timer = setTimeout(() => controller.abort(new DOMException('The operation timed out.', 'TimeoutError')), Math.max(1, Math.min(25000, this.deadline - Date.now())));
+    try {
+      for (let step = 0; step < 12; step++) {
+        signal.throwIfAborted();
+        const headers = new Headers(init.headers);
+        headers.delete('Cookie'); headers.delete('Authorization');
+        headers.set('User-Agent', 'cinev-mcp/0.1');
+        const cookie = await this.jar.getCookieString(url);
+        if (cookie) headers.set('Cookie', cookie);
+        const r = await this.request(url, { method, body, headers, redirect: 'manual', signal });
+        for (const c of r.headers.getSetCookie()) await this.jar.setCookie(c, url);
+        if ([301, 302, 303, 307, 308].includes(r.status)) {
+          const location = r.headers.get('location'); await r.body?.cancel();
+          if (!location) throw new Error('Redirección de login incompleta.');
+          const next = this.allowed(new URL(location, url).href);
+          if (r.status === 303 || ((r.status === 301 || r.status === 302) && method === 'POST')) { method = 'GET'; body = undefined; }
+          if (body && next.origin !== new URL(url).origin) throw new Error('No se reenvían credenciales entre orígenes.');
+          url = next.href; continue;
+        }
+        if (!r.ok) { await r.body?.cancel(); throw new LoginError(`El login respondió HTTP ${r.status}.`); }
+        const reader = r.body?.getReader(); if (!reader) throw new Error('Respuesta de login vacía.');
+        const chunks: Uint8Array[] = []; let size = 0;
+        while (true) { const { done, value } = await reader.read(); if (done) break;
+          size += value.length; if (size > 4 * 1024 * 1024) { await reader.cancel(); throw new Error('Respuesta de login demasiado grande.'); }
+          chunks.push(value);
+        }
+        return { url, body: Buffer.concat(chunks).toString('utf8') };
       }
-      if (!r.ok) { await r.body?.cancel(); throw new LoginError(`El login respondió HTTP ${r.status}.`); }
-      const reader = r.body?.getReader(); if (!reader) throw new Error('Respuesta de login vacía.');
-      const chunks: Uint8Array[] = []; let size = 0;
-      while (true) { const { done, value } = await reader.read(); if (done) break;
-        size += value.length; if (size > 4 * 1024 * 1024) { await reader.cancel(); throw new Error('Respuesta de login demasiado grande.'); }
-        chunks.push(value);
-      }
-      return { url, body: Buffer.concat(chunks).toString('utf8') };
-    }
-    throw new Error('Demasiadas redirecciones de login.');
+      throw new Error('Demasiadas redirecciones de login.');
+    } finally { clearTimeout(timer); }
   }
 }
 

@@ -582,3 +582,12 @@ test('an unfinished MCP body is cut off at its deadline and releases its concurr
   const r = await anonymous.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos' } });
   assert.equal((r.structuredContent as { status: string }).status, 'available', 'slots held by stalled bodies were released');
 });
+
+test('daily cleanup still completes on a deployment that precedes migration 003', async t => {
+  const f = await fixture(t);
+  await f.pool.query('ALTER TABLE cinev_oauth_apps DROP COLUMN last_used_at');
+  await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES('stale',now()-interval '1 minute',1)");
+  await f.links.cleanup();
+  assert.equal((await f.pool.query("SELECT count(*) FROM cinev_budgets WHERE key_hash='stale'")).rows[0].count, '0');
+  await f.pool.query(await migrationSql());
+});
