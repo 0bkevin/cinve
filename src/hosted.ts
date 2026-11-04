@@ -21,11 +21,12 @@ import { EncryptedSessionStore, HostedUsers, digest } from './hosted-store.js';
 import { loginPage, loginScript } from './auth-web.js';
 
 class AnonymousSessions extends SessionStore {
+  constructor(private readonly origin: string) { super(); }
   override async read(): Promise<AuthSession | undefined> { return undefined; }
   override async save(): Promise<void> { throw new Error("Anonymous sessions cannot persist credentials."); }
   override async remove(): Promise<void> { throw new Error("Anonymous sessions cannot modify credentials."); }
   override async status(p: AuthProviderId) {
-    return { ...await super.status(p), status: 'client_authorization_required', login_command: hostedAuthInstructions };
+    return { ...await super.status(p), status: 'client_authorization_required', login_command: hostedAuthInstructions(this.origin) };
   }
 }
 
@@ -38,16 +39,31 @@ class HostedService extends CinemaService {
   }
 }
 class HttpError extends Error { constructor(readonly status: number, message: string) { super(message); } }
-async function body(req: IncomingMessage, max: number): Promise<unknown> {
+async function body(req: IncomingMessage, max: number, deadlineMs = 10000): Promise<unknown> {
   if (req.headers['content-type']?.split(';')[0].trim() !== 'application/json') throw new HttpError(415, 'Se requiere JSON.');
   if (Number(req.headers['content-length'] ?? 0) > max) throw new HttpError(413, 'Solicitud demasiado grande.');
   const chunks: Buffer[] = []; let size = 0;
-  for await (const chunk of req) { size += chunk.length; if (size > max) throw new HttpError(413, 'Solicitud demasiado grande.'); chunks.push(Buffer.from(chunk)); }
+  // A slow sender must not hold a request slot indefinitely. On Vercel the
+  // node:http server timeouts do not apply to the exported handler.
+  const timer = setTimeout(() => req.destroy(new HttpError(408, 'La solicitud tardó demasiado.')), deadlineMs);
+  try {
+    for await (const chunk of req) { size += chunk.length; if (size > max) throw new HttpError(413, 'Solicitud demasiado grande.'); chunks.push(Buffer.from(chunk)); }
+  } finally { clearTimeout(timer); }
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new HttpError(400, 'Solicitud no válida.'); }
+}
+/** Tool calls in a JSON-RPC message (single or batch) that ask to bypass the public cache. */
+function refreshCalls(message: unknown): number {
+  const calls = Array.isArray(message) ? message : [message];
+  return calls.filter(m => {
+    if (!m || typeof m !== 'object') return false;
+    const { method, params } = m as { method?: unknown; params?: unknown };
+    const args = params && typeof params === 'object' ? (params as { arguments?: unknown }).arguments : undefined;
+    return method === 'tools/call' && !!args && typeof args === 'object' && (args as { refresh?: unknown }).refresh === true;
+  }).length;
 }
 export async function createHostedApp(options: {
   publicUrl: string; pool: Pool; key: Buffer; allowLocal?: boolean; trustedVercelProxy?: boolean; cleanupSecret?: string;
-  authenticate?: typeof login; request?: typeof fetch;
+  authenticate?: typeof login; request?: typeof fetch; bodyTimeoutMs?: number;
 }) {
   const publicUrl = new URL(options.publicUrl);
   if (publicUrl.pathname !== '/' || publicUrl.search || publicUrl.hash || publicUrl.username || publicUrl.password ||
@@ -105,30 +121,41 @@ export async function createHostedApp(options: {
         if (authorization && !principal) { res.setHeader('WWW-Authenticate', oauth.challenge(true)); throw new HttpError(401, 'Acceso Cinev requerido.'); }
         const clientKey = principal?.id ?? `anonymous:${ip}`;
         if (!await links.budget(`mcp:${clientKey}`, 120) || (active.get(clientKey) ?? 0) >= 4 || totalActive >= 32) throw new HttpError(429, 'Demasiadas consultas. Inténtalo más tarde.');
-        const parsed = req.method === 'POST' ? await body(req, 65536) : undefined;
-        // Discover public tools anonymously. Calling the connection tool triggers
-        // the client's standard OAuth flow, which retries this same tool afterward.
-        if (!principal && parsed && typeof parsed === 'object' && !Array.isArray(parsed) &&
-            'method' in parsed && parsed.method === 'tools/call' && 'params' in parsed &&
-            parsed.params && typeof parsed.params === 'object' && 'name' in parsed.params &&
-            ['connect_account', 'disconnect_account'].includes(String(parsed.params.name))) {
-          res.setHeader('WWW-Authenticate', oauth.challenge());
-          throw new HttpError(401, hostedAuthInstructions);
-        }
+        // Reserve capacity synchronously with the check, before awaiting the
+        // body, so concurrent slow uploads cannot all pass the same admission.
         active.set(clientKey, (active.get(clientKey) ?? 0) + 1); totalActive++;
-        const store = principal ? storeFor(principal.id) : new AnonymousSessions();
-        const service = new HostedService(new HostedHttpClient(options.request ?? fetch, 15000, store, publicHttp), cinexCatalog);
-        const handler = createMcpHandler(() => createServer(service, principal ? {
-          connect: async provider => {
-            if (!await links.budget(`link:${principal.id}`, 12)) throw new Error('Demasiados enlaces. Inténtalo en un minuto.');
-            const link = await links.issue(principal.id, principal.tokenHash, provider);
-            return { url: `${origin}/connect#${link.token}`, expires_at: link.expires_at };
-          },
-          disconnect: async provider => { await store.remove(provider); },
-        } : undefined, !principal), { maxSubscriptions: 0, keepAliveMs: 0 });
+        let handler: ReturnType<typeof createMcpHandler> | undefined;
         try {
+          const parsed = req.method === 'POST' ? await body(req, 65536, options.bodyTimeoutMs) : undefined;
+          // Discover public tools anonymously. Calling the connection tool triggers
+          // the client's standard OAuth flow, which retries this same tool afterward.
+          if (!principal && parsed && typeof parsed === 'object' && !Array.isArray(parsed) &&
+              'method' in parsed && parsed.method === 'tools/call' && 'params' in parsed &&
+              parsed.params && typeof parsed.params === 'object' && 'name' in parsed.params &&
+              ['connect_account', 'disconnect_account'].includes(String(parsed.params.name))) {
+            res.setHeader('WWW-Authenticate', oauth.challenge());
+            throw new HttpError(401, hostedAuthInstructions(origin));
+          }
+          // refresh bypasses the shared public cache and can fan out to many
+          // provider reads (for example, Cinex venue discovery). Keep it scarce so
+          // one client cannot get the shared egress address blocked upstream.
+          const refreshes = refreshCalls(parsed);
+          if (refreshes && !await links.budget(`refresh:${clientKey}`, 10)) throw new HttpError(429, 'Demasiadas consultas con refresh=true. Repite sin refresh o inténtalo en un minuto.');
+          const store = principal ? storeFor(principal.id) : new AnonymousSessions(origin);
+          const service = new HostedService(new HostedHttpClient(options.request ?? fetch, 15000, store, publicHttp), cinexCatalog);
+          handler = createMcpHandler(() => createServer(service, principal ? {
+            connect: async provider => {
+              if (!await links.budget(`link:${principal.id}`, 12)) throw new Error('Demasiados enlaces. Inténtalo en un minuto.');
+              const link = await links.issue(principal.id, principal.tokenHash, provider);
+              return { url: `${origin}/connect#${link.token}`, expires_at: link.expires_at };
+            },
+            disconnect: async provider => { await store.remove(provider); },
+          } : undefined, !principal, origin), { maxSubscriptions: 0, keepAliveMs: 0 });
           await toNodeHandler(handler)(req, res, parsed);
-        } finally { await handler.close(); active.set(clientKey, active.get(clientKey)! - 1); if (!active.get(clientKey)) active.delete(clientKey); totalActive--; }
+        } finally {
+          await handler?.close();
+          active.set(clientKey, active.get(clientKey)! - 1); if (!active.get(clientKey)) active.delete(clientKey); totalActive--;
+        }
         return;
       }
       if (!req.url?.startsWith('/connect/') || req.method !== 'POST') throw new HttpError(404, 'Ruta no disponible.');

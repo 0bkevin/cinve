@@ -260,8 +260,8 @@ const cxSource = (method: string, id?: string) => `${CX}/assets/php/datasource.p
 export function parseCinexMovies(html: string): DataItem[] {
   const $ = load(html), items = new Map<string, DataItem>();
   $('.poster[onclick]').each((_, e) => {
-    const match = ($(e).attr('onclick') ?? '').match(/sinopsis-([a-zA-Z0-9_-]+)\.html/);
-    if (!match) return;
+    const match = ($(e).attr('onclick') ?? '').match(/sinopsis-([a-zA-Z0-9._-]+)\.html/);
+    if (!match || !Id.safeParse(match[1]).success) return;
     const name = decodeLabel($(e).attr('title') || $(e).attr('alt'));
     if (name) items.set(match[1], { kind: 'movie', id: match[1], name, url: `${CX}/sinopsis-${match[1]}.html` });
   });

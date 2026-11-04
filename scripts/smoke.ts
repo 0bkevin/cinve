@@ -1,6 +1,7 @@
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { Result, today } from '../src/core.js';
+import { SeatResult } from '../src/seats.js';
 import type { QueryResult } from '../src/core.js';
 import * as z from 'zod';
 
@@ -14,15 +15,20 @@ let failed = false;
 const requireAuth = process.argv.includes('--require-auth');
 const day = today();
 async function call(name: string, args: Record<string, unknown>, allowed = ['available']): Promise<QueryResult> {
-  args = { ...args, refresh: true };
+  // Hosted servers cap refresh=true (it bypasses their shared cache), so the
+  // remote smoke reads normally; the local smoke still proves fresh reads.
+  if (!remoteUrl) args = { ...args, refresh: true };
   const started = Date.now();
   const response = await client.callTool({ name, arguments: args });
   const result = Result.parse(response.structuredContent);
   console.log(JSON.stringify({ tool: name, arguments: args, duration_ms: Date.now() - started, status: result.status, total: result.total, partial: result.partial, sources: result.sources, warnings: result.warnings }));
   const expectedError = !['available', 'empty'].includes(result.status);
-  if (!allowed.includes(result.status) || response.isError !== expectedError) failed = true;
-  if (result.sources.some(s => s.cached)) { failed = true; console.error('Fresh query unexpectedly used cache.'); }
-  if (result.status === 'available' && !result.sources.length) failed = true;
+  if (!allowed.includes(result.status) || response.isError !== expectedError) { failed = true; console.error(`${name}: unexpected status ${result.status} or isError=${response.isError}.`); }
+  if (!remoteUrl && result.sources.some(s => s.cached)) { failed = true; console.error('Fresh query unexpectedly used cache.'); }
+  // Cinepic's city list is configured coverage, not a provider read; every
+  // other available result must cite at least one live source.
+  const configured = name === 'list_cities' && args.provider === 'cinepic';
+  if (result.status === 'available' && !result.sources.length && !configured) { failed = true; console.error(`${name}: available result without sources.`); }
   if (name === 'get_showtimes' && result.items.some(s => s.date !== args.date)) failed = true;
   return result;
 }
@@ -49,7 +55,7 @@ try {
   const providers = await client.callTool({ name: 'list_providers', arguments: {} });
   if (!providers.structuredContent) throw new Error('Missing structured provider catalog.');
   for (const provider of ['cinex', 'cinesunidos', 'cinepic']) await call('list_cities', { provider });
-  // Repeat in the same MCP process to prove refresh bypasses warm local state.
+  // Repeat in the same MCP process to prove refresh bypasses warm local state (local mode).
   await call('list_cities', { provider: 'cinesunidos' });
   await call('list_cinemas', { provider: 'cinepic' });
   await call('list_cinemas', { provider: 'cinesunidos', city: 'Caracas' });
@@ -61,6 +67,10 @@ try {
     if (session) {
       const args = { provider: 'cinepic', cinema_id, session_id: session.id, movie_id: session.movie_id };
       await call('get_ticket_prices', args);
+      const seats = await client.callTool({ name: 'get_seats', arguments: args });
+      const map = SeatResult.parse(seats.structuredContent);
+      console.log(JSON.stringify({ tool: 'get_seats', arguments: args, status: map.status, total: map.total, available: map.available, unknown: map.unknown, warnings: map.warnings }));
+      if (map.status !== 'available' || !map.total || seats.isError) { failed = true; console.error('get_seats: Cinepic seat map unavailable.'); }
     } else { failed = true; console.log(JSON.stringify({ skipped: 'Cinepic price live check', cinema_id, reason: 'No upcoming function returned today; price retrieval is unverified.' })); }
     await call('get_concessions', { provider: 'cinepic', cinema_id }, ['available', 'empty']);
   }
@@ -71,6 +81,9 @@ try {
   await authenticatedTickets('cinex', cx);
   const candy = await call('get_concessions', { provider: 'cinex', cinema_id: 'TLN', limit: 2 }, requireAuth ? ['available'] : ['available', 'auth_required']);
   if (requireAuth && candy.status !== 'available') failed = true;
+  // Trasnocho currently refuses automated clients; the server must say so
+  // explicitly rather than report an empty programme.
+  await call('list_movies', { provider: 'trasnocho' }, ['blocked', 'unavailable']);
   console.log(JSON.stringify({ verification: failed ? 'failed' : 'passed', scope: requireAuth ? 'public_and_authenticated' : 'public_with_auth_limitations', date: day }));
 } finally { await client.close(); }
 if (failed) process.exitCode = 1;

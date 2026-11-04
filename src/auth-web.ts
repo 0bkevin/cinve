@@ -7,6 +7,7 @@ export function loginPage() {
 <label for="username">Correo de tu cuenta</label><input id="username" name="username" type="email" autocomplete="username" maxlength="320" required>
 <label for="password">Contraseña</label><div class="password"><input id="password" name="password" type="password" autocomplete="current-password" maxlength="4096" required><button id="show" type="button" aria-label="Mostrar contraseña" aria-pressed="false">Mostrar</button></div>
 <p class="note">Cinve enviará tus datos al cine elegido por una conexión segura. Guardará tu sesión cifrada para que tu asistente consulte precios con tu cuenta. No guarda tu contraseña.</p>
+<p class="note"><strong>Usa este enlace solo si tu asistente acaba de crearlo para ti.</strong> Si otra persona te lo envió, ciérralo: tu cuenta del cine quedaría conectada al acceso de esa persona.</p>
 <button class="primary full" id="connect" type="submit" disabled>Conectar cuenta</button><div id="feedback" class="feedback" role="status" aria-live="polite"></div></form></div>
 <button id="done" class="secondary">Cancelar conexión</button><p class="note">Cinepic funciona sin cuenta. Vuelve a tu asistente después de conectar. Este enlace caduca en 10 minutos.</p><noscript><p>Activa JavaScript para conectar tu cuenta.</p></noscript>`, { compact: true, script: '/app.js' });
 }

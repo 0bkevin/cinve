@@ -16,7 +16,7 @@ import { createRemoteServer } from '../src/remote.js';
 import type { login } from '../src/auth.js';
 
 async function fixture(t: { after(fn: () => Promise<void>): void }, authenticate?: typeof login,
-  request: typeof fetch = async () => new Response('["Caracas"]')) {
+  request: typeof fetch = async () => new Response('["Caracas"]'), extra: { bodyTimeoutMs?: number } = {}) {
   const schema = 'test_' + randomBytes(12).toString('hex');
   const admin = new Pool({ connectionString: process.env.TEST_DATABASE_URL });
   await admin.query(`CREATE SCHEMA ${schema}`);
@@ -24,7 +24,7 @@ async function fixture(t: { after(fn: () => Promise<void>): void }, authenticate
 
   await pool.query(await migrationSql());
   const key = randomBytes(32);
-  const app = await createHostedApp({ publicUrl: 'http://127.0.0.1:0', allowLocal: true, pool, key, authenticate, request });
+  const app = await createHostedApp({ publicUrl: 'http://127.0.0.1:0', allowLocal: true, pool, key, authenticate, request, ...extra });
   await new Promise<void>(resolve => app.server.listen(0, '127.0.0.1', resolve));
   const address = app.server.address(); assert.ok(address && typeof address !== 'string');
   const origin = `http://127.0.0.1:${address.port}`;
@@ -515,4 +515,70 @@ test('public pages use the configured origin and serve local fonts under the aut
   const error = await fetch(f.origin + '/oauth/authorize');
   assert.equal(error.status, 400);
   assert.ok((await error.text()).includes('No se pudo autorizar la conexión.'));
+});
+
+test('one address exhausting its OAuth quota cannot consume the shared OAuth quota', async t => {
+  const f = await fixture(t);
+  const { digest } = await import('../src/hosted-store.js');
+  await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 minute',61)", [digest('oauth:127.0.0.1')]);
+  for (let i = 0; i < 20; i++) assert.equal((await form(f.origin, '/oauth/token', { grant_type: 'refresh_token' })).status, 429);
+  const global = await f.pool.query('SELECT count FROM cinev_budgets WHERE key_hash=$1', [digest('oauth:global')]);
+  assert.equal(global.rows.length, 0, 'rejected requests must not charge the global budget');
+});
+
+test('slow request bodies cannot bypass the per-client MCP concurrency limit', async t => {
+  const f = await fixture(t);
+  const message = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'list_cities', arguments: { provider: 'cinesunidos' } } });
+  const { port } = new URL(f.origin);
+  const requests = Array.from({ length: 8 }, () => {
+    let finish!: () => void;
+    const status = new Promise<number>((resolve, reject) => {
+      const req = httpRequest({ host: '127.0.0.1', port, path: '/mcp', method: 'POST', headers: {
+        'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', 'MCP-Protocol-Version': '2025-06-18',
+      } }, res => { res.resume(); resolve(res.statusCode!); });
+      req.on('error', reject);
+      req.write(message.slice(0, 1));
+      finish = () => req.end(message.slice(1));
+    });
+    return { status, finish: () => finish() };
+  });
+  await new Promise(resolve => setTimeout(resolve, 150));
+  for (const r of requests) r.finish();
+  const statuses = await Promise.all(requests.map(r => r.status));
+  assert.equal(statuses.filter(s => s === 429).length, 4, `statuses: ${statuses.join(',')}`);
+});
+
+test('refresh=true calls have their own small budget so the shared cache cannot be bypassed at volume', async t => {
+  const f = await fixture(t);
+  const { digest } = await import('../src/hosted-store.js');
+  const anonymous = await f.client();
+  await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 minute',10)", [digest('refresh:anonymous:127.0.0.1')]);
+  await assert.rejects(anonymous.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos', refresh: true } }));
+  const cached = await anonymous.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos' } });
+  assert.equal((cached.structuredContent as { status: string }).status, 'available');
+});
+
+test('cleanup removes stale anonymous OAuth registrations but keeps used or recent ones', async t => {
+  const f = await fixture(t);
+  const stale = await register(f.origin), recent = await register(f.origin), used = await enrolled(f.origin);
+  await f.pool.query("UPDATE cinev_oauth_apps SET created_at=now()-interval '100 days' WHERE id=ANY($1)", [[stale, used.client_id]]);
+  assert.ok((await f.pool.query('SELECT last_used_at FROM cinev_oauth_apps WHERE id=$1', [used.client_id])).rows[0].last_used_at, 'token issuance records use');
+  await f.links.cleanup();
+  const left = (await f.pool.query('SELECT id FROM cinev_oauth_apps')).rows.map(r => r.id).sort();
+  assert.deepEqual(left, [recent, used.client_id].sort());
+});
+
+test('an unfinished MCP body is cut off at its deadline and releases its concurrency slot', async t => {
+  const f = await fixture(t, undefined, undefined, { bodyTimeoutMs: 100 });
+  const { port } = new URL(f.origin);
+  const stalled = Array.from({ length: 4 }, () => new Promise<string>(resolve => {
+    const req = httpRequest({ host: '127.0.0.1', port, path: '/mcp', method: 'POST', headers: { 'Content-Type': 'application/json' } },
+      res => { res.resume(); resolve(String(res.statusCode)); });
+    req.on('error', () => resolve('closed'));
+    req.write('{');
+  }));
+  assert.deepEqual(await Promise.all(stalled), ['closed', 'closed', 'closed', 'closed']);
+  const anonymous = await f.client();
+  const r = await anonymous.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos' } });
+  assert.equal((r.structuredContent as { status: string }).status, 'available', 'slots held by stalled bodies were released');
 });

@@ -81,6 +81,11 @@ export class ConnectionLinks {
     await this.pool.query("DELETE FROM cinev_oauth_tokens WHERE kind='access' AND expires_at<=now()");
     await this.pool.query(`DELETE FROM cinev_clients c USING cinev_oauth_grants g
       WHERE c.id=g.user_id AND (g.expires_at<=now() OR c.revoked_at IS NOT NULL)`);
+    // Anonymous registrations: drop apps without a live grant that have not
+    // issued tokens for 90 days (or never did). A returning client simply
+    // registers again; its grants would have expired after 30 days anyway.
+    await this.pool.query(`DELETE FROM cinev_oauth_apps a WHERE COALESCE(a.last_used_at, a.created_at) <= now()-interval '90 days'
+      AND NOT EXISTS (SELECT 1 FROM cinev_oauth_grants g WHERE g.app_id=a.id)`);
     await this.pool.query('DELETE FROM cinev_links WHERE expires_at<=now()');
     await this.pool.query('DELETE FROM cinev_budgets WHERE expires_at<=now()');
     await this.pool.query('DELETE FROM cinev_sessions WHERE expires_at<=now()');

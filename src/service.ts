@@ -41,7 +41,7 @@ export const capabilities = {
   cinepic: { seats: 'public_page_data_ascii', cities: 'public', cinemas: 'public', movies: 'public_api', showtimes: 'public_api', prices: 'page_data_ves_and_derived_usd', concessions: 'public_api_empty_in_samples' },
   cinesunidos: { seats: 'authenticated_api_ascii', cities: 'public_api', cinemas: 'page_data', movies: 'page_data', showtimes: 'page_data', prices: 'authenticated_api', concessions: 'public_api' },
   cinex: { seats: 'authenticated_html_ascii', cities: 'public_api', cinemas: 'html', movies: 'html_general_catalog', showtimes: 'html_requires_cinema_or_movie', prices: 'authenticated_html_requires_session', concessions: 'authenticated_html' },
-  trasnocho: { cities: 'not_implemented', cinemas: 'not_implemented', movies: 'blocked_in_samples', showtimes: 'not_implemented', prices: 'not_implemented', concessions: 'not_implemented' },
+  trasnocho: { seats: 'not_implemented', cities: 'blocked_bot_challenge', cinemas: 'blocked_bot_challenge', movies: 'blocked_bot_challenge', showtimes: 'blocked_bot_challenge', prices: 'blocked_bot_challenge', concessions: 'blocked_bot_challenge' },
 };
 export class CinemaService {
   constructor(private http = new HttpClient(), private cinexCatalog = new CinexCinemaCatalog()) {}
@@ -57,6 +57,11 @@ export class CinemaService {
       const data = q.provider === 'cinex' ? await cinex(op, q, c, this.cinexCatalog)
         : await ({ cinepic, cinesunidos, trasnocho })[q.provider](op, q, c);
       const unique = new Map<string, DataItem>();
+      // A function ID drives price and seat lookups. If the provider reports the
+      // same ID with a different film, date, time or room, neither copy is
+      // trustworthy: suppress the ID instead of letting response order decide.
+      const showtimes = new Map<string, DataItem>(), conflicted = new Set<string>();
+      const showtimeIdentity = (item: DataItem) => JSON.stringify([item.movie_id, item.date, item.time, item.screen ?? null]);
       for (const raw of data) {
         const candidate = { ...raw };
         for (const key of ['url', 'image_url'] as const) {
@@ -68,8 +73,19 @@ export class CinemaService {
         // Validate inside the guarded path, before filtering/pagination can hide a bad record.
         const item = operationItemSchema(op).parse(candidate) as DataItem;
         if (['movie', 'showtime', 'cinema'].includes(item.kind)) Id.parse(item.id);
+        const key = `${item.kind}:${item.cinema_id ?? ''}:${item.id}`;
+        if (item.kind === 'showtime') {
+          if (conflicted.has(key)) continue;
+          const previous = showtimes.get(key);
+          if (previous && showtimeIdentity(previous) !== showtimeIdentity(item)) {
+            conflicted.add(key); showtimes.delete(key); unique.delete(key); c.partial = true;
+            c.warnings.push(`El proveedor devolvió datos contradictorios para la función ${item.id}; se omitió porque no se puede confirmar su película u horario.`);
+            continue;
+          }
+          showtimes.set(key, item);
+        }
         if (op === 'movies' && q.movie_id && item.id !== q.movie_id) continue;
-        if (!q.query || folded(item.name).includes(folded(q.query))) unique.set(`${item.kind}:${item.cinema_id ?? ''}:${item.id}`, item);
+        if (!q.query || folded(item.name).includes(folded(q.query))) unique.set(key, item);
       }
       const items = [...unique.values()].sort((a, b) => (a.starts_at ?? a.name).localeCompare(b.starts_at ?? b.name) || a.id.localeCompare(b.id));
       const offset = q.offset ?? 0, limit = q.limit ?? 50;
