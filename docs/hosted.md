@@ -79,7 +79,14 @@ código consumido revoca la conexión para contener una posible repetición.
 Los tokens opacos se guardan únicamente como resúmenes SHA-256. Las sesiones de
 cine se cifran con AES-256-GCM y se vinculan criptográficamente a su propietario
 y proveedor. El registro, la aprobación y la emisión de tokens tienen límites
-persistentes por IP y globales.
+persistentes por IP y globales. El límite global solo se consume cuando la IP
+todavía tiene cupo, para que una sola dirección no agote el servicio para todos.
+
+En `/mcp`, cada conexión admite hasta 120 solicitudes por minuto y cuatro
+simultáneas; el proceso admite 32 simultáneas. La plaza se reserva antes de leer
+el cuerpo, que debe llegar completo en diez segundos. Las llamadas con
+`refresh: true` evitan la caché pública compartida y pueden generar varias
+lecturas al proveedor, por lo que tienen un cupo propio de diez por minuto.
 
 ## Despliegue
 
@@ -158,7 +165,10 @@ guardar una sesión después de cancelar, reemplazar, vencer o revocar el enlace
 Ante una caída de la base, las operaciones protegidas fallan de forma cerrada.
 
 Una tarea diaria autenticada elimina sesiones, enlaces, límites y objetos OAuth
-vencidos. La validez se comprueba al acceder y no depende de esa limpieza. La
+vencidos. El registro OAuth es anónimo, así que también elimina los clientes
+registrados sin autorizaciones vigentes que llevan 90 días sin emitir tokens; un
+cliente que vuelva se registra de nuevo. Ejecuta `npm run db:migrate` antes de
+desplegar una versión con migraciones nuevas. La validez se comprueba al acceder y no depende de esa limpieza. La
 limpieza manual se ejecuta con:
 
 ```sh

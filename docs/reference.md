@@ -57,8 +57,8 @@ que Cinve omitió o no pudo verificar parte de la respuesta.
 | --- | --- | --- |
 | Cinepic | Dos sedes configuradas; películas, funciones, precios, asientos y consulta de caramelería. | No descubre sedes nuevas automáticamente. La conversión a USD usa la tasa publicada por el proveedor. |
 | Cines Unidos | Ciudades, sedes, películas, funciones, caramelería, precios y asientos. | Precios y asientos requieren una cuenta conectada. |
-| Cinex | Ciudades, sedes, catálogo, funciones, precios, caramelería y asientos. | Precios, caramelería y asientos requieren una cuenta conectada. Algunos cruces de títulos pueden ser parciales. |
-| Trasnocho | Comprobación de acceso. | El sitio devuelve actualmente HTTP 403; no hay un parser de programación validado. |
+| Cinex | Ciudades, sedes, catálogo, funciones, precios, caramelería y asientos. | Precios, caramelería y asientos requieren una cuenta conectada. Algunos cruces de títulos pueden ser parciales. El descubrimiento de sedes tiene un plazo total de 40 s; las sedes sin comprobar se devuelven como `unverified` y `partial`. |
+| Trasnocho | Comprobación de acceso. | El sitio exige un desafío anti-bots de Cloudflare (HTTP 403 con `cf-mitigated: challenge`) a los clientes automatizados, incluida su API de WordPress. Cinve informa `blocked` y no evade esa protección. Su cartelera se publica como productos WooCommerce del mismo dominio protegido; no hay una API o taquilla externa alternativa. Integrarla requiere que Trasnocho autorice a Cinve, por ejemplo como bot verificado, o publique una fuente abierta. |
 
 La cobertura describe implementaciones, no certifica que cada proveedor esté
 disponible en todo momento ni que abarque todos los cines de Venezuela.
@@ -85,8 +85,13 @@ la función esté agotada.
 - Hay como máximo dos consultas activas y 32 en cola por origen.
 - La caché pública mantiene hasta 64 entradas y 16 MiB. Las sesiones y los mapas
   de asientos no usan caché.
-- El servidor solo realiza solicitudes GET a orígenes y rutas permitidos. Los
-  flujos de inicio de sesión son la excepción controlada.
+- El servidor solo realiza solicitudes GET a orígenes y rutas permitidos: cada
+  lectura pública se valida contra la lista de páginas y API que los adaptadores
+  interpretan, con sus parámetros exactos, y las lecturas autenticadas tienen su
+  propia lista. Los flujos de inicio de sesión son la excepción controlada.
+- Si un proveedor devuelve el mismo identificador de función con película,
+  fecha, hora o sala distintas, la función se omite y el resultado se marca
+  `partial`, porque ese identificador se usa para tarifas y asientos.
 - El HTML y JSON externos se tratan como datos, nunca como instrucciones.
 - Los enlaces inseguros, redirecciones no autorizadas y registros inválidos se
   rechazan o se omiten con una advertencia.

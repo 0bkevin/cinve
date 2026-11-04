@@ -1,4 +1,4 @@
-import { DataError } from './core.js';
+import { DataError, Id } from './core.js';
 import type { z } from 'zod';
 import type { Source } from './core.js';
 import { SessionStore, assertPrivateRead } from './auth.js';
@@ -243,9 +243,19 @@ export class HttpClient {
   }
   private async read(url: string, origin: string, authorize?: (target: string) => Promise<Record<string, string>>, refresh = false,
     onPublicRedirect?: (alias: string, canonical: string) => void): Promise<Page> {
+    // AbortSignal.timeout() uses an unreferenced timer: when the only pending
+    // work is a stalled promise (a hung transport, session store or body
+    // reader), Node may exit or drop the task before the deadline fires. A
+    // referenced timer, always cleared, makes the deadline deterministic.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(new DOMException('The operation timed out.', 'TimeoutError')), this.timeout);
+    try { return await this.readUntil(controller.signal, url, origin, authorize, refresh, onPublicRedirect); }
+    finally { clearTimeout(timer); }
+  }
+  private async readUntil(signal: AbortSignal, url: string, origin: string, authorize?: (target: string) => Promise<Record<string, string>>, refresh = false,
+    onPublicRedirect?: (alias: string, canonical: string) => void): Promise<Page> {
     const requested = url;
     const deadline = Date.now() + this.timeout;
-    const signal = AbortSignal.timeout(this.timeout);
     const release = await this.acquire(origin, signal, deadline);
     try {
       // Reload after queue admission: logout/account changes affect requests not yet sent.
@@ -283,6 +293,11 @@ export class HttpClient {
       if (!response.ok) {
         const status = response.status === 401 ? 'auth_required' : response.status === 403 ? 'blocked' : response.status === 429 ? 'rate_limited' : response.status === 404 ? 'unavailable' : 'error';
         cancelBody(response.body);
+        // An interactive anti-bot challenge is an explicit refusal of automated
+        // clients. Report it as such; Cinve never tries to solve or evade it.
+        if (response.status === 403 && response.headers.get('cf-mitigated')?.toLowerCase() === 'challenge') {
+          throw new DataError('blocked', `El proveedor exige un desafío anti-bots (Cloudflare) en ${new URL(url).hostname} y no admite consultas automatizadas. Cinve no evade esa protección; consulta la programación en su web o redes oficiales.`);
+        }
         throw new DataError(status, `El proveedor respondió HTTP ${response.status} en ${url}.`);
       }
       const reader = response.body?.getReader();
@@ -310,6 +325,59 @@ export class HttpClient {
   }
 }
 
+const ids = (value: string | null) => value !== null && Id.safeParse(value).success;
+/** Each listed query key appears exactly once, and no other key appears. */
+function exactQuery(u: URL, rules: Record<string, (value: string | null) => boolean>) {
+  const keys = [...u.searchParams.keys()];
+  return keys.length === Object.keys(rules).length &&
+    Object.entries(rules).every(([key, valid]) => u.searchParams.getAll(key).length === 1 && valid(u.searchParams.get(key)));
+}
+const cinexDatasource: Record<string, Record<string, (value: string | null) => boolean>> = {
+  getcinemacitieslist: { method: () => true },
+  getcinemadatafromcinemaid: { method: () => true, cinemaid: ids },
+  preparepricecinema: { method: () => true, cinemaid: ids },
+};
+/**
+ * Public GET routes the provider adapters are allowed to read. The host
+ * allowlist in HttpClient bounds egress; this bounds it to the read-only pages
+ * and APIs Cinve actually parses, so a future adapter bug cannot turn a
+ * permitted host into a request for a purchase or account endpoint.
+ */
+export function assertPublicRead(value: string) {
+  const u = new URL(value), path = u.pathname, none = !u.search;
+  const allowed = (() => {
+    switch (u.hostname) {
+      case 'www.cinex.com.ve':
+        if (['/cines.html', '/cartelera.html'].includes(path)) return none;
+        if (/^\/cinex-[A-Za-z0-9_-]{1,80}\.html$/.test(path)) return none;
+        if (path.startsWith('/sinopsis-') && path.endsWith('.html')) return none && Id.safeParse(path.slice(10, -5)).success;
+        if (path === '/assets/php/datasource.php') {
+          const rules = cinexDatasource[u.searchParams.get('method') ?? ''];
+          return !!rules && exactQuery(u, rules);
+        }
+        return false;
+      case 'www.cinesunidos.com':
+        return ['/cines', '/cartelera'].includes(path) && exactQuery(u, { city: v => !!v && v.length <= 80 });
+      case 'gateway.cinesunidos.com':
+        if (path === '/search/cities') return none;
+        { const m = path.match(/^\/concessions\/www\/cinemas\/([^/]+)\/concessions$/); return !!m && none && Id.safeParse(m[1]).success; }
+      case 'cinepiccandelaria.com': case 'cinepicvip.com':
+        if (path === '/es-AR') return none;
+        return path === '/es-AR/compra' && exactQuery(u, { cid: ids, fid: ids, pid: ids });
+      case 'apifront.cinexo.com.ar':
+        return path === '/mobile/consultas/peliculas/PeliculasConFuncionesYHorarios' &&
+          exactQuery(u, { idComplejo: ids, fecha: v => !!v && /^\d{2}\/\d{2}\/\d{4}$/.test(v) });
+      case 'api.cinexo.com.ar':
+        { const m = path.match(/^\/api\/complejo\/([^/]+)\/candy$/); return !!m && none && Id.safeParse(m[1]).success; }
+      case 'www.trasnochocultural.com':
+        return path === '/cine/' && none;
+      default:
+        return false;
+    }
+  })();
+  if (!allowed) throw new DataError('error', 'Ruta de consulta pública no permitida.');
+}
+
 export class ReadContext {
   sources: EvidenceSource[] = [];
   warnings: string[] = [];
@@ -324,6 +392,7 @@ export class ReadContext {
     return (await this.page(url, ttl)).body;
   }
   async page(url: string, ttl?: number): Promise<Page> {
+    assertPublicRead(url);
     const page = await this.http.get(url, ttl, this.refresh);
     if (!this.sources.some(s => s.url === page.source.url)) this.sources.push(page.source);
     return page;

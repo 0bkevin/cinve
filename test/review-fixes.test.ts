@@ -1,0 +1,105 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { CinemaService } from '../src/service.js';
+import { CinexCinemaCatalog } from '../src/cinex-cinemas.js';
+import { HttpClient, ReadContext, assertPublicRead } from '../src/http.js';
+import { DataError, Id } from '../src/core.js';
+import { parseCinexMovies, parseCinexCinemaShowtimes } from '../src/providers.js';
+import { page } from './fixtures.js';
+
+const epoch = (date: string, time = '18:00') => String(Date.parse(`${date}T${time}:00-04:00`) / 1000);
+
+test('Cinex movie slugs with interior dots stay in the catalog and match cinema sessions', () => {
+  const catalog = parseCinexMovies(`<div class="poster" onclick="javascript: posterMovieClick('HO1', 'SERES. PARTE 1 LA INVASION', '10', 'Ficción', 'B', 'sinopsis-seres.parte1lainvasion.html', 'CARTELERA');" title="SERES. PARTE 1 LA INVASION"></div>`
+    + `<div class="poster" onclick="x('sinopsis-..%2Fsecret.html')" title="Bad"></div>`);
+  assert.deepEqual(catalog.map(m => m.id), ['seres.parte1lainvasion']);
+  const c = new ReadContext(new HttpClient(async () => new Response('unexpected')));
+  const sessions = parseCinexCinemaShowtimes(`<div class="sessionslist"><h5 class="title">SERES. PARTE 1 LA INVASION</h5><button onclick="checkLogin('77','TLN')" alt="${epoch('2026-11-04')}"></button></div>`,
+    catalog, 'TLN', '2026-11-04', c, 'https://www.cinex.com.ve/cinex-tolon.html');
+  assert.equal(sessions.length, 1); assert.equal(sessions[0].movie_id, 'seres.parte1lainvasion'); assert.equal(c.partial, false);
+});
+
+test('IDs allow interior dots but never relative path segments', () => {
+  for (const ok of ['a', 'TLN', 'seres.parte1lainvasion', 'x'.repeat(100)]) assert.ok(Id.safeParse(ok).success, ok);
+  for (const bad of ['', '.', '..', '.a', 'a.', 'a..b', '../x', 'a/b', 'x'.repeat(101)]) assert.equal(Id.safeParse(bad).success, false, bad);
+});
+
+test('conflicting duplicate session IDs are suppressed and marked partial instead of overwritten', async () => {
+  const show = (id: string, date: string) => ({ id, date });
+  const html = page({ movies: [
+    { vistaId: 'M', title: 'Movie M', theaters: [{ id: '1002', showTimes: [show('S', '2026-11-04T18:00:00'), show('OK', '2026-11-04T19:00:00')] }] },
+    { vistaId: 'N', title: 'Movie N', theaters: [{ id: '1002', showTimes: [show('S', '2026-11-04T20:00:00')] }] },
+  ] }) + page({ movies: [
+    // Later identical copies of a conflicting ID must not resurrect it.
+    { vistaId: 'M', title: 'Movie M', theaters: [{ id: '1002', showTimes: [show('S', '2026-11-04T18:00:00'), show('OK', '2026-11-04T19:00:00')] }] },
+  ] });
+  const r = await new CinemaService(new HttpClient(async () => new Response(html))).query('showtimes', { provider: 'cinesunidos', city: 'Caracas', date: '2026-11-04' });
+  assert.equal(r.status, 'available'); assert.equal(r.partial, true);
+  assert.deepEqual(r.items.map(i => i.id), ['OK'], 'identical duplicates collapse; conflicting IDs are dropped');
+  assert.ok(r.warnings.some(w => /contradictorios para la función S/.test(w)));
+});
+
+test('a seeded unlisted Cinex venue resolves on a fresh catalog (cold instance)', async () => {
+  const detail = `<h3 class="title">METROPOLIS BARQUISIMETO</h3><div class="sessionslist"><h5 class="title">KNOWN</h5><button onclick="checkLogin('s1','MTB')" alt="${epoch('2026-11-04')}"></button></div>`;
+  const make = () => new CinemaService(new HttpClient(async input => {
+    const url = new URL(String(input));
+    if (url.pathname === '/cines.html') return new Response(`<a href="cinex-listed.html" title="Cinex Listed, Caracas"><img src="https://www.cinex.com.ve/assets/images/cinemas/xlisted.jpg"><h3>Listed</h3></a>`);
+    if (url.pathname === '/assets/php/datasource.php') return Response.json({ data: [] });
+    if (url.pathname === '/cinex-metropolisbarquisimeto.html') return new Response(detail);
+    if (url.pathname === '/cartelera.html') return new Response(`<div class="poster" onclick="posterMovieClick('M','KNOWN','0','x','A','sinopsis-known.html','CARTELERA')" title="KNOWN"></div>`);
+    return new Response('missing', { status: 404 });
+  }), new CinexCinemaCatalog());
+  const showtimes = await make().query('showtimes', { provider: 'cinex', cinema_id: 'MTB', date: '2026-11-04' });
+  assert.equal(showtimes.status, 'available'); assert.equal(showtimes.total, 1);
+  // A different code on the same seed page is still rejected.
+  const other = await make().query('showtimes', { provider: 'cinex', cinema_id: 'XYZ', date: '2026-11-04' });
+  assert.equal(other.status, 'unavailable');
+});
+
+test('public reads are limited to the routes adapters parse, even on allowed hosts', () => {
+  for (const ok of [
+    'https://www.cinex.com.ve/cines.html', 'https://www.cinex.com.ve/cartelera.html', 'https://www.cinex.com.ve/cinex-tolon.html',
+    'https://www.cinex.com.ve/sinopsis-seres.parte1lainvasion.html',
+    'https://www.cinex.com.ve/assets/php/datasource.php?method=getcinemacitieslist',
+    'https://www.cinex.com.ve/assets/php/datasource.php?method=getcinemadatafromcinemaid&cinemaid=TLN',
+    'https://www.cinex.com.ve/assets/php/datasource.php?method=preparepricecinema&cinemaid=TLN',
+    'https://www.cinesunidos.com/cines?city=Caracas', 'https://www.cinesunidos.com/cartelera?city=M%C3%A9rida',
+    'https://gateway.cinesunidos.com/search/cities', 'https://gateway.cinesunidos.com/concessions/www/cinemas/1005/concessions',
+    'https://cinepiccandelaria.com/es-AR', 'https://cinepicvip.com/es-AR/compra?cid=123301&fid=3636&pid=206',
+    'https://apifront.cinexo.com.ar/mobile/consultas/peliculas/PeliculasConFuncionesYHorarios?idComplejo=123300&fecha=04%2F11%2F2026',
+    'https://api.cinexo.com.ar/api/complejo/123300/candy', 'https://www.trasnochocultural.com/cine/',
+  ]) assert.doesNotThrow(() => assertPublicRead(ok), ok);
+  for (const bad of [
+    'https://www.cinex.com.ve/assets/php/prepareconcessionprocess.php?action=buy',
+    'https://www.cinex.com.ve/assets/php/datasource.php?method=getcinemacitieslist&extra=1',
+    'https://www.cinex.com.ve/assets/php/datasource.php?method=somethingelse',
+    'https://www.cinex.com.ve/cartelera.html?x=1', 'https://www.cinex.com.ve/sinopsis-..%2Fx.html',
+    'https://www.cinex.com.ve/boletos.php?cinemaid=TLN&sessionid=1',
+    'https://www.cinesunidos.com/cines?city=Caracas&city=Valencia', 'https://www.cinesunidos.com/api/seats?theaterId=1&showTimeId=2',
+    'https://gateway.cinesunidos.com/tickets/www/theaters/1/sessions/2/', 'https://cinepicvip.com/es-AR/compra?cid=1&fid=2',
+    'https://www.trasnochocultural.com/wp-json/', 'https://evil.test/',
+  ]) assert.throws(() => assertPublicRead(bad), DataError, bad);
+});
+
+test('a Cloudflare challenge is reported as an explicit block without evasion', async () => {
+  let calls = 0;
+  const s = new CinemaService(new HttpClient(async () => { calls++; return new Response('Just a moment...', { status: 403, headers: { 'cf-mitigated': 'challenge' } }); }));
+  const r = await s.query('movies', { provider: 'trasnocho' });
+  assert.equal(r.status, 'blocked'); assert.equal(calls, 1);
+  assert.match(r.warnings[0], /desafío anti-bots/); assert.match(r.warnings[0], /no evade/);
+});
+
+test('Cinex venue discovery stops at its time budget and keeps remaining venues as unverified', async () => {
+  const cards = ['a', 'b', 'c', 'd', 'e'].map(slug => `<a href="cinex-${slug}.html" title="Cinex ${slug.toUpperCase()}, Caracas"><img src="https://www.cinex.com.ve/assets/images/cinemas/x${slug}.jpg"><h3>${slug.toUpperCase()}</h3></a>`).join('');
+  let metadata = 0;
+  const http = new HttpClient(async input => {
+    const url = new URL(String(input));
+    if (url.pathname === '/cines.html') return new Response(cards);
+    if (url.pathname === '/assets/php/datasource.php') { metadata++; return Response.json({ data: [] }); }
+    return new Response('missing', { status: 404 });
+  });
+  const r = await new CinemaService(http, new CinexCinemaCatalog(0)).query('cinemas', { provider: 'cinex' });
+  assert.equal(r.total, 5); assert.equal(r.partial, true); assert.equal(metadata, 0, 'no provider reads after the budget is spent');
+  assert.ok(r.items.every(i => i.code_status === 'unverified' && i.id.startsWith('directory-')));
+  assert.ok(r.warnings.some(w => /tiempo de comprobación/.test(w)));
+});

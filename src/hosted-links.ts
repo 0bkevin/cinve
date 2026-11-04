@@ -84,5 +84,13 @@ export class ConnectionLinks {
     await this.pool.query('DELETE FROM cinev_links WHERE expires_at<=now()');
     await this.pool.query('DELETE FROM cinev_budgets WHERE expires_at<=now()');
     await this.pool.query('DELETE FROM cinev_sessions WHERE expires_at<=now()');
+    // Anonymous registrations: drop apps without a live grant that have not
+    // issued tokens for 90 days (or never did). A returning client simply
+    // registers again; its grants would have expired after 30 days anyway.
+    // Runs last and tolerates a deployment that precedes migration 003.
+    await this.pool.query(`DELETE FROM cinev_oauth_apps a WHERE COALESCE(a.last_used_at, a.created_at) <= now()-interval '90 days'
+      AND NOT EXISTS (SELECT 1 FROM cinev_oauth_grants g WHERE g.app_id=a.id)`).catch((error: { code?: string }) => {
+      if (error?.code !== '42703') throw error; // undefined_column: migration 003 pending.
+    });
   }
 }

@@ -8,7 +8,10 @@ export const DateInput = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(s => {
   const d = new Date(`${s}T12:00:00Z`);
   return !Number.isNaN(+d) && d.toISOString().slice(0, 10) === s;
 }, 'Fecha calendario válida YYYY-MM-DD');
-export const Id = z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/);
+// Provider identifiers. Interior dots are allowed because Cinex publishes movie
+// slugs such as seres.parte1lainvasion; leading/trailing dots and '..' are not,
+// so an ID can never form a relative path segment.
+export const Id = z.string().regex(/^(?!.*\.\.)[a-zA-Z0-9_-](?:[a-zA-Z0-9._-]{0,98}[a-zA-Z0-9_-])?$/);
 export const PublicUrl = z.string().max(4096).refine(value => {
   try { const u = new URL(value); return u.protocol === 'https:' && !u.username && !u.password && !u.port; } catch { return false; }
 }, 'URL HTTPS sin credenciales');

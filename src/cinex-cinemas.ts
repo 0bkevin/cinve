@@ -14,11 +14,23 @@ const metadataUrl = (id: string) => `${base}/assets/php/datasource.php?${new URL
 function imageCode(image = ''): string | undefined {
   return image.match(/(?:^|\/)cinemas\/(?:\d+x\d+x|x)?([a-z0-9_-]+)\.(?:jpg|png|webp)(?:\.|$)/i)?.[1]?.toUpperCase();
 }
+// Official details observed 2026-09-18, absent from some directory responses.
+// Seeds only enable discovery; they never supply a provider code or assert
+// that the venue operates. Every use re-validates the current detail page.
+const seedVenues: readonly Venue[] = [
+  { href: 'cinex-metropolisbarquisimeto.html', name: 'METROPOLIS BARQUISIMETO', city: 'Barquisimeto' },
+];
 type Verified = { url: string; name: string; aliases: string[]; metadataConfirmed: boolean };
 type Located = { venue: Venue; metadataConfirmed: boolean };
 
 /** Per-service discovery history, bounded and in memory; never evidence of closure. */
 export class CinexCinemaCatalog {
+  /**
+   * @param discoveryBudgetMs Wall-clock budget for one list() fan-out. Each read
+   * already has its own 15 s deadline; this bounds the whole operation so a
+   * slow provider cannot push a hosted call past the platform's 90 s limit.
+   */
+  constructor(private readonly discoveryBudgetMs = 40000) {}
   private known = new Map<string, Venue>();
   /** Verified associations are cheap discovery state, not a schedule cache. */
   private verifiedUrls = new Map<string, Verified>();
@@ -106,10 +118,7 @@ export class CinexCinemaCatalog {
     // An invalid directory must not trigger unrelated detail reads.
     if (!listed.size) { finishWarnings(); return []; }
     const candidates = new Map(this.known);
-    // Official detail observed 2026-09-18, absent from some directory responses.
-    // Seed only discovery, never a provider code or an assertion of operation.
-    const seed: Venue = { href: 'cinex-metropolisbarquisimeto.html', name: 'METROPOLIS BARQUISIMETO', city: 'Barquisimeto' };
-    if (!candidates.has(seed.href)) candidates.set(seed.href, seed);
+    for (const seed of seedVenues) if (!candidates.has(seed.href)) candidates.set(seed.href, seed);
     for (const [href, venue] of listed) candidates.set(href, venue);
     const items: DataItem[] = [];
     const venues = [...candidates.values()].filter(v =>
@@ -121,7 +130,17 @@ export class CinexCinemaCatalog {
       warn(`Se limitaron las comprobaciones de sedes a ${maxDiscoveryVenues}; se omitieron ${venues.length - work.length} candidatas. El resultado es parcial.`);
     }
     // Limit fan-out so one discovery call has a real, explicit work bound.
+    const deadline = Date.now() + this.discoveryBudgetMs;
     for (let i = 0; i < work.length; i += 4) {
+      if (Date.now() >= deadline) {
+        // Keep the remaining directory venues visible, without unverifiable codes.
+        const remaining = work.slice(i).filter(v => listed.has(v.href));
+        c.partial = true;
+        warn(`Se agotó el tiempo de comprobación de sedes; ${remaining.length} sedes del directorio se devuelven sin código verificado. Repite la consulta para completarlas. Esto no indica cierre.`);
+        items.push(...remaining.map(venue => ({ kind: 'cinema' as const, id: `directory-${venue.href.slice(6, -5)}`, name: venue.name, city: venue.city,
+          url: `${base}/${venue.href}`, code_status: 'unverified' as const, directory_status: 'listed' as const })));
+        break;
+      }
       const batch = await Promise.all(work.slice(i, i + 4).map(async venue => {
         const present = listed.has(venue.href), url = `${base}/${venue.href}`;
         let code: string | undefined, detailVerifiedUrl: string | undefined, metadataConfirmed = false;
@@ -166,9 +185,12 @@ export class CinexCinemaCatalog {
             detailVerifiedUrl = page.source.url;
             if (mappedCode && mappedCode !== code) this.dropMappingsFor(url, venue.name);
             this.rememberVerified(code, page.source.url, venue.name, url, metadataConfirmed);
-          } catch {
+          } catch (error) {
             if (mappedCode) this.dropMappingsFor(url, venue.name);
-            c.partial = true; warn(`No se pudo leer la página oficial de ${venue.name}: ${url}.`);
+            c.partial = true;
+            warn(error instanceof DataError && error.status === 'unavailable' && error.message.startsWith('La página no confirma')
+              ? `La página oficial de ${venue.name} no confirma su identidad ni un código de consulta: ${url}.`
+              : `No se pudo leer la página oficial de ${venue.name}: ${url}.`);
             if (!present && !this.known.has(venue.href)) return undefined;
           }
         }
@@ -219,12 +241,41 @@ export class CinexCinemaCatalog {
   }
 
   private async resolveFromDirectory(cinemaId: string, c: ReadContext): Promise<{ url: string; name?: string; city?: string; body?: string }> {
-    const located = await this.locate(cinemaId, c);
+    let located: Located;
+    try { located = await this.locate(cinemaId, c); }
+    catch (error) {
+      if (!(error instanceof DataError) || error.status !== 'unavailable') throw error;
+      // list_cinemas may verify a seeded venue that the directory omits. A
+      // fresh instance (another serverless worker, a restart) has no memory of
+      // that, so apply the same detail-page proof here instead of failing.
+      const seeded = await this.resolveSeed(cinemaId, c);
+      if (seeded) return seeded;
+      throw error;
+    }
     const venue = located.venue, requested = `${base}/${venue.href}`;
     const page = await c.page(requested, cinemaPageTtl);
     await this.validatePage(page.body, cinemaId, venue.name, c, located.metadataConfirmed);
     this.rememberVerified(cinemaId, page.source.url, venue.name, requested, located.metadataConfirmed);
     return { url: page.source.url, name: venue.name, city: venue.city, body: page.body };
+  }
+
+  private async resolveSeed(cinemaId: string, c: ReadContext): Promise<{ url: string; name: string; city: string; body: string } | undefined> {
+    for (const seed of seedVenues) {
+      const requested = `${base}/${seed.href}`;
+      try {
+        const page = await c.page(requested, cinemaPageTtl);
+        // validatePage accepts a missing title only with metadata proof; a
+        // seed has none, so also require the page to name the seeded venue.
+        const title = load(page.body)('h3.title').first().text().trim();
+        if (!title || normalizedName(title) !== normalizedName(seed.name)) continue;
+        await this.validatePage(page.body, cinemaId, seed.name, c, false);
+        this.rememberVerified(cinemaId, page.source.url, seed.name, requested, false);
+        return { url: page.source.url, name: seed.name, city: seed.city, body: page.body };
+      } catch (error) {
+        if (!(error instanceof DataError) || error.status !== 'unavailable') throw error;
+      }
+    }
+    return undefined;
   }
 
   private async locate(cinemaId: string, c: ReadContext): Promise<Located> {

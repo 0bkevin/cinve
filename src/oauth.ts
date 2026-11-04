@@ -74,6 +74,10 @@ export class HostedOAuth {
       ($2,$3,'refresh',(SELECT expires_at FROM cinev_oauth_grants WHERE user_id=$3))`, [digest(access), digest(refresh), user]);
     return { access_token: access, token_type: 'Bearer', expires_in: 3600, refresh_token: refresh, scope };
   }
+  /** Retention metadata only; never part of the token transaction or its outcome. */
+  private async touch(app: string) {
+    await this.pool.query('UPDATE cinev_oauth_apps SET last_used_at=now() WHERE id=$1', [app]).catch(() => {});
+  }
   private async exchange(p: URLSearchParams) {
     const app = required(p.get('client_id'));
     if (p.get('resource') !== this.resource) throw new OAuthError('invalid_target');
@@ -98,6 +102,7 @@ export class HostedOAuth {
         return this.tokens(client, user);
       });
       if (!result) throw new OAuthError('invalid_grant');
+      await this.touch(app);
       return result;
     }
     if (grant === 'refresh_token') {
@@ -115,6 +120,7 @@ export class HostedOAuth {
         return this.tokens(client, r.user_id);
       });
       if (!result) throw new OAuthError('invalid_grant');
+      await this.touch(app);
       return result;
     }
     throw new OAuthError('unsupported_grant_type');
@@ -145,7 +151,9 @@ export class HostedOAuth {
         });
         return true;
       }
-      if (!await this.budgets.budget('oauth:global', 600) || !await this.budgets.budget(`oauth:${ip}`, 60)) throw new OAuthError('temporarily_unavailable', 429);
+      // Charge the shared quota only for requests the caller's own quota admits;
+      // otherwise one address could exhaust OAuth for every other user.
+      if (!await this.budgets.budget(`oauth:${ip}`, 60) || !await this.budgets.budget('oauth:global', 600)) throw new OAuthError('temporarily_unavailable', 429);
       if (path === '/oauth/register' && req.method === 'POST') {
         if (!await this.budgets.budget(`oauth:register:${ip}`, 10)) throw new OAuthError('temporarily_unavailable', 429);
         const parsed = registration.safeParse(await payload(req, true));

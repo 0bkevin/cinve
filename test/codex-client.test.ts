@@ -60,7 +60,12 @@ test('companion reads original queries but rejects mutation and credential tools
   const bad = await runFixture(t, 'existing', ['call', 'disconnect_account', '{}']); assert.equal(bad.code, 2);
 });
 test('served instructions direct local stale connections to continuation', () => {
-  for (const s of [hostedAuthInstructions, installGuide('https://example.test')]) {
+  for (const s of [hostedAuthInstructions('https://example.test'), installGuide('https://example.test')]) {
     assert.match(s, /codex-client.mjs/); assert.match(s, /get_seats/);
   }
+});
+test('hosted guidance references the companion on the serving origin only', () => {
+  const s = hostedAuthInstructions('https://self-hosted.example');
+  assert.match(s, /https:\/\/self-hosted\.example\/codex-client\.mjs/);
+  assert.doesNotMatch(s, /vercel\.app|kevinbravo\.com/);
 });

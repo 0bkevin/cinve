@@ -25,8 +25,9 @@ cambiar antes de completar una compra.
 - Ciudades, sedes, películas y funciones.
 - Precios de entradas y caramelería cuando el proveedor los publica.
 - Mapas de asientos de Cinex, Cines Unidos y Cinepic.
-- Datos de Cinepic, Cines Unidos y Cinex. Trasnocho tiene cobertura limitada
-  porque su sitio bloquea actualmente las consultas automatizadas.
+- Datos de Cinepic, Cines Unidos y Cinex. Trasnocho tiene cobertura limitada:
+  su sitio exige un desafío anti-bots que Cinve no evade, y no publica otra
+  fuente de programación consultable.
 
 Algunas consultas de Cinex y Cines Unidos requieren que conectes tu cuenta del
 cine. Las credenciales se introducen únicamente en el formulario privado; no se
