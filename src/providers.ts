@@ -215,18 +215,25 @@ export async function cinesunidos(op: Operation, q: Query, c: ReadContext): Prom
   let city = requireArg(q, 'city');
   const key = op === 'cinemas' ? 'theaters' : 'movies';
   let url = `${CU}/${op === 'cinemas' ? 'cines' : 'cartelera'}?${new URLSearchParams({ city })}`;
-  let fields = pageFields(flight(await c.get(url, op === 'cinemas' ? 3600000 : 120000)), key);
-  if (!fields.length) {
-    // The provider's city filter is accent-sensitive. Retry only with a name
-    // actually returned by its official city registry, never guess a city.
-    const cities = await cinesunidos('cities', q, c);
-    const canonical = cities.find(r => folded(r.name) === folded(city))?.name;
-    if (!canonical) throw new DataError('unavailable', 'Ciudad no reconocida por Cines Unidos; consulta list_cities.');
-    if (canonical !== city) {
-      city = canonical;
-      url = `${CU}/${op === 'cinemas' ? 'cines' : 'cartelera'}?${new URLSearchParams({ city })}`;
-      fields = pageFields(flight(await c.get(url, op === 'cinemas' ? 3600000 : 120000)), key);
+  let fields: unknown[];
+  try {
+    fields = pageFields(flight(await c.get(url, op === 'cinemas' ? 3600000 : 120000)), key);
+    if (!fields.length) {
+      // The provider's city filter is accent-sensitive. Retry only with a name
+      // actually returned by its official city registry, never guess a city.
+      const canonical = await cinesUnidosCity(city, q, c);
+      if (canonical !== city) {
+        city = canonical;
+        url = `${CU}/${op === 'cinemas' ? 'cines' : 'cartelera'}?${new URLSearchParams({ city })}`;
+        fields = pageFields(flight(await c.get(url, op === 'cinemas' ? 3600000 : 120000)), key);
+      }
     }
+  } catch (error) {
+    // www.cinesunidos.com challenges some datacenter networks (including the
+    // hosted service's). Its public search API is not challenged; use it
+    // instead of the page, never a way around the challenge itself.
+    if (!(error instanceof DataError) || error.status !== 'blocked') throw error;
+    return cinesUnidosGateway(op, q, c, city);
   }
   if (!fields.length) throw new DataError('error', `No se reconoció el catálogo Cines Unidos: ${key}.`);
   if (op === 'cinemas') return parseCinemaDirectory(fields, city, url, c);
@@ -253,6 +260,51 @@ export async function cinesunidos(op: Operation, q: Query, c: ReadContext): Prom
       url: `${CU}/pelicula/${encodeURIComponent(mid)}?${new URLSearchParams({ city })}` });
   }
   return items;
+}
+
+async function cinesUnidosCity(city: string, q: Query, c: ReadContext): Promise<string> {
+  const cities = await cinesunidos('cities', q, c);
+  const canonical = cities.find(r => folded(r.name) === folded(city))?.name;
+  if (!canonical) throw new DataError('unavailable', 'Ciudad no reconocida por Cines Unidos; consulta list_cities.');
+  return canonical;
+}
+
+const cuGatewayTitles = 80;
+/** Cines Unidos public search API: directory, billboard titles and sessions by title. */
+async function cinesUnidosGateway(op: Operation, q: Query, c: ReadContext, requestedCity: string): Promise<DataItem[]> {
+  const city = await cinesUnidosCity(requestedCity, q, c);
+  const base = `https://gateway.cinesunidos.com/search/cities/${encodeURIComponent(city)}`;
+  const pageUrl = (path: string) => `${CU}/${path}?${new URLSearchParams({ city })}`;
+  c.warnings.push('La web de Cines Unidos rechazó la consulta automatizada; los datos provienen de su API pública de búsqueda.');
+  if (op === 'cinemas') return parseCinemaDirectory([rows(await c.json(`${base}/theaters`), 'gateway theaters')], city, pageUrl('cines'), c);
+  const films = await c.json(`${base}/films`);
+  if (!Array.isArray(films) || films.some(t => typeof t !== 'string')) throw new DataError('error', 'Lista de películas de Cines Unidos no reconocida.');
+  const titles = [...new Set((films as string[]).map(t => t.trim()).filter(t => t && t.length <= 200))];
+  if (titles.length > cuGatewayTitles) {
+    c.partial = true;
+    c.warnings.push(`Se consultaron ${cuGatewayTitles} de ${titles.length} títulos de Cines Unidos; el resultado es parcial.`);
+  }
+  const sessions: Obj[] = [];
+  // Small batches stay within the per-origin queue and keep the fan-out explicit.
+  const work = titles.slice(0, cuGatewayTitles);
+  for (let i = 0; i < work.length; i += 4) {
+    const batch = await Promise.all(work.slice(i, i + 4).map(async title =>
+      rows(await c.json(`${base}/sessions?${new URLSearchParams({ Title: title })}`), 'gateway sessions')));
+    sessions.push(...batch.flat());
+  }
+  const date = isoDate(q), showtimes: DataItem[] = [], movies = new Map<string, DataItem>();
+  for (const s of sessions) {
+    const raw = requiredText(s, 'showtime');
+    if (!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/.test(raw) || !DateInput.safeParse(raw.slice(0, 10)).success) throw new DataError('error', 'Fecha Cines Unidos con formato no reconocido.');
+    const mid = requiredText(s, 'ho'), cid = requiredText(s, 'cinemaId'), name = requiredText(s, 'title');
+    if (raw.slice(0, 10) !== date || (q.cinema_id && cid !== q.cinema_id) || (q.movie_id && mid !== q.movie_id)) continue;
+    const url = `${CU}/pelicula/${encodeURIComponent(mid)}?${new URLSearchParams({ city })}`;
+    showtimes.push({ kind: 'showtime', id: requiredText(s, 'sessionId'), name, cinema_id: cid, movie_id: mid,
+      date, time: raw.slice(11, 16), starts_at: `${raw}-04:00`, screen: text(s.screenNumber), format: text(s.format),
+      language: text(s.language), url });
+    if (!movies.has(mid)) movies.set(mid, { kind: 'movie', id: mid, name, city, url });
+  }
+  return op === 'showtimes' ? showtimes : [...movies.values()];
 }
 
 const CX = 'https://www.cinex.com.ve';

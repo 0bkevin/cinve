@@ -103,3 +103,42 @@ test('Cinex venue discovery stops at its time budget and keeps remaining venues 
   assert.ok(r.items.every(i => i.code_status === 'unverified' && i.id.startsWith('directory-')));
   assert.ok(r.warnings.some(w => /tiempo de comprobación/.test(w)));
 });
+
+test('Cines Unidos falls back to its public search API when the website challenges the client', async () => {
+  const requests: string[] = [];
+  const http = new HttpClient(async input => {
+    const url = new URL(String(input)); requests.push(url.hostname + url.pathname + url.search);
+    if (url.hostname === 'www.cinesunidos.com') return new Response('Just a moment...', { status: 403, headers: { 'cf-mitigated': 'challenge' } });
+    if (url.pathname === '/search/cities') return Response.json(['Caracas', 'Mérida']);
+    if (url.pathname === '/search/cities/M%C3%A9rida/theaters') return Response.json([{ id: '1012', name: 'Alto Prado', address: 'Av. Los Próceres' }]);
+    if (url.pathname === '/search/cities/M%C3%A9rida/films') return Response.json(['Duna Parte 3', 'Otra']);
+    if (url.pathname === '/search/cities/M%C3%A9rida/sessions') {
+      const title = url.searchParams.get('Title');
+      return Response.json(title === 'Duna Parte 3' ? [
+        { showtime: '2026-11-04T18:15:00', sessionId: '44788', screenNumber: 2, format: 'Digital', ho: 'HO00006098', title, cinemaId: '1012', language: 'Español' },
+        { showtime: '2026-11-05T18:15:00', sessionId: '44790', screenNumber: 2, format: 'Digital', ho: 'HO00006098', title, cinemaId: '1012', language: 'Español' },
+      ] : [{ showtime: '2026-11-04T20:00:00', sessionId: '5', screenNumber: 1, format: '3D', ho: 'HO1', title, cinemaId: '9999' }]);
+    }
+    return new Response('missing', { status: 404 });
+  });
+  const s = new CinemaService(http);
+  const cinemas = await s.query('cinemas', { provider: 'cinesunidos', city: 'merida' });
+  assert.equal(cinemas.status, 'available'); assert.equal(cinemas.items[0].cinema_id, '1012'); assert.equal(cinemas.items[0].city, 'Mérida');
+  assert.ok(cinemas.warnings.some(w => /API pública de búsqueda/.test(w)));
+  const showtimes = await s.query('showtimes', { provider: 'cinesunidos', city: 'Mérida', cinema_id: '1012', date: '2026-11-04' });
+  assert.deepEqual(showtimes.items.map(i => [i.id, i.movie_id, i.time, i.screen, i.starts_at]), [['44788', 'HO00006098', '18:15', '2', '2026-11-04T18:15:00-04:00']]);
+  const movies = await s.query('movies', { provider: 'cinesunidos', city: 'Mérida', date: '2026-11-04' });
+  assert.deepEqual(movies.items.map(i => i.id).sort(), ['HO00006098', 'HO1']);
+  assert.ok(requests.every(r => !r.includes('/tickets/')), 'the fallback never touches ticketing routes');
+  // A non-challenge failure is not masked by the fallback.
+  const down = await new CinemaService(new HttpClient(async () => new Response('down', { status: 503 }))).query('cinemas', { provider: 'cinesunidos', city: 'Caracas' });
+  assert.equal(down.status, 'error');
+});
+
+test('gateway search routes are allowed only with a bounded city and exact Title query', () => {
+  for (const ok of ['https://gateway.cinesunidos.com/search/cities/Caracas/theaters', 'https://gateway.cinesunidos.com/search/cities/M%C3%A9rida/films',
+    'https://gateway.cinesunidos.com/search/cities/Caracas/sessions?Title=Duna+Parte+3']) assert.doesNotThrow(() => assertPublicRead(ok), ok);
+  for (const bad of ['https://gateway.cinesunidos.com/search/cities/Caracas/sessions', 'https://gateway.cinesunidos.com/search/cities/Caracas/sessions?Title=a&x=1',
+    'https://gateway.cinesunidos.com/search/cities/Caracas/theaters?x=1', 'https://gateway.cinesunidos.com/search/cities/%2F/films',
+    'https://gateway.cinesunidos.com/search/cities/%E0%A4%A/films', 'https://gateway.cinesunidos.com/search/cities/Caracas/orders']) assert.throws(() => assertPublicRead(bad), DataError, bad);
+});
