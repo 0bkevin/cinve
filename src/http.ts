@@ -9,7 +9,7 @@ type Page = { body: string; source: EvidenceSource };
 type CacheEntry = { page: Page; expires: number; bytes: number; startedAt: number; keys: Set<string> };
 type Waiting = { start: () => boolean; cancel: () => void };
 type RefreshState = { keys: Set<string> };
-const hosts = new Set(['www.cinex.com.ve', 'www.cinesunidos.com', 'gateway.cinesunidos.com', 'cinepiccandelaria.com', 'cinepicvip.com', 'apifront.cinexo.com.ar', 'api.cinexo.com.ar', 'www.trasnochocultural.com']);
+const hosts = new Set(['www.cinex.com.ve', 'www.cinesunidos.com', 'gateway.cinesunidos.com', 'cinepiccandelaria.com', 'cinepicvip.com', 'apifront.cinexo.com.ar', 'api.cinexo.com.ar']);
 
 function cancelBody(body: ReadableStream<Uint8Array> | null | undefined) {
   if (!body) return;
@@ -381,8 +381,6 @@ export function assertPublicRead(value: string) {
           exactQuery(u, { idComplejo: ids, fecha: v => !!v && /^\d{2}\/\d{2}\/\d{4}$/.test(v) });
       case 'api.cinexo.com.ar':
         { const m = path.match(/^\/api\/complejo\/([^/]+)\/candy$/); return !!m && none && Id.safeParse(m[1]).success; }
-      case 'www.trasnochocultural.com':
-        return path === '/cine/' && none;
       default:
         return false;
     }

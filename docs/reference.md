@@ -20,7 +20,7 @@ o mantener Cinve. Para empezar, consulta el [README](../README.md).
 | `get_concessions` | Consulta la caramelería publicada para una sede. |
 
 Salvo `list_providers` y `get_auth_status`, las herramientas reciben `provider`:
-`cinepic`, `cinesunidos`, `cinex` o `trasnocho`. Los listados admiten `query`
+`cinepic`, `cinesunidos` o `cinex`. Los listados admiten `query`
 cuando corresponde, `offset` y `limit` —50 por defecto y 100 como máximo—.
 Continúa con `next_offset` hasta que sea `null`.
 
@@ -58,7 +58,6 @@ que Cinve omitió o no pudo verificar parte de la respuesta.
 | Cinepic | Dos sedes configuradas; películas, funciones, precios, asientos y consulta de caramelería. | No descubre sedes nuevas automáticamente. La conversión a USD usa la tasa publicada por el proveedor. |
 | Cines Unidos | Ciudades, sedes, películas, funciones, caramelería, precios y asientos. | Precios y asientos requieren una cuenta conectada. Si su web exige un desafío anti-bots (ocurre desde algunas redes de centros de datos, como la del servicio alojado), sedes, películas y funciones se leen de su API pública de búsqueda y el resultado lo advierte. |
 | Cinex | Ciudades, sedes, catálogo, funciones, precios, caramelería y asientos. | Precios, caramelería y asientos requieren una cuenta conectada. Algunos cruces de títulos pueden ser parciales. El descubrimiento de sedes tiene un plazo total de 40 s; las sedes sin comprobar se devuelven como `unverified` y `partial`. |
-| Trasnocho | Comprobación de acceso. | El sitio exige un desafío anti-bots de Cloudflare (HTTP 403 con `cf-mitigated: challenge`) a los clientes automatizados, incluida su API de WordPress. Cinve informa `blocked` y no evade esa protección. Su cartelera se publica como productos WooCommerce del mismo dominio protegido; no hay una API o taquilla externa alternativa. Integrarla requiere que Trasnocho autorice a Cinve, por ejemplo como bot verificado, o publique una fuente abierta. |
 
 La cobertura describe implementaciones, no certifica que cada proveedor esté
 disponible en todo momento ni que abarque todos los cines de Venezuela.

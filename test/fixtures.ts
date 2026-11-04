@@ -43,7 +43,6 @@ export const mockFetch: typeof fetch = async (input) => {
   else if (url.includes('/concessions/www/')) body = JSON.stringify(concessions);
   else if (url.includes('/cartelera?')) body = page(cuMovies);
   else if (url.includes('/sinopsis-')) body = cxSession;
-  else if (url.includes('trasnochocultural')) return new Response('blocked', { status: 403 });
   else throw new Error('Unexpected fixture URL: ' + url);
   return new Response(body, { status: 200 });
 };

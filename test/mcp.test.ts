@@ -46,9 +46,6 @@ test('official MCP client discovers tools, validates arguments and reads structu
     assert.match(SeatResult.parse(seats.structuredContent).ascii, /A:1O/);
     const privateSeats = await client.callTool({ name: 'get_seats', arguments: { provider: 'cinesunidos', cinema_id: '1005', session_id: 's1' } });
     assert.equal(SeatResult.parse(privateSeats.structuredContent).status, 'auth_required');
-    const blocked = await client.callTool({ name: 'list_movies', arguments: { provider: 'trasnocho' } });
-    assert.equal(blocked.isError, true);
-    assert.equal(Result.parse(blocked.structuredContent).status, 'blocked');
   } finally { await client.close(); }
 });
 
