@@ -467,4 +467,3 @@ export async function cinex(op: Operation, q: Query, c: ReadContext, catalog = n
   const movies = parseCinexMovies(await c.get(`${CX}/cartelera.html`, 120000));
   return parseCinexCinemaShowtimes(page.body, movies, cinemaId, date, c, venue.url);
 }
-

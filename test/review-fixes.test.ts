@@ -85,7 +85,7 @@ test('a Cloudflare challenge is reported as an explicit block without evasion', 
   let calls = 0;
   const s = new CinemaService(new HttpClient(async () => { calls++; return new Response('Just a moment...', { status: 403, headers: { 'cf-mitigated': 'challenge' } }); }));
   const r = await s.query('movies', { provider: 'cinex' });
-  assert.equal(r.status, 'blocked'); assert.equal(calls, 1);
+  assert.equal(r.status, 'blocked'); assert.equal(calls, 1); assert.equal(r.sources.length, 0);
   assert.ok(r.warnings.some(w => /desafío anti-bots/.test(w) && /no evade/.test(w)), r.warnings.join(' | '));
 });
 
