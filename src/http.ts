@@ -360,6 +360,15 @@ export function assertPublicRead(value: string) {
         return ['/cines', '/cartelera'].includes(path) && exactQuery(u, { city: v => !!v && v.length <= 80 });
       case 'gateway.cinesunidos.com':
         if (path === '/search/cities') return none;
+        {
+          const m = path.match(/^\/search\/cities\/([^/]+)\/(theaters|films|sessions)$/);
+          if (m) {
+            let city = '';
+            try { city = decodeURIComponent(m[1]); } catch { return false; }
+            if (!city || city.length > 80 || /[\u0000-\u001f/\\]/.test(city)) return false;
+            return m[2] === 'sessions' ? exactQuery(u, { Title: v => !!v && v.length <= 200 }) : none;
+          }
+        }
         { const m = path.match(/^\/concessions\/www\/cinemas\/([^/]+)\/concessions$/); return !!m && none && Id.safeParse(m[1]).success; }
       case 'cinepiccandelaria.com': case 'cinepicvip.com':
         if (path === '/es-AR') return none;
