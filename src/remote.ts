@@ -1,6 +1,18 @@
 import { constants } from 'node:fs';
 import { open } from 'node:fs/promises';
-import { SERVER_INFO_META_KEY, Server } from '@modelcontextprotocol/server';
+import { McpServer, SERVER_INFO_META_KEY, fromJsonSchema } from '@modelcontextprotocol/server';
+import type { JsonSchemaType, StandardSchemaWithJSON } from '@modelcontextprotocol/server';
+
+/**
+ * Publishes an upstream JSON Schema unchanged but leaves validation to the
+ * hosted server. Re-validating here would replace its guidance messages
+ * ("Se requiere cinema_id; obtenlo con list_cinemas") with generic ones and
+ * reject arguments it deliberately accepts, such as null for "not given".
+ */
+function upstreamSchema(schema: JsonSchemaType): StandardSchemaWithJSON {
+  const published = fromJsonSchema(schema)['~standard'];
+  return { '~standard': { ...published, validate: (value: unknown) => ({ value }) } };
+}
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 
 export async function remoteConfig(path: string) {
@@ -20,10 +32,9 @@ export async function createRemoteServer(config: { url: string; token: string })
   // Preserve the upstream usage guidance so a stdio client receives the same
   // account and data handling instructions as a direct hosted client.
   const instructions = client.getInstructions();
-  const server = new Server({ name: 'cinve', version: '0.1.0' }, {
-    capabilities: { tools: {} },
-    ...(instructions ? { instructions } : {}),
-  });
+  // The high-level McpServer (the low-level Server class is deprecated for
+  // this use) re-publishes each upstream tool with its own JSON Schemas.
+  const server = new McpServer({ name: 'cinve', version: '0.1.0' }, instructions ? { instructions } : undefined);
   const stripServerIdentity = (meta: Record<string, unknown> | undefined) => {
     if (!meta) return undefined;
     const forwarded = { ...meta };
@@ -32,23 +43,27 @@ export async function createRemoteServer(config: { url: string; token: string })
     delete forwarded[SERVER_INFO_META_KEY];
     return Object.keys(forwarded).length ? forwarded : undefined;
   };
-  server.setRequestHandler('tools/list', async request => {
-    const result = await client.listTools(request.params);
-    const { _meta, ...body } = result;
-    const forwarded = stripServerIdentity(_meta);
-    return { ...body, ...(forwarded ? { _meta: forwarded } : {}) };
-  });
-  server.setRequestHandler('tools/call', async request => {
-    // Forward tool metadata as well as ordinary results. This bridge does not
-    // implement elicitation, so it intentionally does not advertise it.
-    const result = await client.callTool(request.params);
-    const { _meta, ...body } = result;
-    const forwarded = stripServerIdentity(_meta);
-    return {
-      ...body,
-      ...(forwarded ? { _meta: forwarded } : {}),
-    };
-  });
-  server.onclose = () => { void client.close(); };
+  const tools = [];
+  let cursor: string | undefined;
+  do {
+    const page = await client.listTools(cursor ? { cursor } : undefined);
+    tools.push(...page.tools); cursor = page.nextCursor;
+  } while (cursor);
+  for (const tool of tools) {
+    server.registerTool(tool.name, {
+      title: tool.title, description: tool.description, annotations: tool.annotations,
+      inputSchema: upstreamSchema(tool.inputSchema as JsonSchemaType),
+      ...(tool.outputSchema ? { outputSchema: upstreamSchema(tool.outputSchema as JsonSchemaType) } : {}),
+    }, async (args, ctx) => {
+      // Forward tool metadata as well as ordinary results, and the caller's
+      // cancellation. This bridge does not implement elicitation, so it
+      // intentionally does not advertise it.
+      const result = await client.callTool({ name: tool.name, arguments: args as Record<string, unknown> }, { signal: ctx.mcpReq.signal });
+      const { _meta, ...body } = result;
+      const forwarded = stripServerIdentity(_meta);
+      return { ...body, ...(forwarded ? { _meta: forwarded } : {}) } as typeof result;
+    });
+  }
+  server.server.onclose = () => { void client.close(); };
   return server;
 }

@@ -91,6 +91,9 @@ test('stdio bridge forwards application metadata but keeps its own server identi
   upstream.registerTool('metadata_fixture', {
     title: 'Metadata fixture', inputSchema: z.object({}), outputSchema: z.object({ ok: z.literal(true) }),
   }, async () => ({ content: [{ type: 'text', text: '{"ok":true}' }], structuredContent: { ok: true }, _meta: { 'fixture-key': 'preserved' } }));
+  upstream.registerTool('echo_fixture', {
+    description: 'Echo', inputSchema: z.object({ city: z.string().min(1).describe('Ciudad') }).strict(), annotations: { readOnlyHint: true },
+  }, async ({ city }) => ({ content: [{ type: 'text', text: city }] }));
   const upstreamHandler = createMcpHandler(() => upstream, { maxSubscriptions: 0, keepAliveMs: 0 });
   const http = nodeServer((req, res) => { void toNodeHandler(upstreamHandler)(req, res); });
   await new Promise<void>(resolve => http.listen(0, '127.0.0.1', resolve));
@@ -106,4 +109,12 @@ test('stdio bridge forwards application metadata but keeps its own server identi
   const result = await client.callTool({ name: 'metadata_fixture', arguments: {} });
   assert.equal((result._meta as Record<string, unknown>)['fixture-key'], 'preserved');
   assert.equal(client.getServerVersion()?.name, 'cinve');
+  // Tools are re-published with their upstream schemas, annotations and descriptions.
+  const echo = (await client.listTools()).tools.find(tool => tool.name === 'echo_fixture');
+  assert.equal(echo?.description, 'Echo'); assert.equal(echo?.annotations?.readOnlyHint, true);
+  assert.deepEqual((echo?.inputSchema as { required?: string[] }).required, ['city']);
+  assert.equal(((await client.callTool({ name: 'echo_fixture', arguments: { city: 'Caracas' } })).content[0] as { text: string }).text, 'Caracas');
+  // Validation stays upstream, with its own messages.
+  const invalid = await client.callTool({ name: 'echo_fixture', arguments: {} });
+  assert.equal(invalid.isError, true); assert.match(JSON.stringify(invalid.content), /city/);
 });
