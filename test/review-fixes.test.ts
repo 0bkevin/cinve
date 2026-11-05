@@ -6,6 +6,7 @@ import { HttpClient, ReadContext, assertPublicRead } from '../src/http.js';
 import { DataError, Id } from '../src/core.js';
 import { parseCinexMovies, parseCinexCinemaShowtimes } from '../src/providers.js';
 import { page } from './fixtures.js';
+import { inputSchema } from '../src/server.js';
 
 const epoch = (date: string, time = '18:00') => String(Date.parse(`${date}T${time}:00-04:00`) / 1000);
 
@@ -190,4 +191,10 @@ test('one city read through the search API fits in the cache alongside another c
   assert.equal(again.sources.length, 10);
   const oldest = again.sources.reduce((a, b) => (b.fetched_at < a.fetched_at ? b : a)).fetched_at;
   assert.ok(again.warnings.some(w => w.includes('Se consultaron 62 fuentes') && w.includes(oldest)), again.warnings.join(' | '));
+});
+
+test('Cinepic calls without a venue name the two valid IDs, avoiding a discovery call', () => {
+  const r = inputSchema('showtimes').safeParse({ provider: 'cinepic' });
+  assert.equal(r.success, false);
+  assert.match(r.error!.issues[0].message, /123300 \(Candelaria\) o 123301 \(VVIP Lido\)/);
 });

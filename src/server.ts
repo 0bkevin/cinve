@@ -37,7 +37,9 @@ export function inputSchema(op: Operation): z.ZodType<Query> {
   return base.superRefine((value, ctx) => {
     const q = value as Query;
     const need = (field: 'city' | 'cinema_id' | 'movie_id' | 'session_id') => {
-      if (!q[field]) ctx.addIssue({ code: 'custom', path: [field], message: `Se requiere ${field} para ${q.provider}/${op}.` });
+      // Cinepic has two fixed venues: naming them saves the model a discovery call.
+      const hint = q.provider === 'cinepic' && field === 'cinema_id' ? ' Usa 123300 (Candelaria) o 123301 (VVIP Lido).' : '';
+      if (!q[field]) ctx.addIssue({ code: 'custom', path: [field], message: `Se requiere ${field} para ${q.provider}/${op}.${hint}` });
     };
     if (q.provider === 'cinepic') {
       if (q.city && op !== 'cinemas') ctx.addIssue({ code: 'custom', path: ['city'], message: 'Para Cinepic usa cinema_id como contexto de consulta.' });
@@ -144,8 +146,8 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
   const tools: Array<[string, Operation, string]> = [
     ['list_cities', 'cities', 'Lista ciudades del proveedor. Usa sus nombres al consultar Cines Unidos.'],
     ['list_cinemas', 'cinemas', 'Lista sedes e IDs. Cines Unidos requiere city; Cinepic verifica las sedes configuradas Candelaria y VVIP Lido. Los proveedores conservan sedes conocidas sin código verificado (code_status=unverified). Cinex admite city opcional e incluye sedes conocidas ausentes del directorio actual (directory_status=not_listed); ninguna condición indica cierre.'],
-    ['list_movies', 'movies', 'Busca películas por nombre. Cinepic requiere cinema_id y filtra funciones del día; Cines Unidos requiere city y permite cinema_id/date. Cinex devuelve catálogo general sin fecha/sede: solo provider, query y paginación. Los IDs pertenecen al proveedor y, en Cinepic, a la sede.'],
-    ['get_showtimes', 'showtimes', 'Consulta funciones de una fecha (hoy en Caracas por defecto). Cinepic requiere cinema_id; Cines Unidos city; Cinex acepta cinema_id para una sola llamada con toda la sede o movie_id para conservar la consulta de una ficha. La llamada de sede resuelve títulos contra el catálogo y marca partial cuando no puede confirmar un movie_id. Retorna IDs necesarios para tarifas, sala/formato cuando disponibles y URL de la web.'],
+    ['list_movies', 'movies', 'Busca películas por nombre. Cinepic requiere cinema_id (123300 Candelaria o 123301 VVIP Lido) y filtra funciones del día; Cines Unidos requiere city y permite cinema_id/date. Cinex devuelve catálogo general sin fecha/sede: solo provider, query y paginación. Los IDs pertenecen al proveedor y, en Cinepic, a la sede.'],
+    ['get_showtimes', 'showtimes', 'Consulta funciones de una fecha (hoy en Caracas por defecto). Cinepic requiere cinema_id (123300 Candelaria o 123301 VVIP Lido); Cines Unidos city; Cinex acepta cinema_id para una sola llamada con toda la sede o movie_id para conservar la consulta de una ficha. La llamada de sede resuelve títulos contra el catálogo y marca partial cuando no puede confirmar un movie_id. Retorna IDs necesarios para tarifas, sala/formato cuando disponibles y URL de la web.'],
     ['get_ticket_prices', 'prices', 'Consulta tarifas. Cinepic requiere cinema_id, movie_id y session_id de get_showtimes. Cines Unidos requiere cinema_id, session_id y una cuenta conectada. Cinex: cinema_id y session_id con una cuenta conectada; sin session_id consulta listado público que puede no estar disponible. Devuelve USD/VES cuando verificables, desglose Cinex en VES. No devuelve totales finales de compra.'],
     ['get_concessions', 'concessions', 'Consulta caramelería por sede. Cinepic y Cines Unidos requieren solo cinema_id, por API pública; Cinepic puede devolver catálogo vacío. Cinex requiere cinema_id y una cuenta conectada. Stock solo cuando está verificado; no usa cero para precios ausentes.'],
   ];
