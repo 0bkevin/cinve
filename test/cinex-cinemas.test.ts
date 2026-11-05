@@ -4,6 +4,7 @@ import { CinemaService } from '../src/service.js';
 import { CinexCinemaCatalog } from '../src/cinex-cinemas.js';
 import { HttpClient } from '../src/http.js';
 import { outputSchema } from '../src/core.js';
+import { inputSchema } from '../src/server.js';
 
 const base = 'https://www.cinex.com.ve';
 const card = (slug: string, name: string, image: string, city = 'Caracas') => `<a href="cinex-${slug}.html" title="Cinex ${name}, ${city}"><img src="${base}/assets/images/cinemas/${image}"><h3>${name}</h3></a>`;
@@ -424,4 +425,30 @@ test('a Cinex venue plus movie query reads the venue page, not the synopsis page
   const movieOnly = await s.query('showtimes', { provider: 'cinex', movie_id: 'elsilbon', date: '2026-09-18' });
   assert.equal(movieOnly.status, 'unavailable');
   assert.ok(movieOnly.warnings.some(w => /cinema_id de cada sede/.test(w)), movieOnly.warnings.join(' | '));
+});
+
+test('Cinex city showtimes read every verified venue of the city in one call and keep the ones that answer', async () => {
+  const epoch = (time: string) => String(Date.parse(`2026-09-18T${time}:00-04:00`) / 1000);
+  const requests: string[] = [];
+  const http = new HttpClient(async input => {
+    const url = new URL(String(input)); requests.push(url.pathname);
+    if (url.pathname === '/cines.html') return new Response(card('sambil', 'Sambil', 'xSBC.jpg') + card('lider', 'Lider', 'xLDR.jpg') + card('tolon', 'Tolon', 'xTLN.jpg', 'Valencia'));
+    if (url.pathname === '/assets/php/datasource.php') {
+      const id = url.searchParams.get('cinemaid');
+      return Response.json({ data: [{ siglas: id, name: id === 'SBC' ? 'Sambil' : id === 'LDR' ? 'Lider' : 'Tolon' }] });
+    }
+    if (url.pathname === '/cartelera.html') return new Response(`<div class="poster" onclick="x('sinopsis-clayface.html')" title="CLAYFACE"></div>`);
+    if (url.pathname === '/cinex-sambil.html') return new Response(`<h3 class="title">SAMBIL</h3><div class="sessionslist"><h5 class="title">CLAYFACE</h5><button onclick="checkLogin('1','SBC')" alt="${epoch('20:30')}"></button></div>`);
+    if (url.pathname === '/cinex-lider.html') return new Response('down', { status: 503 });
+    return new Response('missing', { status: 404 });
+  });
+  const r = await new CinemaService(http, new CinexCinemaCatalog()).query('showtimes', { provider: 'cinex', city: 'caracas', date: '2026-09-18' });
+  assert.equal(r.status, 'available');
+  assert.deepEqual(r.items.map(i => [i.id, i.cinema_id, i.cinema_name, i.movie_id, i.time]), [['1', 'SBC', 'Sambil', 'clayface', '20:30']]);
+  assert.equal(r.partial, true);
+  assert.ok(r.warnings.some(w => /1 sedes Cinex \(Lider\)/.test(w)), r.warnings.join(' | '));
+  assert.ok(!requests.includes('/cinex-tolon.html'), 'venues of other cities are not read');
+  assert.equal(inputSchema('showtimes').safeParse({ provider: 'cinex', city: 'Caracas' }).success, true);
+  assert.equal(inputSchema('showtimes').safeParse({ provider: 'cinex', city: 'Caracas', cinema_id: 'SBC' }).success, false);
+  assert.equal(inputSchema('showtimes').safeParse({ provider: 'cinex' }).success, false);
 });

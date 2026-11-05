@@ -492,10 +492,61 @@ export async function cinex(op: Operation, q: Query, c: ReadContext, catalog = n
       throw error;
     }
   }
+  if (q.city && !q.cinema_id) return cinexCityShowtimes(q, c, catalog, date);
   const cinemaId = requireArg(q, 'cinema_id');
   const venue = await catalog.resolve(cinemaId, c);
   const page = venue.body === undefined ? await c.page(venue.url, 120000) : { body: venue.body };
   const movies = parseCinexMovies(await c.get(`${CX}/cartelera.html`, 120000));
   const items = parseCinexCinemaShowtimes(page.body, movies, cinemaId, date, c, venue.url, venue.name ? warningLabel(decodeLabel(venue.name), 200) || undefined : undefined);
   return q.movie_id ? items.filter(r => r.movie_id === q.movie_id) : items;
+}
+
+const cinexCityVenues = 16;
+const cinexCityBudgetMs = 30000;
+/**
+ * All verified venues of one city in one call. A model would otherwise list
+ * the city's venues and query each one: ten round trips for Caracas. The
+ * upstream reads are the same ones (directory, one page per venue, catalog),
+ * served from the same cache, in batches that stay within the origin queue.
+ */
+async function cinexCityShowtimes(q: Query, c: ReadContext, catalog: CinexCinemaCatalog, date: string): Promise<DataItem[]> {
+  const started = Date.now();
+  const listed = await catalog.list({ provider: 'cinex', city: q.city }, c);
+  const venues = listed.filter((v): v is DataItem & { cinema_id: string } => v.code_status === 'verified' && !!v.cinema_id);
+  if (!venues.length) {
+    c.warnings.push(listed.length
+      ? 'Las sedes Cinex de esta ciudad no tienen código verificado; consulta list_cinemas y sus enlaces oficiales.'
+      : 'No se encontraron sedes Cinex en esta ciudad; consulta list_cities para ver los nombres disponibles.');
+    return [];
+  }
+  const work = venues.slice(0, cinexCityVenues);
+  if (venues.length > work.length) {
+    c.partial = true;
+    c.warnings.push(`Se consultaron ${work.length} de ${venues.length} sedes Cinex de la ciudad; usa cinema_id para las demás.`);
+  }
+  const movies = parseCinexMovies(await c.get(`${CX}/cartelera.html`, 120000));
+  const items: DataItem[] = [], failed: string[] = [], skipped: string[] = [];
+  let firstError: unknown;
+  for (let i = 0; i < work.length; i += 4) {
+    if (Date.now() - started >= cinexCityBudgetMs) { skipped.push(...work.slice(i).map(v => v.name)); break; }
+    const batch = await Promise.allSettled(work.slice(i, i + 4).map(async v => {
+      const venue = await catalog.resolve(v.cinema_id, c);
+      const page = venue.body === undefined ? await c.page(venue.url, 120000) : { body: venue.body };
+      return parseCinexCinemaShowtimes(page.body, movies, v.cinema_id, date, c, venue.url, warningLabel(decodeLabel(v.name), 200) || undefined);
+    }));
+    batch.forEach((outcome, j) => {
+      if (outcome.status === 'fulfilled') items.push(...outcome.value);
+      else { failed.push(work[i + j].name); firstError ??= outcome.reason; }
+    });
+  }
+  if (failed.length === work.length) throw firstError;
+  if (failed.length) {
+    c.partial = true;
+    c.warnings.push(`No se pudieron leer las funciones de ${failed.length} sedes Cinex (${failed.map(n => warningLabel(n, 60)).join(', ')}); consulta su cinema_id por separado.`);
+  }
+  if (skipped.length) {
+    c.partial = true;
+    c.warnings.push(`Se agotó el tiempo de consulta antes de leer ${skipped.length} sedes Cinex (${skipped.map(n => warningLabel(n, 60)).join(', ')}); consulta su cinema_id por separado.`);
+  }
+  return items;
 }
