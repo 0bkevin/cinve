@@ -6,7 +6,10 @@ import { HttpClient, ReadContext } from './http.js';
 import { cpBuy } from './providers.js';
 import { findField, object, rows } from './parsers.js';
 
-const label = z.string().min(1).max(40).regex(/^[\p{L}\p{N} _:.()-]+$/u);
+// Unicode property escapes (\p{L}) are invalid in Python's re and RE2, and
+// MCP clients such as the Python SDK validate structuredContent against the
+// published outputSchema, so this rule is a server-side refinement.
+const label = z.string().min(1).max(40).refine(value => /^[\p{L}\p{N} _:.()-]+$/u.test(value), 'Etiqueta de asiento no válida.');
 const coordinate = z.number().int().min(0).max(199);
 export const Seat = z.object({
   id: z.string().min(1).max(200), label, row: label, area: label,
