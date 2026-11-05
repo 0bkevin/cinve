@@ -272,7 +272,8 @@ async function cinesUnidosCity(city: string, q: Query, c: ReadContext): Promise<
 const cuGatewayTitles = 80;
 // One deadline for the whole fan-out: forty slow titles at two reads at a
 // time could otherwise run past the hosted 90 s limit while every single read
-// stays within its own 15 s.
+// stays within its own 15 s. It never extends past the call's own deadline
+// (ReadContext), which also counts the page, city and film reads before it.
 const cuGatewayBudgetMs = 45000;
 const cuGatewayWorkers = 2;
 /** Cines Unidos public search API: directory, billboard titles and sessions by title. */
@@ -311,7 +312,7 @@ async function cinesUnidosGateway(op: Operation, q: Query, c: ReadContext, reque
   const showtimes: DataItem[] = [];
   const failures: unknown[] = [];
   const work = titles.slice(0, cuGatewayTitles);
-  const deadline = Date.now() + cuGatewayBudgetMs;
+  const deadline = c.budget(cuGatewayBudgetMs);
   let next = 0, succeeded = 0;
   // Two workers match the HTTP client's two reads per origin, whose 15 s
   // deadline includes queue time; more would only time out waiting.
@@ -546,8 +547,9 @@ export async function cinex(op: Operation, q: Query, c: ReadContext, catalog = n
 }
 
 const cinexCityVenues = 16;
-// One deadline for discovery, catalog and venue reads; with at most one read
-// in flight per worker past it (15 s), a call stays well under the hosted 90 s.
+// One deadline for discovery, catalog and venue reads, capped by the call's
+// own deadline (ReadContext), which also stops the follow-up reads a venue's
+// resolution may chain; the call stays under the hosted 90 s.
 const cinexCityBudgetMs = 45000;
 // The HTTP client admits two reads per origin and each read's 15 s deadline
 // includes its queue time, so more workers would only time out in the queue.
@@ -559,7 +561,7 @@ const cinexCityWorkers = 2;
  * served from the same cache.
  */
 async function cinexCityShowtimes(q: Query, c: ReadContext, catalog: CinexCinemaCatalog, date: string): Promise<DataItem[]> {
-  const deadline = Date.now() + cinexCityBudgetMs;
+  const deadline = c.budget(cinexCityBudgetMs);
   const listed = await catalog.list({ provider: 'cinex', city: q.city }, c);
   const venues = listed.filter((v): v is DataItem & { cinema_id: string } => v.code_status === 'verified' && !!v.cinema_id);
   // Known venues without a verified code are unread schedules, not an empty

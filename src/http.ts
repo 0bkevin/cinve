@@ -426,25 +426,40 @@ export function assertPublicRead(value: string) {
 /** Per-call options from the MCP request: its cancellation and progress reporting. */
 export type CallOptions = { signal?: AbortSignal; progress?: (message: string) => void };
 
+/**
+ * No provider read starts once this much of one tool call has elapsed. A read
+ * already in flight may still take its own 15 s, so a call stays near 75 s,
+ * under the hosted 90 s limit, however its reads are chained or fanned out.
+ */
+export const operationBudgetMs = 60000;
 export class ReadContext {
   sources: EvidenceSource[] = [];
   warnings: string[] = [];
   partial = false;
+  /** Epoch ms after which this call starts no further provider reads. */
+  readonly deadline: number;
   /**
    * @param signal The MCP request's cancellation. A cancelled call starts no
    * further provider reads, so fan-outs stop at their next read; reads already
    * in flight finish, since other callers may share them through the cache.
    */
-  constructor(private http: HttpClient, private refresh = false, private call: CallOptions = {}) {}
-  private checkCancelled() {
+  constructor(private http: HttpClient, private refresh = false, private call: CallOptions = {}, budgetMs = operationBudgetMs) {
+    this.deadline = Date.now() + budgetMs;
+  }
+  /** The earlier of `ms` from now and the call's own deadline, for a fan-out's loop. */
+  budget(ms: number) { return Math.min(Date.now() + ms, this.deadline); }
+  private checkCanRead() {
     if (this.call.signal?.aborted) throw new DataError('error', 'La consulta fue cancelada por el cliente.');
+    // 'error', like a read timeout: an 'unavailable' here would read as a
+    // missing page and make callers discard verified state or try fallbacks.
+    if (Date.now() >= this.deadline) throw new DataError('error', 'Se agotó el tiempo de esta consulta antes de terminar de leer el proveedor; repítela o acótala con cinema_id, movie_id o query.');
   }
   /** Reports one completed step of a fan-out, when the client asked for progress. */
   progress(message: string) {
     try { this.call.progress?.(message); } catch { /* Progress is advisory; it never fails a read. */ }
   }
   async authenticated(provider: AuthProviderId, url: string): Promise<string> {
-    this.checkCancelled();
+    this.checkCanRead();
     const page = await this.http.getAuthenticated(provider, url);
     if (!this.sources.some(s => s.url === page.source.url)) this.sources.push(page.source);
     return page.body;
@@ -454,7 +469,7 @@ export class ReadContext {
   }
   async page(url: string, ttl?: number): Promise<Page> {
     assertPublicRead(url);
-    this.checkCancelled();
+    this.checkCanRead();
     const page = await this.http.get(url, ttl, this.refresh);
     if (!this.sources.some(s => s.url === page.source.url)) this.sources.push(page.source);
     return page;

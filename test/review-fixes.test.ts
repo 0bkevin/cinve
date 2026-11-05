@@ -337,3 +337,39 @@ test('the Cines Unidos search fallback stops at its total deadline and keeps the
   assert.ok(r.total > 0 && r.total < 10, `${r.total} titles read before the 45 s budget`);
   assert.ok(r.warnings.some(w => /Se agotó el tiempo de consulta antes de leer \d+ de 40 títulos/.test(w)), r.warnings.join(' | '));
 });
+
+test('a call starts no provider read past its own deadline, whatever chain of reads it is in', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: 0 });
+  let reads = 0;
+  const c = new ReadContext(new HttpClient(async () => { reads++; return new Response('ok'); }), false, {}, 1000);
+  assert.equal(c.budget(5000), 1000, 'a fan-out budget never extends past the call deadline');
+  assert.equal(c.budget(500), 500);
+  await c.get('https://www.cinex.com.ve/cines.html');
+  t.mock.timers.tick(1000);
+  await assert.rejects(c.get('https://www.cinex.com.ve/cartelera.html'), (e: DataError) => e.status === 'error' && /Se agotó el tiempo de esta consulta/.test(e.message));
+  assert.equal(reads, 1);
+});
+
+test('the Cines Unidos search fallback counts its setup reads against the hosted time limit', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-04T12:00:00Z') });
+  const started = Date.now();
+  // Every read takes 14 s, just under the per-read deadline: the challenged
+  // page, the city registry and the film list use 42 s before any title search.
+  const http = new HttpClient(async input => {
+    const url = new URL(String(input));
+    t.mock.timers.tick(14000);
+    if (url.hostname === 'www.cinesunidos.com') return new Response('Just a moment...', { status: 403, headers: { 'cf-mitigated': 'challenge' } });
+    if (url.pathname === '/search/cities') return Response.json(['Caracas']);
+    if (url.pathname.endsWith('/films')) return Response.json(Array.from({ length: 8 }, (_, i) => `Film ${i}`));
+    if (url.pathname.endsWith('/sessions')) {
+      const title = url.searchParams.get('Title')!;
+      return Response.json([{ showtime: '2026-11-04T19:00:00', sessionId: title.replace(' ', '-'), ho: `HO${title.slice(5)}`, title, cinemaId: '1005' }]);
+    }
+    return new Response('missing', { status: 404 });
+  }, 15000);
+  const r = await new CinemaService(http).query('showtimes', { provider: 'cinesunidos', city: 'Caracas', date: '2026-11-04' });
+  const elapsed = Date.now() - started;
+  assert.ok(elapsed <= 75000, `finished after ${elapsed} ms; reads must stop starting at 60 s`);
+  assert.equal(r.status, 'available'); assert.equal(r.partial, true);
+  assert.ok(r.total > 0 && r.total < 8, String(r.total));
+});

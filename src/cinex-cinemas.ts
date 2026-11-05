@@ -130,7 +130,7 @@ export class CinexCinemaCatalog {
       warn(`Se limitaron las comprobaciones de sedes a ${maxDiscoveryVenues}; se omitieron ${venues.length - work.length} candidatas. El resultado es parcial.`);
     }
     // Limit fan-out so one discovery call has a real, explicit work bound.
-    const deadline = Date.now() + this.discoveryBudgetMs;
+    const deadline = c.budget(this.discoveryBudgetMs);
     for (let i = 0; i < work.length; i += 4) {
       if (Date.now() >= deadline) {
         // Keep the remaining directory venues visible, without unverifiable codes.
