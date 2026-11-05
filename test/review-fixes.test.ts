@@ -373,3 +373,18 @@ test('the Cines Unidos search fallback counts its setup reads against the hosted
   assert.equal(r.status, 'available'); assert.equal(r.partial, true);
   assert.ok(r.total > 0 && r.total < 8, String(r.total));
 });
+
+test('a Cinex movie_id without a synopsis page is reported as a wrong ID, not as a film without functions', async () => {
+  const http = new HttpClient(async input => {
+    const url = new URL(String(input));
+    if (url.pathname === '/sinopsis-clayface.html') return new Response('<h1>CLAYFACE</h1>');
+    return new Response('missing', { status: 404 });
+  });
+  const s = new CinemaService(http);
+  const missing = await s.query('showtimes', { provider: 'cinex', movie_id: 'noexiste', date: '2026-09-18' });
+  assert.equal(missing.status, 'unavailable');
+  assert.ok(missing.warnings.some(w => /no tiene una ficha para ese movie_id; obtén un ID vigente con list_movies/.test(w)), missing.warnings.join(' | '));
+  const empty = await s.query('showtimes', { provider: 'cinex', movie_id: 'clayface', date: '2026-09-18' });
+  assert.equal(empty.status, 'unavailable');
+  assert.ok(empty.warnings.some(w => /no lista funciones/.test(w)), empty.warnings.join(' | '));
+});

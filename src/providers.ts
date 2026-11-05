@@ -536,9 +536,16 @@ export async function cinex(op: Operation, q: Query, c: ReadContext, catalog = n
   // functions while the venue page shows that film. Filter it by movie.
   if (q.movie_id && !q.cinema_id) {
     const mid = q.movie_id;
-    try {
-      return parseCinexShowtimes(await c.get(`${CX}/sinopsis-${encodeURIComponent(mid)}.html`), mid, date, c);
-    } catch (error) {
+    let html: string;
+    try { html = await c.get(`${CX}/sinopsis-${encodeURIComponent(mid)}.html`); }
+    catch (error) {
+      // A missing or redirected synopsis page means the ID is wrong, not that
+      // the film has no functions: send the model back to list_movies.
+      if (error instanceof DataError && error.status === 'unavailable') throw new DataError('unavailable', 'Cinex no tiene una ficha para ese movie_id; obtén un ID vigente con list_movies.');
+      throw error;
+    }
+    try { return parseCinexShowtimes(html, mid, date, c); }
+    catch (error) {
       if (error instanceof DataError && error.status === 'unavailable') throw new DataError('unavailable', 'La ficha Cinex de esta película no lista funciones. Consulta get_showtimes con el cinema_id de cada sede (list_cinemas), que lee la programación de la sede.');
       throw error;
     }
