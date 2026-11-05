@@ -73,7 +73,7 @@ que Cinve omitió o no pudo verificar parte de la respuesta.
 | Proveedor | Cobertura | Límites conocidos |
 | --- | --- | --- |
 | Cinepic | Dos sedes configuradas; películas, funciones, precios, asientos y consulta de caramelería. | No descubre sedes nuevas automáticamente. La conversión a USD usa la tasa publicada por el proveedor. |
-| Cines Unidos | Ciudades, sedes, películas, funciones, caramelería, precios y asientos. | Precios y asientos requieren una cuenta conectada. Si su web exige un desafío anti-bots (ocurre desde algunas redes de centros de datos, como la del servicio alojado), sedes, películas y funciones se leen de su API pública de búsqueda y el resultado lo advierte. |
+| Cines Unidos | Ciudades, sedes, películas, funciones, caramelería, precios y asientos. | Precios y asientos requieren una cuenta conectada. Si su web exige un desafío anti-bots (ocurre desde algunas redes de centros de datos, como la del servicio alojado), sedes, películas y funciones se leen de su API pública de búsqueda y el resultado lo advierte. Esa vía consulta cada título por separado, dos a la vez y con un plazo total de 45 s; con `query` solo consulta los títulos que coinciden. Los títulos que fallan o no se alcanzan a leer se cuentan en una advertencia y el resultado se marca `partial`. |
 | Cinex | Ciudades, sedes, catálogo, funciones, precios, caramelería y asientos. | Precios, caramelería y asientos requieren una cuenta conectada. Algunos cruces de títulos pueden ser parciales. El descubrimiento de sedes tiene un plazo de 40 s, comprobado antes de cada lectura; las sedes sin comprobar se devuelven como `unverified` y `partial`. Las funciones por ciudad leen hasta 16 sedes, dos a la vez, con un plazo total de 45 s; nombran las que no se pudieron leer y fallan si no se leyó ninguna. |
 
 La cobertura describe implementaciones, no certifica que cada proveedor esté
@@ -102,6 +102,16 @@ la función esté agotada.
 
 - Las lecturas HTTP tienen un plazo de 15 segundos y un cuerpo máximo de 4 MiB.
 - Hay como máximo dos consultas activas y 32 en cola por origen.
+- Si el cliente cancela una llamada, Cinve no inicia más lecturas para ella; las
+  que ya están en curso terminan, porque otras consultas pueden compartirlas.
+- Las instrucciones del servidor son breves (menos de 2.048 caracteres en todos
+  los modos) y empiezan por las reglas esenciales, porque algunos clientes solo
+  muestran el comienzo. Las reglas de asientos están en la descripción de
+  `get_seats`, y los pasos de conexión llegan con cada resultado `auth_required`
+  y en `get_auth_status`.
+- Los esquemas publicados usan expresiones regulares compatibles con
+  validadores ECMA, Python y RE2 (sin `lookaround` ni `\p{...}`); las reglas que
+  no lo son se comprueban en el servidor.
 - La caché pública mantiene hasta 512 entradas y 64 MiB, y descarta primero la
   entrada usada hace más tiempo. Las páginas HTML de Cinex se guardan con los
   espacios en blanco compactados. Las sesiones y los mapas

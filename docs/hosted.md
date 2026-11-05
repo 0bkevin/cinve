@@ -88,6 +88,12 @@ el cuerpo, que debe llegar completo en diez segundos. Las llamadas con
 `refresh: true` evitan la caché pública compartida y pueden generar varias
 lecturas al proveedor, por lo que tienen un cupo propio de diez por minuto.
 
+`/mcp` admite solicitudes desde cualquier origen web, porque la autorización es
+solo mediante token Bearer y nunca usa cookies; la comprobación exacta de `Host`
+impide el DNS rebinding. Una cabecera `Origin` mal formada recibe 403. CORS
+permite las cabeceras `Mcp-Method` y `Mcp-Name` del protocolo 2026-07-28 además
+de `MCP-Protocol-Version`.
+
 ## Despliegue
 
 1. Crea un proyecto en Vercel y conecta una base PostgreSQL dedicada. Neon desde
