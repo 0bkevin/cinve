@@ -142,3 +142,48 @@ test('gateway search routes are allowed only with a bounded city and exact Title
     'https://gateway.cinesunidos.com/search/cities/Caracas/theaters?x=1', 'https://gateway.cinesunidos.com/search/cities/%2F/films',
     'https://gateway.cinesunidos.com/search/cities/%E0%A4%A/films', 'https://gateway.cinesunidos.com/search/cities/Caracas/orders']) assert.throws(() => assertPublicRead(bad), DataError, bad);
 });
+
+test('a challenged origin is remembered so later public reads skip straight to the fallback', async () => {
+  const www: string[] = [];
+  let challenge = true;
+  const http = new HttpClient(async input => {
+    const url = new URL(String(input));
+    if (url.hostname === 'www.cinesunidos.com') {
+      www.push(url.pathname);
+      return challenge ? new Response('Just a moment...', { status: 403, headers: { 'cf-mitigated': 'challenge' } }) : new Response('<html></html>');
+    }
+    if (url.pathname === '/search/cities') return Response.json(['Caracas']);
+    if (url.pathname === '/search/cities/Caracas/theaters') return Response.json([{ id: '1005', name: 'Sambil Caracas', address: 'Chacao' }]);
+    return new Response('missing', { status: 404 });
+  });
+  const s = new CinemaService(http);
+  for (let i = 0; i < 3; i++) {
+    const r = await s.query('cinemas', { provider: 'cinesunidos', city: 'Caracas' });
+    assert.equal(r.status, 'available'); assert.ok(r.warnings.some(w => /API pública de búsqueda/.test(w)));
+  }
+  assert.equal(www.length, 1, 'the challenged website is asked once, not on every call');
+  // refresh=true still asks the website again, and a success clears the memory.
+  challenge = false;
+  await http.get('https://www.cinesunidos.com/cines?city=Caracas', 120000, true);
+  await http.get('https://www.cinesunidos.com/cartelera?city=Caracas');
+  assert.equal(www.length, 3);
+});
+
+test('one city read through the search API fits in the cache alongside another city', async () => {
+  let reads = 0;
+  const http = new HttpClient(async input => {
+    reads++;
+    const url = new URL(String(input));
+    if (url.hostname === 'www.cinesunidos.com') return new Response('Just a moment...', { status: 403, headers: { 'cf-mitigated': 'challenge' } });
+    if (url.pathname === '/search/cities') return Response.json(['Caracas', 'Valencia']);
+    if (url.pathname.endsWith('/films')) return Response.json(Array.from({ length: 60 }, (_, i) => `Film ${i}`));
+    if (url.pathname.endsWith('/sessions')) return Response.json([{ showtime: '2026-11-04T18:15:00', sessionId: `s${reads}`, screenNumber: 1, format: '2D', ho: `HO${url.searchParams.get('Title')!.slice(5)}`, title: url.searchParams.get('Title'), cinemaId: '1005' }]);
+    return new Response('missing', { status: 404 });
+  });
+  const s = new CinemaService(http);
+  await s.query('showtimes', { provider: 'cinesunidos', city: 'Caracas', date: '2026-11-04' });
+  await s.query('showtimes', { provider: 'cinesunidos', city: 'Valencia', date: '2026-11-04' });
+  const before = reads;
+  const again = await s.query('showtimes', { provider: 'cinesunidos', city: 'Caracas', date: '2026-11-04' });
+  assert.equal(again.total, 60); assert.equal(reads, before, 'a second city must not evict the first city from the cache');
+});
