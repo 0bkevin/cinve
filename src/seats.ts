@@ -242,8 +242,11 @@ export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions)
       c.warnings.push('Los estados especiales se muestran restringidos; verifica sus condiciones en la web del cine.');
     } else if (q.provider === 'cinex') {
       if ((await c.authenticated('cinex', 'https://www.cinex.com.ve/checklogin.php')).trim() !== 'on') throw new DataError('auth_required', 'La sesión Cinex expiró; conecta de nuevo tu cuenta.');
-      await c.authenticated('cinex', `https://www.cinex.com.ve/boletosdev.php?${new URLSearchParams({ cinemaid: result.cinema_id, sessionid: result.session_id })}`);
-      const html = await c.authenticated('cinex', 'https://www.cinex.com.ve/asientosdev.php');
+      // Cinex keeps the chosen function in its PHP session: select and read it as one step.
+      const html = await c.exclusive('cinex', async () => {
+        await c.authenticated('cinex', `https://www.cinex.com.ve/boletosdev.php?${new URLSearchParams({ cinemaid: result.cinema_id, sessionid: result.session_id })}`);
+        return c.authenticated('cinex', 'https://www.cinex.com.ve/asientosdev.php');
+      });
       result.seats = parseCinexSeats(html, q);
       const page = parseCinexShowing(html);
       result.showing = page.showing;

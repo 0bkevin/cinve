@@ -440,6 +440,17 @@ export class CallStopped extends DataError {
  * under the hosted 90 s limit, however its reads are chained or fanned out.
  */
 export const operationBudgetMs = 60000;
+const exclusiveTails = new Map<string, Promise<void>>();
+/** Runs fn once every earlier holder of key has finished, one at a time, in call order. */
+export async function exclusive<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const previous = exclusiveTails.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const tail = previous.then(() => new Promise<void>(resolve => { release = resolve; }));
+  exclusiveTails.set(key, tail);
+  await previous;
+  try { return await fn(); }
+  finally { release(); if (exclusiveTails.get(key) === tail) exclusiveTails.delete(key); }
+}
 export class ReadContext {
   sources: EvidenceSource[] = [];
   warnings: string[] = [];
@@ -465,6 +476,14 @@ export class ReadContext {
   /** Reports one completed step of a fan-out, when the client asked for progress. */
   progress(message: string) {
     try { this.call.progress?.(message); } catch { /* Progress is advisory; it never fails a read. */ }
+  }
+  /**
+   * For provider pages that keep the selected function in the account's server
+   * session (Cinex): reads for one account run one at a time, so parallel calls
+   * cannot switch each other's function between two requests.
+   */
+  exclusive<T>(provider: AuthProviderId, fn: () => Promise<T>): Promise<T> {
+    return exclusive(this.http.sessions.accountKey(provider), fn);
   }
   async authenticated(provider: AuthProviderId, url: string): Promise<string> {
     this.checkCanRead();

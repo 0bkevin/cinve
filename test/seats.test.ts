@@ -129,3 +129,30 @@ test('the ASCII map is oriented as each provider website draws it', () => {
   assert.deepEqual(seatLayout('cinex'), { screen: 'unverified', column_order: 'ascending' });
   assert.match(renderSeats(parseCinepicSeats(map)), /que no indica el lado de la pantalla/, 'no layout claims nothing');
 });
+
+test('parallel Cinex seat and price reads for different functions do not switch each other', async () => {
+  // Cinex keeps one selected function per PHP session: the last boletos page opened wins.
+  let selected = '', inFlight = 0, maxInFlight = 0;
+  const sessions = new class extends EmptySessionStore { override async headers() { return { Cookie: 'synthetic' }; } };
+  const http = new HttpClient(async url => {
+    const u = new URL(String(url));
+    inFlight++; maxInFlight = Math.max(maxInFlight, inFlight);
+    await new Promise(r => setTimeout(r, 5 + Math.random() * 15));
+    inFlight--;
+    if (u.pathname === '/checklogin.php') return new Response('on');
+    if (u.pathname === '/boletosdev.php' || u.pathname === '/boletos.php') { selected = u.searchParams.get('sessionid')!; return new Response('<form id="frmboletos"></form>'); }
+    if (u.pathname === '/asientosdev.php') return new Response(cinexMap.replace('sessionid=s1', `sessionid=${selected}`));
+    return new Response('', { status: 404 });
+  }, 15000, sessions);
+  const service = new CinemaService(http);
+  const ids = ['s1', 's2', 's3', 's4', 's5', 's6'];
+  const [results] = await Promise.all([
+    Promise.all(ids.map(session_id => service.seats({ provider: 'cinex', cinema_id: 'SBC', session_id }))),
+    service.query('prices', { provider: 'cinex', cinema_id: 'SBC', session_id: 's9' }),
+  ]);
+  for (const [i, r] of results.entries()) {
+    assert.equal(r.status, 'available', `${ids[i]}: ${r.warnings.join(' ')}`);
+    assert.equal(r.session_id, ids[i]);
+  }
+  assert.ok(maxInFlight >= 2, 'other reads still run in parallel');
+});

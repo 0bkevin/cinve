@@ -602,7 +602,8 @@ export async function cinex(op: Operation, q: Query, c: ReadContext, catalog = n
     if ((await c.authenticated('cinex', `${CX}/checklogin.php`)).trim() !== 'on') throw new DataError('auth_required', 'La sesión Cinex expiró. Ejecuta npm run login -- cinex en una terminal local.');
     const url = `${CX}/boletos.php?${new URLSearchParams({ sessionid: sessionId, cinemaid: requireArg(q, 'cinema_id') })}`;
     c.warnings.push('Importe VES de la función, con boleto y otros cargos desglosados; no es un total final de compra.');
-    return parseCinexPrices(await c.authenticated('cinex', url), q, url);
+    // Opening a function page selects it in Cinex's PHP session, which a seat read in progress depends on.
+    return parseCinexPrices(await c.exclusive('cinex', () => c.authenticated('cinex', url)), q, url);
   }
   if (op === 'concessions') {
     if ((await c.authenticated('cinex', `${CX}/checklogin.php`)).trim() !== 'on') throw new DataError('auth_required', 'La sesión Cinex expiró. Ejecuta npm run login -- cinex en una terminal local.');

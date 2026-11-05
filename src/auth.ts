@@ -23,6 +23,8 @@ const loginHint = (p: AuthProviderId) => `Ejecuta npm run login -- ${p} en una t
 export class SessionStore {
   constructor(readonly directory = join(process.env.XDG_CONFIG_HOME && isAbsolute(process.env.XDG_CONFIG_HOME) ? process.env.XDG_CONFIG_HOME : join(homedir(), '.config'), 'cinev')) {}
   private path(p: AuthProviderId) { return join(this.directory, `${AuthProvider.parse(p)}.json`); }
+  /** Names the provider account whose server-side session these credentials share. */
+  accountKey(p: AuthProviderId) { return `local:${this.directory}:${p}`; }
   async read(p: AuthProviderId): Promise<AuthSession | undefined> {
     try {
       const dir = await lstat(this.directory);

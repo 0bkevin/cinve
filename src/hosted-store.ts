@@ -55,6 +55,7 @@ export class EncryptedSessionStore extends SessionStore {
     super();
     if (key.length !== 32) throw new Error('La clave de cifrado debe tener 32 bytes.');
   }
+  override accountKey(provider: AuthProviderId) { return `hosted:${this.user}:${provider}`; }
   private aad(provider: AuthProviderId) { return Buffer.from(`cinev:v1:${this.user}:${provider}`); }
   encrypt(value: AuthSession) {
     const session = Session.parse(value), iv = randomBytes(12), cipher = createCipheriv('aes-256-gcm', this.key, iv);
