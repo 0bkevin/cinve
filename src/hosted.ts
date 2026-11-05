@@ -108,11 +108,13 @@ export async function createHostedApp(options: {
         // Streamable HTTP transport requires for invalid origins.
         if (req.headers.origin !== undefined && !wellFormedOrigin(req.headers.origin)) throw new HttpError(403, 'Origen no permitido.');
         res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-        // Mcp-Method and Mcp-Name are required request headers since protocol
-        // 2026-07-28; the session headers serve older stateful clients.
-        res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, MCP-Protocol-Version, Mcp-Method, Mcp-Name, MCP-Session-Id, Last-Event-ID');
-        res.setHeader('Access-Control-Expose-Headers', 'WWW-Authenticate, MCP-Session-Id');
+        // The endpoint is stateless: it answers POST only (GET and DELETE get
+        // 405) and never issues a session, so the session and SSE-resumption
+        // headers that protocol 2026-07-28 removed are not offered. Mcp-Method
+        // and Mcp-Name are required request headers since that revision.
+        res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, MCP-Protocol-Version, Mcp-Method, Mcp-Name');
+        res.setHeader('Access-Control-Expose-Headers', 'WWW-Authenticate');
         if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
       } else if (req.headers.origin && req.headers.origin !== origin) throw new HttpError(403, 'Origen no permitido.');
       if (req.method === 'GET' && req.url === '/internal/cleanup') {

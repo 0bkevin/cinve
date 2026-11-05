@@ -90,9 +90,11 @@ lecturas al proveedor, por lo que tienen un cupo propio de diez por minuto.
 
 `/mcp` admite solicitudes desde cualquier origen web, porque la autorización es
 solo mediante token Bearer y nunca usa cookies; la comprobación exacta de `Host`
-impide el DNS rebinding. Una cabecera `Origin` mal formada recibe 403. CORS
-permite las cabeceras `Mcp-Method` y `Mcp-Name` del protocolo 2026-07-28 además
-de `MCP-Protocol-Version`.
+impide el DNS rebinding. Una cabecera `Origin` mal formada recibe 403. El
+endpoint no guarda estado: solo acepta POST (GET y DELETE reciben 405) y nunca
+crea sesiones, así que CORS permite `Authorization`, `Content-Type`,
+`MCP-Protocol-Version`, `Mcp-Method` y `Mcp-Name`, sin las cabeceras de sesión y
+reanudación que el protocolo 2026-07-28 eliminó.
 
 ## Despliegue
 

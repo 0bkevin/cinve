@@ -452,6 +452,9 @@ test('browser MCP clients discover OAuth without cookies; approval names are esc
   // Required request headers of protocol 2026-07-28 must pass a browser preflight.
   for (const header of ['mcp-method', 'mcp-name', 'mcp-protocol-version', 'authorization'])
     assert.ok(preflight.headers.get('access-control-allow-headers')!.toLowerCase().split(/,\s*/).includes(header), header);
+  // No session or resumption headers: the stateless endpoint never uses them.
+  assert.doesNotMatch(preflight.headers.get('access-control-allow-headers')!, /session-id|last-event-id/i);
+  assert.equal(preflight.headers.get('access-control-allow-methods'), 'POST, OPTIONS');
   for (const origin of ['javascript:alert(1)', 'https://assistant.example/path', 'not an origin'])
     assert.equal((await fetch(f.origin + '/mcp', { method: 'OPTIONS', headers: { Origin: origin } })).status, 403, origin);
   const challenge = await fetch(f.origin + '/mcp', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json', Cookie: 'cinve=untrusted' },
