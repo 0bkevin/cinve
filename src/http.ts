@@ -352,7 +352,6 @@ function exactQuery(u: URL, rules: Record<string, (value: string | null) => bool
 const cinexDatasource: Record<string, Record<string, (value: string | null) => boolean>> = {
   getcinemacitieslist: { method: () => true },
   getcinemadatafromcinemaid: { method: () => true, cinemaid: ids },
-  preparepricecinema: { method: () => true, cinemaid: ids },
 };
 /**
  * Public GET routes the provider adapters are allowed to read. The host

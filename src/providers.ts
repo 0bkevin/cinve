@@ -463,15 +463,12 @@ export async function cinex(op: Operation, q: Query, c: ReadContext, catalog = n
   }
   if (op === 'cinemas') return catalog.list(q, c);
   if (op === 'prices') {
-    if (q.session_id) {
-      if ((await c.authenticated('cinex', `${CX}/checklogin.php`)).trim() !== 'on') throw new DataError('auth_required', 'La sesión Cinex expiró. Ejecuta npm run login -- cinex en una terminal local.');
-      const url = `${CX}/boletos.php?${new URLSearchParams({ sessionid: q.session_id, cinemaid: requireArg(q, 'cinema_id') })}`;
-      c.warnings.push('Importe VES de la función, con boleto y otros cargos desglosados; no es un total final de compra.');
-      return parseCinexPrices(await c.authenticated('cinex', url), q, url);
-    }
-    const body = (await c.get(cxSource('preparepricecinema', requireArg(q, 'cinema_id')), 60000)).trim();
-    if (!body || body.includes('NO DISPONIBLE')) throw new DataError('unavailable', 'Cinex no devuelve un listado de tarifas para esta sede.');
-    throw new DataError('unavailable', 'Cinex devolvió un listado cuyo formato de tarifas todavía no está validado.');
+    // Cinex publishes ticket prices only on the authenticated function page.
+    const sessionId = requireArg(q, 'session_id');
+    if ((await c.authenticated('cinex', `${CX}/checklogin.php`)).trim() !== 'on') throw new DataError('auth_required', 'La sesión Cinex expiró. Ejecuta npm run login -- cinex en una terminal local.');
+    const url = `${CX}/boletos.php?${new URLSearchParams({ sessionid: sessionId, cinemaid: requireArg(q, 'cinema_id') })}`;
+    c.warnings.push('Importe VES de la función, con boleto y otros cargos desglosados; no es un total final de compra.');
+    return parseCinexPrices(await c.authenticated('cinex', url), q, url);
   }
   if (op === 'concessions') {
     if ((await c.authenticated('cinex', `${CX}/checklogin.php`)).trim() !== 'on') throw new DataError('auth_required', 'La sesión Cinex expiró. Ejecuta npm run login -- cinex en una terminal local.');

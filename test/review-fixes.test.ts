@@ -63,7 +63,6 @@ test('public reads are limited to the routes adapters parse, even on allowed hos
     'https://www.cinex.com.ve/sinopsis-seres.parte1lainvasion.html',
     'https://www.cinex.com.ve/assets/php/datasource.php?method=getcinemacitieslist',
     'https://www.cinex.com.ve/assets/php/datasource.php?method=getcinemadatafromcinemaid&cinemaid=TLN',
-    'https://www.cinex.com.ve/assets/php/datasource.php?method=preparepricecinema&cinemaid=TLN',
     'https://www.cinesunidos.com/cines?city=Caracas', 'https://www.cinesunidos.com/cartelera?city=M%C3%A9rida',
     'https://gateway.cinesunidos.com/search/cities', 'https://gateway.cinesunidos.com/concessions/www/cinemas/1005/concessions',
     'https://cinepiccandelaria.com/es-AR', 'https://cinepicvip.com/es-AR/compra?cid=123301&fid=3636&pid=206',
@@ -73,6 +72,7 @@ test('public reads are limited to the routes adapters parse, even on allowed hos
   for (const bad of [
     'https://www.cinex.com.ve/assets/php/prepareconcessionprocess.php?action=buy',
     'https://www.cinex.com.ve/assets/php/datasource.php?method=getcinemacitieslist&extra=1',
+    'https://www.cinex.com.ve/assets/php/datasource.php?method=preparepricecinema&cinemaid=TLN',
     'https://www.cinex.com.ve/assets/php/datasource.php?method=somethingelse',
     'https://www.cinex.com.ve/cartelera.html?x=1', 'https://www.cinex.com.ve/sinopsis-..%2Fx.html',
     'https://www.cinex.com.ve/boletos.php?cinemaid=TLN&sessionid=1',
@@ -221,4 +221,10 @@ test('the Cines Unidos search fallback searches only matching titles and keeps t
   assert.equal(all.status, 'available'); assert.equal(all.partial, true);
   assert.deepEqual(all.items.map(i => i.name).sort(), ['El Silbón', 'Good Film', 'Otra']);
   assert.ok(all.warnings.some(w => /1 de 4 títulos/.test(w)), all.warnings.join(' | '));
+});
+
+test('Cinex ticket prices require a function, since no public listing can supply them', () => {
+  const r = inputSchema('prices').safeParse({ provider: 'cinex', cinema_id: 'TLN' });
+  assert.equal(r.success, false);
+  assert.ok(r.error!.issues.some(i => i.path[0] === 'session_id'));
 });
