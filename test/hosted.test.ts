@@ -467,8 +467,11 @@ test('browser MCP clients discover OAuth without cookies; approval names are esc
   // No session or resumption headers: the stateless endpoint never uses them.
   assert.doesNotMatch(preflight.headers.get('access-control-allow-headers')!, /session-id|last-event-id/i);
   assert.equal(preflight.headers.get('access-control-allow-methods'), 'POST, OPTIONS');
-  for (const origin of ['javascript:alert(1)', 'https://assistant.example/path', 'not an origin'])
+  for (const origin of ['javascript:alert(1)', 'https://assistant.example/path', 'https://a.example?x', 'https://user@a.example', 'not an origin'])
     assert.equal((await fetch(f.origin + '/mcp', { method: 'OPTIONS', headers: { Origin: origin } })).status, 403, origin);
+  // Extension and app-shell clients send origins of their own schemes.
+  for (const origin of ['chrome-extension://abcdefghijklmnop', 'moz-extension://0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0', 'tauri://localhost', 'capacitor://localhost', 'http://[::1]:5173', 'null'])
+    assert.equal((await fetch(f.origin + '/mcp', { method: 'OPTIONS', headers: { Origin: origin } })).status, 204, origin);
   const challenge = await fetch(f.origin + '/mcp', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json', Cookie: 'cinve=untrusted' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'connect_account', arguments: { provider: 'cinex' } } }) });
   assert.equal(challenge.status, 401);

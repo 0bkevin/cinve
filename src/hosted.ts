@@ -40,10 +40,14 @@ class HostedService extends CinemaService {
     return result;
   }
 }
-/** A serialized web origin (scheme://host[:port]), or "null" from sandboxed documents. */
+/**
+ * A serialized origin, scheme://host[:port] with nothing after it, or "null"
+ * from sandboxed documents. Any scheme: browser extensions and app shells
+ * (chrome-extension://, moz-extension://, tauri://, capacitor://) are MCP
+ * clients too, and the WHATWG URL parser turns their origins into "null".
+ */
 function wellFormedOrigin(value: string): boolean {
-  if (value === 'null') return true;
-  try { const u = new URL(value); return ['http:', 'https:'].includes(u.protocol) && u.origin === value; } catch { return false; }
+  return value === 'null' || /^[a-z][a-z0-9+.-]*:\/\/[^\s/?#@]+$/i.test(value);
 }
 class HttpError extends Error { constructor(readonly status: number, message: string) { super(message); } }
 async function body(req: IncomingMessage, max: number, deadlineMs = 10000): Promise<unknown> {
