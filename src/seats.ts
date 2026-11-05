@@ -250,7 +250,7 @@ export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions)
       if (rooms.size === 1 && [...rooms][0]) result.showing = { screen: `Sala ${[...rooms][0]}` };
       c.warnings.push('Los estados especiales se muestran restringidos; verifica sus condiciones en la web del cine.');
     } else if (q.provider === 'cinex') {
-      if ((await c.authenticated('cinex', 'https://www.cinex.com.ve/checklogin.php')).trim() !== 'on') throw new DataError('auth_required', 'La sesión Cinex expiró; conecta de nuevo tu cuenta.');
+      if (!await c.cinexSessionActive()) throw new DataError('auth_required', 'La sesión Cinex expiró; conecta de nuevo tu cuenta.');
       // Cinex keeps the chosen function in its PHP session: select and read it as one step.
       const html = await c.exclusive('cinex', async () => {
         await c.authenticated('cinex', `https://www.cinex.com.ve/boletosdev.php?${new URLSearchParams({ cinemaid: result.cinema_id, sessionid: result.session_id })}`);

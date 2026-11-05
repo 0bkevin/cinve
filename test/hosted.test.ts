@@ -268,6 +268,17 @@ test('independent server instances consume a link only once and share saved sess
   assert.ok(!dump.includes('SECRET_SESSION')); assert.ok(!dump.includes(f.alice.token));
 });
 
+test('the hosted store expires a refused session under the account lock, keeping newer logins', async t => {
+  const f = await fixture(t), store = new EncryptedSessionStore(f.pool, f.alice.id, f.key);
+  const session = { version: 1 as const, provider: 'cinesunidos' as const, expires_at: Date.now() + 60000, access_token: 'SECRET_SESSION' };
+  await store.save({ ...session, saved_at: Date.now() - 1000 });
+  await store.expire('cinesunidos', Date.now());
+  assert.equal((await store.status('cinesunidos')).status, 'expired');
+  await store.save({ ...session, saved_at: Date.now() });
+  await store.expire('cinesunidos', Date.now() - 5000);
+  assert.equal((await store.status('cinesunidos')).status, 'configured');
+});
+
 test('revocation and newer invitations prevent another instance from saving a late login', async t => {
   const f = await fixture(t), other = new ConnectionLinks(f.pool);
   const hash = (await f.users.hash(f.alice.id))!;

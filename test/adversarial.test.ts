@@ -147,3 +147,24 @@ test('Cinex expiry redirect becomes auth_required and redirects are never follow
   await assert.rejects(http.getAuthenticated('cinex', 'https://www.cinex.com.ve/concesiones.php?cinemaid=TLN'), e => e instanceof DataError && e.status === 'auth_required');
   assert.equal(calls, 1);
 });
+
+test('a session Cinex refuses is recorded as expired, but a newer login is kept', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'cinev-expire-')); t.after(() => rm(dir, { recursive: true, force: true }));
+  const store = new SessionStore(join(dir, 'sessions'));
+  const jar = JSON.stringify({ version: 'tough-cookie@4.1.4', storeType: 'MemoryCookieStore', rejectPublicSuffixes: true, cookies: [{ key: 'PHPSESSID', value: 'x', domain: 'www.cinex.com.ve', path: '/', hostOnly: true, creation: new Date().toISOString(), lastAccessed: new Date().toISOString() }] });
+  const save = (saved_at?: number) => store.save({ version: 1, provider: 'cinex', expires_at: Date.now() + 3600000, cookie_jar: jar, ...(saved_at ? { saved_at } : {}) });
+  // Cinex answers "off": the next get_auth_status must not say configured.
+  let calls = 0;
+  const service = new CinemaService(new HttpClient(async url => { calls++; return new Response(String(url).endsWith('checklogin.php') ? 'off' : ''); }, 15000, store));
+  await save(Date.now() - 1000);
+  const seats = await service.seats({ provider: 'cinex', cinema_id: 'SBC', session_id: 's1' });
+  assert.equal(seats.status, 'auth_required'); assert.equal(calls, 1);
+  assert.equal((await store.status('cinex')).status, 'expired');
+  // Sessions saved before saved_at existed are treated as old.
+  await save(); await store.expire('cinex', Date.now());
+  assert.equal((await store.status('cinex')).status, 'expired');
+  // A login saved after the refused check started is newer than the refusal.
+  const checkStarted = Date.now() - 5000;
+  await save(Date.now()); await store.expire('cinex', checkStarted);
+  assert.equal((await store.status('cinex')).status, 'configured');
+});

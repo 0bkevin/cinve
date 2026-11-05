@@ -63,8 +63,9 @@ export class EncryptedSessionStore extends SessionStore {
     const data = Buffer.concat([cipher.update(JSON.stringify(session), 'utf8'), cipher.final()]);
     return JSON.stringify({ v: 1, iv: iv.toString('base64'), tag: cipher.getAuthTag().toString('base64'), data: data.toString('base64') });
   }
-  override async read(provider: AuthProviderId): Promise<AuthSession | undefined> {
-    const { rows } = await this.pool.query(`SELECT ciphertext FROM cinev_sessions s JOIN cinev_clients c ON c.id=s.user_id
+  override async read(provider: AuthProviderId): Promise<AuthSession | undefined> { return this.readWith(this.pool, provider); }
+  private async readWith(db: Pool | PoolClient, provider: AuthProviderId): Promise<AuthSession | undefined> {
+    const { rows } = await db.query(`SELECT ciphertext FROM cinev_sessions s JOIN cinev_clients c ON c.id=s.user_id
       WHERE s.user_id=$1 AND provider=$2 AND c.revoked_at IS NULL`, [this.user, provider]);
     if (!rows.length) return undefined;
     try {
@@ -93,6 +94,14 @@ export class EncryptedSessionStore extends SessionStore {
       await lockUser(client, this.user);
       await client.query('DELETE FROM cinev_links WHERE user_id=$1 AND provider=$2', [this.user, provider]);
       await client.query('DELETE FROM cinev_sessions WHERE user_id=$1 AND provider=$2', [this.user, provider]);
+    });
+  }
+  /** As SessionStore.expire, under the account lock that saves take, so a concurrent connection cannot be lost. */
+  override async expire(provider: AuthProviderId, notAfter: number) {
+    await transaction(this.pool, async client => {
+      if (!await lockUser(client, this.user)) return;
+      const s = await this.readWith(client, provider);
+      if (s && (s.saved_at ?? 0) <= notAfter && s.expires_at > Date.now()) await this.saveInTransaction(client, { ...s, expires_at: Date.now() });
     });
   }
   override async status(provider: AuthProviderId) { return { ...await super.status(provider), login_command: 'connect_account' }; }

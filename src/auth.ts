@@ -14,6 +14,8 @@ export const AuthProvider = z.enum(['cinex', 'cinesunidos']);
 export type AuthProviderId = z.infer<typeof AuthProvider>;
 export const Session = z.object({
   version: z.literal(1), provider: AuthProvider, expires_at: z.number().int().positive().max(8.64e15),
+  /** When this login was saved; a refusal seen after a newer login must not expire it. */
+  saved_at: z.number().int().positive().max(8.64e15).optional(),
   cookie_jar: z.string().max(100000).optional(), access_token: z.string().min(1).max(16000).regex(/^[A-Za-z0-9._~+\/-]+=*$/).optional(),
 }).strict().refine(s => s.provider === 'cinex' ? !!s.cookie_jar && !s.access_token : !!s.access_token && !s.cookie_jar);
 export type AuthSession = z.infer<typeof Session>;
@@ -62,6 +64,15 @@ export class SessionStore {
       if (!dir.isDirectory() || (process.getuid && dir.uid !== process.getuid())) throw new Error('Directorio de sesiones no válido.');
       await unlink(this.path(p));
     } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
+  }
+  /**
+   * Records that the provider refused a session read before notAfter (epoch ms),
+   * so status reports expired instead of the optimistic local expiry. A login
+   * saved after notAfter is newer than the refusal and is left alone.
+   */
+  async expire(p: AuthProviderId, notAfter: number) {
+    const s = await this.read(p);
+    if (s && (s.saved_at ?? 0) <= notAfter && s.expires_at > Date.now()) await this.save({ ...s, expires_at: Date.now() });
   }
   async status(p: AuthProviderId) {
     try {
@@ -157,7 +168,8 @@ export async function login(provider: AuthProviderId, username: string, password
       let data; try { data = JSON.parse(r.body); } catch { throw new LoginError('Cinex no aceptó la solicitud de login.'); }
       if (data.result !== 'OK') throw new LoginError('Cinex no aceptó el login. Revisa las credenciales en su sitio.');
       if ((await http.read(`${base}/checklogin.php`)).body.trim() !== 'on') throw new LoginError('Cinex no estableció una sesión válida.');
-      await store.save({ version: 1, provider, expires_at: Date.now() + 24 * 3600000, cookie_jar: JSON.stringify(await http.jar.serialize()) });
+      // An upper bound: Cinex's PHP session can end much sooner when idle (seen under an hour).
+      await store.save({ version: 1, provider, expires_at: Date.now() + 24 * 3600000, saved_at: Date.now(), cookie_jar: JSON.stringify(await http.jar.serialize()) });
       return { provider, authenticated: true, profile_update_requested: data.usuario_dataupdate !== 'S' };
     }
     const base = 'https://www.cinesunidos.com';
@@ -182,7 +194,7 @@ export async function login(provider: AuthProviderId, username: string, password
     const claims = JSON.parse(Buffer.from(data.access_token.split('.')[1], 'base64url').toString());
     const expiry = Number(claims.exp) * 1000;
     if (!Number.isFinite(expiry) || expiry <= Date.now()) throw new LoginError('El token de Cines Unidos ya expiró.');
-    await store.save({ version: 1, provider, expires_at: expiry, access_token: data.access_token });
+    await store.save({ version: 1, provider, expires_at: expiry, saved_at: Date.now(), access_token: data.access_token });
     return { provider, authenticated: true, profile_update_requested: false };
   } catch (e) {
     // Never surface provider HTML, personal data, request objects, or credential-bearing URLs.

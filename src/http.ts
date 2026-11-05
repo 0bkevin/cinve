@@ -485,6 +485,13 @@ export class ReadContext {
   exclusive<T>(provider: AuthProviderId, fn: () => Promise<T>): Promise<T> {
     return exclusive(this.http.sessions.accountKey(provider), fn);
   }
+  /** Cinex's own login check. A refused session is recorded as expired, so get_auth_status tells the truth. */
+  async cinexSessionActive(): Promise<boolean> {
+    const started = Date.now();
+    if ((await this.authenticated('cinex', 'https://www.cinex.com.ve/checklogin.php')).trim() === 'on') return true;
+    try { await this.http.sessions.expire('cinex', started); } catch { /* the answer is auth_required either way */ }
+    return false;
+  }
   async authenticated(provider: AuthProviderId, url: string): Promise<string> {
     this.checkCanRead();
     const page = await this.http.getAuthenticated(provider, url);

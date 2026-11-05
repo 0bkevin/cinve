@@ -618,14 +618,14 @@ export async function cinex(op: Operation, q: Query, c: ReadContext, catalog = n
   if (op === 'prices') {
     // Cinex publishes ticket prices only on the authenticated function page.
     const sessionId = requireArg(q, 'session_id');
-    if ((await c.authenticated('cinex', `${CX}/checklogin.php`)).trim() !== 'on') throw new DataError('auth_required', 'La sesión Cinex expiró. Ejecuta npm run login -- cinex en una terminal local.');
+    if (!await c.cinexSessionActive()) throw new DataError('auth_required', 'La sesión Cinex expiró. Ejecuta npm run login -- cinex en una terminal local.');
     const url = `${CX}/boletos.php?${new URLSearchParams({ sessionid: sessionId, cinemaid: requireArg(q, 'cinema_id') })}`;
     c.warnings.push('Importe VES de la función, con boleto y otros cargos desglosados; no es un total final de compra.');
     // Opening a function page selects it in Cinex's PHP session, which a seat read in progress depends on.
     return parseCinexPrices(await c.exclusive('cinex', () => c.authenticated('cinex', url)), q, url);
   }
   if (op === 'concessions') {
-    if ((await c.authenticated('cinex', `${CX}/checklogin.php`)).trim() !== 'on') throw new DataError('auth_required', 'La sesión Cinex expiró. Ejecuta npm run login -- cinex en una terminal local.');
+    if (!await c.cinexSessionActive()) throw new DataError('auth_required', 'La sesión Cinex expiró. Ejecuta npm run login -- cinex en una terminal local.');
     const url = `${CX}/concesiones.php?${new URLSearchParams({ cinemaid: requireArg(q, 'cinema_id') })}`;
     c.warnings.push('Precios VES del catálogo de sede. La cantidad máxima del formulario no se interpreta como stock; cargos finales no verificados.');
     return parseCinexConcessions(await c.authenticated('cinex', url), q, url);

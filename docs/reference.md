@@ -8,7 +8,7 @@ o mantener Cinve. Para empezar, consulta el [README](../README.md).
 | Herramienta | Uso principal |
 | --- | --- |
 | `list_providers` | Describe proveedores, capacidades y límites implementados. |
-| `get_auth_status` | Informa el estado de las conexiones Cinex y Cines Unidos. |
+| `get_auth_status` | Informa el estado de las conexiones Cinex y Cines Unidos. La caducidad de Cinex es un tope de 24 h: su sesión puede terminar antes por inactividad (se vio en menos de una hora); cuando Cinex la rechaza, Cinve la marca `expired`. |
 | `connect_account` | En modo alojado, crea el enlace privado para conectar un cine. |
 | `disconnect_account` | Elimina la sesión de un cine y sus enlaces pendientes. |
 | `list_cities` | Lista las ciudades publicadas por un proveedor. |
