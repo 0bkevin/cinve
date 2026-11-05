@@ -143,3 +143,17 @@ test('a Cinex session ID reported on two dates is suppressed even when only one 
   assert.deepEqual(parseCinexShowtimes(`<h1>Known</h1><button onclick="checkLogin('x','C')" alt="${epoch('2026-11-04')}"></button><button onclick="checkLogin('x','C')" alt="${epoch('2026-11-04')}"></button>`, 'm', '2026-11-06', other), []);
   assert.equal(other.partial, false);
 });
+
+test('Cinex movie pages compare named rooms and full start times when suppressing conflicts', () => {
+  for (const [label, a, b] of [
+    ['named rooms', `alt="${epoch('2026-11-04')}">Sala A`, `alt="${epoch('2026-11-04')}">Sala B`],
+    ['seconds apart', `alt="${epoch('2026-11-04')}">Sala 1`, `alt="${Number(epoch('2026-11-04')) + 30}">Sala 1`],
+  ] as const) {
+    const c = context();
+    const items = parseCinexShowtimes(`<h1>Film</h1><button onclick="checkLogin('same','SBC')" ${a}</button><button onclick="checkLogin('same','SBC')" ${b}</button>`, 'm', '2026-11-04', c);
+    assert.deepEqual(items, [], label); assert.equal(c.partial, true, label);
+  }
+  const c = context();
+  const [vip] = parseCinexShowtimes(`<h1>Film</h1><button onclick="checkLogin('v','SBC')" alt="${epoch('2026-11-04')}">Sala VIP</button>`, 'm', '2026-11-04', c);
+  assert.equal(vip.screen, 'VIP');
+});

@@ -371,7 +371,8 @@ export function parseCinexShowtimes(html: string, movieId: string, date: string,
     if (!match || epoch === undefined || !Number.isInteger(epoch) || epoch < 1e9 || epoch > 1e11) { malformed++; return; }
     const local = new Date(epoch * 1000 - 4 * 3600000).toISOString().slice(0, 19);
     const readable = $(e).clone(); readable.find('br').replaceWith('\n');
-    const body = readable.text(), screen = body.match(/Sala\s+(\d+)/i)?.[1];
+    // Same room syntax as the venue page (Sala 3, Sala VIP).
+    const body = readable.text(), screen = body.match(/Sala\s+([A-Za-z0-9_-]+)/i)?.[1];
     const key = `${match[2]}:${match[1]}`;
     const list = occurrences.get(key) ?? []; occurrences.set(key, list);
     list.push({ kind: 'showtime', id: match[1], name: title,
@@ -398,7 +399,8 @@ export function parseCinexShowtimes(html: string, movieId: string, date: string,
 
 /** The same session ID with another film, date, time or room cannot drive a price or seat lookup. */
 function cinexSessionConflict(a: DataItem, b: DataItem) {
-  return a.movie_id !== b.movie_id || a.date !== b.date || a.time !== b.time || (a.screen ?? null) !== (b.screen ?? null);
+  // starts_at keeps the provider's seconds; time is rounded to the minute.
+  return a.movie_id !== b.movie_id || a.date !== b.date || a.time !== b.time || a.starts_at !== b.starts_at || (a.screen ?? null) !== (b.screen ?? null);
 }
 
 function cinexLanguage(src?: string): string | undefined {
@@ -559,10 +561,11 @@ async function cinexCityShowtimes(q: Query, c: ReadContext, catalog: CinexCinema
   const deadline = Date.now() + cinexCityBudgetMs;
   const listed = await catalog.list({ provider: 'cinex', city: q.city }, c);
   const venues = listed.filter((v): v is DataItem & { cinema_id: string } => v.code_status === 'verified' && !!v.cinema_id);
+  // Known venues without a verified code are unread schedules, not an empty
+  // city: report a failure. Only a city with no Cinex venue at all is empty.
+  if (listed.length && !venues.length) throw new DataError('unavailable', 'No se pudo verificar el código de ninguna sede Cinex de esta ciudad, así que no se leyó su programación; consulta list_cinemas y sus enlaces oficiales.');
   if (!venues.length) {
-    c.warnings.push(listed.length
-      ? 'Las sedes Cinex de esta ciudad no tienen código verificado; consulta list_cinemas y sus enlaces oficiales.'
-      : 'No se encontraron sedes Cinex en esta ciudad; consulta list_cities para ver los nombres disponibles.');
+    c.warnings.push('No se encontraron sedes Cinex en esta ciudad; consulta list_cities para ver los nombres disponibles.');
     return [];
   }
   const work = venues.slice(0, cinexCityVenues);

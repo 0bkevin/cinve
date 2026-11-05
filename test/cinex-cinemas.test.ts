@@ -478,3 +478,17 @@ test('Cinex city showtimes keep reads within the per-origin limit, and a city wi
   assert.equal(none.status, 'error');
   assert.ok(none.warnings.some(w => /4 sedes Cinex/.test(w)), none.warnings.join(' | '));
 });
+
+test('Cinex city showtimes fail, rather than report an empty city, when no venue code could be verified', async () => {
+  const http = new HttpClient(async input => {
+    const url = new URL(String(input));
+    if (url.pathname === '/cines.html') return new Response('<a href="cinex-a.html" title="Cinex A, Caracas"><h3>A</h3></a>');
+    return new Response('down', { status: 503 });
+  });
+  const s = new CinemaService(http, new CinexCinemaCatalog());
+  const r = await s.query('showtimes', { provider: 'cinex', city: 'Caracas', date: '2026-11-04' });
+  assert.equal(r.status, 'unavailable'); assert.equal(r.total, 0);
+  assert.ok(r.warnings.some(w => /ninguna sede Cinex/.test(w)), r.warnings.join(' | '));
+  const elsewhere = await s.query('showtimes', { provider: 'cinex', city: 'Maracay', date: '2026-11-04' });
+  assert.equal(elsewhere.status, 'empty', 'a city without Cinex venues is a real empty answer');
+});
