@@ -401,3 +401,27 @@ test('Cinex permanently suppresses a session ID after cross-movie conflict, incl
   assert.equal(result.items.some(item => item.id === 's1'), false);
   assert.ok(result.warnings.some(w => /contradictorios/.test(w)));
 });
+
+test('a Cinex venue plus movie query reads the venue page, not the synopsis page', async () => {
+  const epoch = (time: string) => String(Date.parse(`2026-09-18T${time}:00-04:00`) / 1000);
+  const requests: string[] = [];
+  const http = new HttpClient(async input => {
+    const url = new URL(String(input)); requests.push(url.pathname);
+    if (url.pathname === '/cines.html') return new Response(card('sambil', 'Sambil', 'xSBC.jpg'));
+    if (url.pathname === '/cartelera.html') return new Response(`<div class="poster" onclick="x('sinopsis-elsilbon.html')" title="EL SILBON"></div><div class="poster" onclick="x('sinopsis-otra.html')" title="OTRA"></div>`);
+    if (url.pathname === '/cinex-sambil.html') return new Response(`<h3 class="title">SAMBIL</h3>`
+      + `<div class="sessionslist"><h5 class="title">EL SILBON</h5><button onclick="checkLogin('24013','SBC')" alt="${epoch('20:30')}"></button></div>`
+      + `<div class="sessionslist"><h5 class="title">OTRA</h5><button onclick="checkLogin('24014','SBC')" alt="${epoch('21:00')}"></button></div>`);
+    if (url.pathname === '/sinopsis-elsilbon.html') return new Response('<h1>EL SILBON</h1><div class="carousel"></div>');
+    return new Response('missing', { status: 404 });
+  });
+  const s = new CinemaService(http, new CinexCinemaCatalog());
+  const r = await s.query('showtimes', { provider: 'cinex', cinema_id: 'SBC', movie_id: 'elsilbon', date: '2026-09-18' });
+  assert.equal(r.status, 'available');
+  assert.deepEqual(r.items.map(i => [i.id, i.movie_id, i.time]), [['24013', 'elsilbon', '20:30']]);
+  assert.ok(!requests.includes('/sinopsis-elsilbon.html'));
+  // Movie-only queries still read the synopsis page, and an empty one points to the venue path.
+  const movieOnly = await s.query('showtimes', { provider: 'cinex', movie_id: 'elsilbon', date: '2026-09-18' });
+  assert.equal(movieOnly.status, 'unavailable');
+  assert.ok(movieOnly.warnings.some(w => /cinema_id de cada sede/.test(w)), movieOnly.warnings.join(' | '));
+});

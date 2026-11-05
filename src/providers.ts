@@ -484,14 +484,21 @@ export async function cinex(op: Operation, q: Query, c: ReadContext, catalog = n
     return parseCinexMovies(await c.get(`${CX}/cartelera.html`));
   }
   const date = isoDate(q);
-  if (q.movie_id) {
+  // With a venue, its page is authoritative: some synopsis pages list no
+  // functions while the venue page shows that film. Filter it by movie.
+  if (q.movie_id && !q.cinema_id) {
     const mid = q.movie_id;
-    const items = parseCinexShowtimes(await c.get(`${CX}/sinopsis-${encodeURIComponent(mid)}.html`), mid, date, c);
-    return items.filter(r => !q.cinema_id || r.cinema_id === q.cinema_id);
+    try {
+      return parseCinexShowtimes(await c.get(`${CX}/sinopsis-${encodeURIComponent(mid)}.html`), mid, date, c);
+    } catch (error) {
+      if (error instanceof DataError && error.status === 'unavailable') throw new DataError('unavailable', 'La ficha Cinex de esta película no lista funciones. Consulta get_showtimes con el cinema_id de cada sede (list_cinemas), que lee la programación de la sede.');
+      throw error;
+    }
   }
   const cinemaId = requireArg(q, 'cinema_id');
   const venue = await catalog.resolve(cinemaId, c);
   const page = venue.body === undefined ? await c.page(venue.url, 120000) : { body: venue.body };
   const movies = parseCinexMovies(await c.get(`${CX}/cartelera.html`, 120000));
-  return parseCinexCinemaShowtimes(page.body, movies, cinemaId, date, c, venue.url);
+  const items = parseCinexCinemaShowtimes(page.body, movies, cinemaId, date, c, venue.url);
+  return q.movie_id ? items.filter(r => r.movie_id === q.movie_id) : items;
 }
