@@ -21,7 +21,7 @@ const movieId = Id.describe('ID de película devuelto por list_movies del mismo 
 const sessionId = Id.describe('ID de función devuelto por get_showtimes del mismo proveedor.');
 const schema = z.object({
   provider,
-  city: z.string().trim().min(1).max(80).optional(),
+  city: z.string().trim().min(1).max(80).optional().describe('Nombre de ciudad tal como lo devuelve list_cities del mismo proveedor (p. ej. Caracas); no distingue tildes ni mayúsculas en Cines Unidos.'),
   cinema_id: cinemaId.optional(), movie_id: movieId.optional(), session_id: sessionId.optional(),
   date: DateInput.optional().describe('YYYY-MM-DD; por defecto hoy en America/Caracas para películas y funciones de Cinepic/Cines Unidos y funciones de Cinex.'),
   ...paging,
