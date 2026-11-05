@@ -1,7 +1,7 @@
 import { load } from 'cheerio';
 import { DataError, folded, Id } from './core.js';
 import type { DataItem, Query } from './core.js';
-import type { ReadContext } from './http.js';
+import { CallStopped, type ReadContext } from './http.js';
 
 const base = 'https://www.cinex.com.ve';
 const detailPath = /^cinex-[A-Za-z0-9_-]{1,80}\.html$/;
@@ -88,7 +88,7 @@ export class CinexCinemaCatalog {
       const match = data.data.find(r => r && typeof r.name === 'string' && typeof r.siglas === 'string'
         && r.siglas.toUpperCase() === candidate && normalizedName(r.name) === normalizedName(venueName));
       return match && Id.safeParse(match.siglas).success ? match.siglas as string : undefined;
-    } catch { return undefined; }
+    } catch (error) { if (error instanceof CallStopped) throw error; return undefined; }
   }
   async list(q: Query, c: ReadContext): Promise<DataItem[]> {
     let emittedWarnings = 0, suppressedWarnings = 0;
@@ -192,6 +192,9 @@ export class CinexCinemaCatalog {
             if (mappedCode && mappedCode !== code) this.dropMappingsFor(url, venue.name);
             this.rememberVerified(code, page.source.url, venue.name, url, metadataConfirmed);
           } catch (error) {
+            // A cancelled or expired call says nothing about the venue: it must
+            // not drop the shared catalog's verified mappings.
+            if (error instanceof CallStopped) throw error;
             if (mappedCode) this.dropMappingsFor(url, venue.name);
             c.partial = true;
             warn(error instanceof DataError && error.status === 'unavailable' && error.message.startsWith('La página no confirma')
@@ -338,7 +341,11 @@ export class CinexCinemaCatalog {
     // Verify the requested code against Cinex metadata instead of trusting the
     // directory image filename alone.
     let data: unknown;
-    try { data = await c.json(metadataUrl(cinemaId)); } catch { throw new DataError('unavailable', 'Cinex no confirmó el código de la sede sin funciones visibles.'); }
+    try { data = await c.json(metadataUrl(cinemaId)); } catch (error) {
+      // As 'unavailable', a stopped call would make resolve() forget a verified URL.
+      if (error instanceof CallStopped) throw error;
+      throw new DataError('unavailable', 'Cinex no confirmó el código de la sede sin funciones visibles.');
+    }
     if (!Array.isArray(data) && !(data && typeof data === 'object' && Array.isArray((data as { data?: unknown }).data))) {
       throw new DataError('unavailable', 'Cinex no confirmó el código de la sede sin funciones visibles.');
     }
@@ -357,6 +364,6 @@ export class CinexCinemaCatalog {
       const match = rows.find(row => row && typeof row === 'object' && typeof (row as { siglas?: unknown }).siglas === 'string' &&
         typeof (row as { name?: unknown }).name === 'string' && (row as { siglas: string }).siglas.toUpperCase() === cinemaId);
       return match && typeof (match as { name: unknown }).name === 'string' ? (match as { name: string }).name : undefined;
-    } catch { return undefined; }
+    } catch (error) { if (error instanceof CallStopped) throw error; return undefined; }
   }
 }

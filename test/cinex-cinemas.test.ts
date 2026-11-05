@@ -546,3 +546,26 @@ test('one Cinex venue with an invalid item fails alone instead of emptying the c
   assert.equal(r.partial, true);
   assert.ok(r.warnings.some(w => /1 sedes Cinex \(Lider\)/.test(w)), r.warnings.join(' | '));
 });
+
+test('a cancelled call does not make the shared Cinex catalog forget verified venues', async () => {
+  const requests: string[] = [];
+  let abortOnVenuePage: AbortController | undefined;
+  const http = new HttpClient(async input => {
+    const url = new URL(String(input)); requests.push(url.pathname);
+    if (url.pathname === '/cines.html') return new Response(card('sambil', 'Sambil', 'xSBC.jpg'));
+    if (url.pathname === '/assets/php/datasource.php') return Response.json({ data: [{ siglas: 'SBC', name: 'Sambil' }] });
+    if (url.pathname === '/cartelera.html') return new Response(`<div class="poster" onclick="x('sinopsis-clayface.html')" title="CLAYFACE"></div>`);
+    // No sessions on the page, so its code is confirmed by a metadata read.
+    if (url.pathname === '/cinex-sambil.html') { abortOnVenuePage?.abort(); return new Response('<h3 class="title">SAMBIL</h3><div class="sessionslist"><h5 class="title">CLAYFACE</h5></div>'); }
+    return new Response('missing', { status: 404 });
+  });
+  const s = new CinemaService(http, new CinexCinemaCatalog());
+  const q = { provider: 'cinex' as const, cinema_id: 'SBC', date: '2026-09-18', refresh: true };
+  assert.equal((await s.query('showtimes', q)).status, 'empty');
+  abortOnVenuePage = new AbortController();
+  const cancelled = await s.query('showtimes', q, { signal: abortOnVenuePage.signal });
+  assert.ok(cancelled.warnings.some(w => /cancelada/.test(w)), cancelled.warnings.join(' | '));
+  abortOnVenuePage = undefined; requests.length = 0;
+  assert.equal((await s.query('showtimes', q)).status, 'empty');
+  assert.ok(!requests.includes('/cines.html'), `the remembered venue URL must survive the cancellation; read: ${requests.join(', ')}`);
+});

@@ -427,6 +427,14 @@ export function assertPublicRead(value: string) {
 export type CallOptions = { signal?: AbortSignal; progress?: (message: string) => void };
 
 /**
+ * The call itself stopped: the client cancelled it or its deadline passed.
+ * Not evidence about the provider, so callers rethrow it before treating a
+ * failed read as a missing page or changing shared discovery state.
+ */
+export class CallStopped extends DataError {
+  constructor(message: string) { super('error', message); }
+}
+/**
  * No provider read starts once this much of one tool call has elapsed. A read
  * already in flight may still take its own 15 s, so a call stays near 75 s,
  * under the hosted 90 s limit, however its reads are chained or fanned out.
@@ -449,10 +457,10 @@ export class ReadContext {
   /** The earlier of `ms` from now and the call's own deadline, for a fan-out's loop. */
   budget(ms: number) { return Math.min(Date.now() + ms, this.deadline); }
   private checkCanRead() {
-    if (this.call.signal?.aborted) throw new DataError('error', 'La consulta fue cancelada por el cliente.');
+    if (this.call.signal?.aborted) throw new CallStopped('La consulta fue cancelada por el cliente.');
     // 'error', like a read timeout: an 'unavailable' here would read as a
     // missing page and make callers discard verified state or try fallbacks.
-    if (Date.now() >= this.deadline) throw new DataError('error', 'Se agotó el tiempo de esta consulta antes de terminar de leer el proveedor; repítela o acótala con cinema_id, movie_id o query.');
+    if (Date.now() >= this.deadline) throw new CallStopped('Se agotó el tiempo de esta consulta antes de terminar de leer el proveedor; repítela o acótala con cinema_id, movie_id o query.');
   }
   /** Reports one completed step of a fan-out, when the client asked for progress. */
   progress(message: string) {
