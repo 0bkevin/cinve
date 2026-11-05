@@ -387,6 +387,9 @@ export function parseCinexMovies(html: string): DataItem[] {
 export function parseCinexShowtimes(html: string, movieId: string, date: string, c?: ReadContext): DataItem[] {
   const $ = load(html);
   const title = decodeLabel($('h1').first().text() || movieId);
+  // "<strong>Censura: </strong>C", the film's age rating.
+  const ratingItem = $('li').filter((_, li) => /^Censura:/i.test($(li).find('strong').first().text().trim())).first();
+  const rating = decodeLabel(ratingItem.text().replace(/^\s*Censura:\s*/i, '')).slice(0, 20) || undefined;
   const nodes = $('[onclick*="checkLogin("]');
   if (!nodes.length) throw new DataError('unavailable', 'La ficha Cinex no contiene funciones reconocibles.');
   let malformed = 0;
@@ -405,7 +408,7 @@ export function parseCinexShowtimes(html: string, movieId: string, date: string,
     const key = `${match[2]}:${match[1]}`;
     const list = occurrences.get(key) ?? []; occurrences.set(key, list);
     list.push({ kind: 'showtime', id: match[1], name: title,
-      movie_id: movieId, cinema_id: match[2], date: local.slice(0, 10), time: local.slice(11, 16), starts_at: `${local}-04:00`, ...details,
+      movie_id: movieId, cinema_id: match[2], date: local.slice(0, 10), time: local.slice(11, 16), starts_at: `${local}-04:00`, rating, ...details,
       url: `${CX}/sinopsis-${movieId}.html` });
   });
   const items: DataItem[] = [];
@@ -482,6 +485,8 @@ export function parseCinexCinemaShowtimes(html: string, movies: DataItem[], cine
   $('.sessionslist').each((_, block) => {
     blocks++;
     const title = decodeLabel($(block).find('h5.title').first().text());
+    // "Censura: <b>B</b>", the venue's age rating for this film.
+    const rating = decodeLabel($(block).find('.movieinforow3 b').first().text()).slice(0, 20) || undefined;
     const sessionNodes = $(block).find('[onclick*="checkLogin("]');
     nodes += sessionNodes.length;
     if (!sessionNodes.length) return;
@@ -525,7 +530,7 @@ export function parseCinexCinemaShowtimes(html: string, movies: DataItem[], cine
       if (local.slice(0, 10) !== date) return;
       const readable = $(e).clone(); readable.find('br').replaceWith('\n');
       const item: DataItem = { kind: 'showtime', id: sessionId, name: movie.name, cinema_id: cinemaId, cinema_name: cinemaName, movie_id: movie.id,
-        date, time: local.slice(11, 16), starts_at: `${local}-04:00`,
+        date, time: local.slice(11, 16), starts_at: `${local}-04:00`, rating,
         ...cinexSessionDetails(readable.text(), $(e).find('img.icoIdioma').attr('src')), url };
       const key = `${cinemaId}:${sessionId}`;
       if (suppressed.has(key)) return;

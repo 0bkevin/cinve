@@ -167,3 +167,13 @@ test('Cinex session buttons give the room, the subtitled or dubbed version and s
   assert.deepEqual(cinexSessionDetails('Sala 7\n06:40 pm', 'https://www.cinex.com.ve/assets/images/xsub.png'), { screen: '7', language: 'subtitulada' });
   assert.deepEqual(cinexSessionDetails('06:40 pm', undefined), { screen: undefined }, 'no room line means no room');
 });
+
+test('Cinex showtimes carry the age rating the venue and synopsis pages show', () => {
+  // Markup as served on 2026-11-05 by cinex-tolon.html and sinopsis-clayface.html.
+  const session = `<div onclick="javascript:checkLogin('7','TLN');" alt="${epoch('2026-11-04')}" class="cinemasessionpos"><button><img src="https://www.cinex.com.ve/assets/images/xsub.png" class="icoIdioma"><br>Sala 2<br>08:00 pm<br></button></div>`;
+  const venue = parseCinexCinemaShowtimes(`<div class='container sessionslist'><h5 class='title'>CLAYFACE</h5><div class='movieinforow1'>Genero: <b>Terror</b><br></div><div class='movieinforow3'>Censura: <b>C</b><br></div>${session}</div>`,
+    [{ kind: 'movie', id: 'clayface', name: 'CLAYFACE' }], 'TLN', '2026-11-04', context(), 'https://www.cinex.com.ve/cinex-tolon.html');
+  assert.deepEqual(venue.map(i => [i.id, i.rating, i.screen, i.language]), [['7', 'C', '2', 'subtitulada']]);
+  const synopsis = parseCinexShowtimes(`<h1>CLAYFACE</h1><ul><li><strong>Director: </strong>James Watkins</li><li><strong>Censura: </strong>C</li></ul>${session}`, 'clayface', '2026-11-04', context());
+  assert.equal(synopsis[0].rating, 'C');
+});
