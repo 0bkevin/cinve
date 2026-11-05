@@ -9,6 +9,15 @@ type Page = { body: string; source: EvidenceSource };
 type CacheEntry = { page: Page; expires: number; bytes: number; startedAt: number; keys: Set<string> };
 type Waiting = { start: () => boolean; cancel: () => void };
 type RefreshState = { keys: Set<string> };
+// Entry count bounds bookkeeping; the byte budget bounds memory. One Cines
+// Unidos city read through its search API alone needs ~50 small responses,
+// and one Cinex city needs about ten venue pages of ~2 MB each (1 MB once
+// whitespace is collapsed; see compactBody).
+const cacheEntries = 512, cacheBytesLimit = 64 * 1024 * 1024;
+// An anti-bot challenge is a refusal of automated clients that does not clear
+// within seconds. Remember it per origin so later public reads fail fast (or
+// take an adapter's documented fallback) instead of being refused again.
+const challengeMemoryMs = 10 * 60 * 1000;
 const hosts = new Set(['www.cinex.com.ve', 'www.cinesunidos.com', 'gateway.cinesunidos.com', 'cinepiccandelaria.com', 'cinepicvip.com', 'apifront.cinexo.com.ar', 'api.cinexo.com.ar']);
 
 function cancelBody(body: ReadableStream<Uint8Array> | null | undefined) {
@@ -71,6 +80,18 @@ function cinexCinemaRedirect(url: string, response: Response): string | undefine
   } catch { /* Unrecognized redirects remain unavailable, without leaking their URL. */ }
 }
 
+/**
+ * Cinex venue pages are about 55% whitespace (1.9 MB, of which 1 MB is
+ * indentation between calendar blocks). Its HTML parsers read only element
+ * structure, attributes and \s-tolerant text, so collapsing whitespace runs
+ * before caching gives identical results at half the memory. Other
+ * providers embed JSON in their pages and are left byte-for-byte intact.
+ */
+function compactBody(url: string, body: string): string {
+  const u = new URL(url);
+  return u.hostname === 'www.cinex.com.ve' && u.pathname.endsWith('.html') ? body.replace(/\s+/g, ' ') : body;
+}
+
 /** Public reads are cached. Authenticated reads reload local sessions and bypass all caches. */
 export class HttpClient {
   // A single cache entry can be addressed by both the requested cinema URL
@@ -87,6 +108,7 @@ export class HttpClient {
   private clock = 0;
   private active = new Map<string, number>();
   private queues = new Map<string, Waiting[]>();
+  private challenged = new Map<string, { until: number; error: DataError }>();
   constructor(private request: typeof fetch = fetch, private timeout = 15000, readonly sessions = new SessionStore()) {}
   async getAuthenticated(provider: AuthProviderId, url: string): Promise<Page> {
     assertPrivateRead(provider, url);
@@ -122,8 +144,14 @@ export class HttpClient {
       }
     }
     const hit = this.cache.get(url);
-    if (hit && hit.expires > Date.now()) return { ...hit.page, source: { ...hit.page.source, cached: true } };
+    if (hit && hit.expires > Date.now()) {
+      this.touch(hit);
+      return { ...hit.page, source: { ...hit.page.source, cached: true } };
+    }
     if (hit) this.evictEntry(hit);
+    const challenge = this.challenged.get(parsed.origin);
+    if (challenge && challenge.until > Date.now()) throw new DataError(challenge.error.status, challenge.error.message);
+    if (challenge) this.challenged.delete(parsed.origin);
     const running = this.pending.get(url);
     if (running) return running;
     const startedAt = ++this.clock;
@@ -200,8 +228,8 @@ export class HttpClient {
       if (!removable) break;
       keys.delete(removable);
     }
-    while (this.cache.size + keys.size > 64 ||
-           this.cacheBytes + bytes > 16 * 1024 * 1024) {
+    while (this.cache.size + keys.size > cacheEntries ||
+           this.cacheBytes + bytes > cacheBytesLimit) {
       const victim = [...new Set(this.cache.values())].find(entry => entry !== existing);
       if (!victim) break;
       this.evictEntry(victim);
@@ -209,6 +237,10 @@ export class HttpClient {
     const entry: CacheEntry = { page, expires: Date.now() + ttl, bytes, startedAt, keys };
     for (const key of keys) this.cache.set(key, entry);
     this.cacheBytes += bytes;
+  }
+  /** Eviction takes the first entry in Map order; a hit moves its keys to the end (LRU). */
+  private touch(entry: CacheEntry) {
+    for (const key of entry.keys) if (this.cache.get(key) === entry) { this.cache.delete(key); this.cache.set(key, entry); }
   }
   private evict(url: string) { const entry = this.cache.get(url); if (entry) this.evictEntry(entry); }
   private evictEntry(entry: CacheEntry) {
@@ -299,7 +331,9 @@ export class HttpClient {
         // An interactive anti-bot challenge is an explicit refusal of automated
         // clients. Report it as such; Cinve never tries to solve or evade it.
         if (response.status === 403 && response.headers.get('cf-mitigated')?.toLowerCase() === 'challenge') {
-          throw new DataError('blocked', `El proveedor exige un desafío anti-bots (Cloudflare) en ${new URL(url).hostname} y no admite consultas automatizadas. Cinve no evade esa protección; consulta la programación en su web o redes oficiales.`);
+          const error = new DataError('blocked', `El proveedor exige un desafío anti-bots (Cloudflare) en ${new URL(url).hostname} y no admite consultas automatizadas. Cinve no evade esa protección; consulta la programación en su web o redes oficiales.`);
+          if (!authorize) this.challenged.set(origin, { until: Date.now() + challengeMemoryMs, error });
+          throw error;
         }
         throw new DataError(status, `El proveedor respondió HTTP ${response.status} en ${url}.`);
       }
@@ -317,7 +351,9 @@ export class HttpClient {
         if (signal.aborted) cancelReader(reader);
         throw error;
       }
-      return { body: Buffer.concat(chunks).toString('utf8'), source: { url, fetched_at: new Date().toISOString(), cached: false } };
+      if (!authorize) this.challenged.delete(origin);
+      const text = Buffer.concat(chunks).toString('utf8');
+      return { body: authorize ? text : compactBody(url, text), source: { url, fetched_at: new Date().toISOString(), cached: false } };
     } catch (error) {
       if (error instanceof DataError) throw error;
       if (signal.aborted) throw new DataError('error', `Se agotó el plazo total de la consulta a ${url}.`);
@@ -338,7 +374,6 @@ function exactQuery(u: URL, rules: Record<string, (value: string | null) => bool
 const cinexDatasource: Record<string, Record<string, (value: string | null) => boolean>> = {
   getcinemacitieslist: { method: () => true },
   getcinemadatafromcinemaid: { method: () => true, cinemaid: ids },
-  preparepricecinema: { method: () => true, cinemaid: ids },
 };
 /**
  * Public GET routes the provider adapters are allowed to read. The host
@@ -388,12 +423,28 @@ export function assertPublicRead(value: string) {
   if (!allowed) throw new DataError('error', 'Ruta de consulta pública no permitida.');
 }
 
+/** Per-call options from the MCP request: its cancellation and progress reporting. */
+export type CallOptions = { signal?: AbortSignal; progress?: (message: string) => void };
+
 export class ReadContext {
   sources: EvidenceSource[] = [];
   warnings: string[] = [];
   partial = false;
-  constructor(private http: HttpClient, private refresh = false) {}
+  /**
+   * @param signal The MCP request's cancellation. A cancelled call starts no
+   * further provider reads, so fan-outs stop at their next read; reads already
+   * in flight finish, since other callers may share them through the cache.
+   */
+  constructor(private http: HttpClient, private refresh = false, private call: CallOptions = {}) {}
+  private checkCancelled() {
+    if (this.call.signal?.aborted) throw new DataError('error', 'La consulta fue cancelada por el cliente.');
+  }
+  /** Reports one completed step of a fan-out, when the client asked for progress. */
+  progress(message: string) {
+    try { this.call.progress?.(message); } catch { /* Progress is advisory; it never fails a read. */ }
+  }
   async authenticated(provider: AuthProviderId, url: string): Promise<string> {
+    this.checkCancelled();
     const page = await this.http.getAuthenticated(provider, url);
     if (!this.sources.some(s => s.url === page.source.url)) this.sources.push(page.source);
     return page.body;
@@ -403,6 +454,7 @@ export class ReadContext {
   }
   async page(url: string, ttl?: number): Promise<Page> {
     assertPublicRead(url);
+    this.checkCancelled();
     const page = await this.http.get(url, ttl, this.refresh);
     if (!this.sources.some(s => s.url === page.source.url)) this.sources.push(page.source);
     return page;

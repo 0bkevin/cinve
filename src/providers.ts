@@ -1,7 +1,7 @@
 import { parseCinemaDirectory } from './cinema-directory.js';
 import { CinexCinemaCatalog } from './cinex-cinemas.js';
 import { load } from 'cheerio';
-import { DataError, DateInput, folded, Id, number, requireArg, text, today } from './core.js';
+import { DataError, DateInput, folded, Id, number, operationItemSchema, requireArg, text, today } from './core.js';
 import type { DataItem, Operation, Query } from './core.js';
 import { ReadContext } from './http.js';
 import { decodeLabel, findField, pageFields, flight, object, objects, requiredText, rows } from './parsers.js';
@@ -177,7 +177,7 @@ export async function cinepic(op: Operation, q: Query, c: ReadContext): Promise<
       c.partial = true;
       providerWarning(c, 'cinepic-unknown-subtitle', () => `Función ${warningLabel(id)}: Cinepic no confirmó el estado de subtítulos; se omite language.`);
     }
-    return { kind: 'showtime', id, name: text(movie?.peliculas_nombre) || `Película ${mid}`, cinema_id: q.cinema_id, movie_id: mid,
+    return { kind: 'showtime', id, name: text(movie?.peliculas_nombre) || `Película ${mid}`, cinema_id: q.cinema_id, cinema_name: site.name, movie_id: mid,
       date, time, starts_at: overnight === true ? undefined : overnight === false ? `${date}T${time}:00-04:00` : undefined,
       format: text(r.formato), language: subtitled === undefined ? undefined : subtitled ? 'subtitulada' : 'no_subtitulada',
       url: `${site.host}/es-AR/compra?${new URLSearchParams({ cid: q.cinema_id!, fid: id, pid: mid })}` };
@@ -250,7 +250,7 @@ export async function cinesunidos(op: Operation, q: Query, c: ReadContext): Prom
         const raw = requiredText(s, 'date');
         if (!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/.test(raw) || !DateInput.safeParse(raw.slice(0, 10)).success) throw new DataError('error', 'Fecha Cines Unidos con formato no reconocido.');
         if (raw.slice(0, 10) !== isoDate(q)) continue;
-        sessions.push({ kind: 'showtime', id: requiredText(s, 'id'), name: requiredText(m, 'title'), cinema_id: cid, movie_id: mid,
+        sessions.push({ kind: 'showtime', id: requiredText(s, 'id'), name: requiredText(m, 'title'), cinema_id: cid, cinema_name: warningLabel(text(cinema.name), 200) || undefined, movie_id: mid,
           date: raw.slice(0, 10), time: raw.slice(11, 16), starts_at: `${raw}-04:00`, screen: text(s.screen), format: text(s.format),
           url: `${CU}/pelicula/${encodeURIComponent(mid)}?${new URLSearchParams({ city })}` });
       }
@@ -270,6 +270,11 @@ async function cinesUnidosCity(city: string, q: Query, c: ReadContext): Promise<
 }
 
 const cuGatewayTitles = 80;
+// One deadline for the whole fan-out: forty slow titles at two reads at a
+// time could otherwise run past the hosted 90 s limit while every single read
+// stays within its own 15 s.
+const cuGatewayBudgetMs = 45000;
+const cuGatewayWorkers = 2;
 /** Cines Unidos public search API: directory, billboard titles and sessions by title. */
 async function cinesUnidosGateway(op: Operation, q: Query, c: ReadContext, requestedCity: string): Promise<DataItem[]> {
   const city = await cinesUnidosCity(requestedCity, q, c);
@@ -279,31 +284,62 @@ async function cinesUnidosGateway(op: Operation, q: Query, c: ReadContext, reque
   if (op === 'cinemas') return parseCinemaDirectory([rows(await c.json(`${base}/theaters`), 'gateway theaters')], city, pageUrl('cines'), c);
   const films = await c.json(`${base}/films`);
   if (!Array.isArray(films) || films.some(t => typeof t !== 'string')) throw new DataError('error', 'Lista de películas de Cines Unidos no reconocida.');
-  const titles = [...new Set((films as string[]).map(t => t.trim()).filter(t => t && t.length <= 200))];
+  // The service filters results by name; the session title is the searched
+  // film title, so a name filter can skip the searches it would discard.
+  const titles = [...new Set((films as string[]).map(t => t.trim()).filter(t => t && t.length <= 200))]
+    .filter(t => !q.query || folded(t).includes(folded(q.query)));
   if (titles.length > cuGatewayTitles) {
     c.partial = true;
     c.warnings.push(`Se consultaron ${cuGatewayTitles} de ${titles.length} títulos de Cines Unidos; el resultado es parcial.`);
   }
-  const sessions: Obj[] = [];
-  // Small batches stay within the per-origin queue and keep the fan-out explicit.
-  const work = titles.slice(0, cuGatewayTitles);
-  for (let i = 0; i < work.length; i += 4) {
-    const batch = await Promise.all(work.slice(i, i + 4).map(async title =>
-      rows(await c.json(`${base}/sessions?${new URLSearchParams({ Title: title })}`), 'gateway sessions')));
-    sessions.push(...batch.flat());
-  }
-  const date = isoDate(q), showtimes: DataItem[] = [], movies = new Map<string, DataItem>();
-  for (const s of sessions) {
+  const date = isoDate(q);
+  // Normalize each title's sessions inside its own settled task: a title
+  // whose records are malformed fails alone instead of taking the others along.
+  const normalize = (s: Obj): DataItem | undefined => {
     const raw = requiredText(s, 'showtime');
     if (!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/.test(raw) || !DateInput.safeParse(raw.slice(0, 10)).success) throw new DataError('error', 'Fecha Cines Unidos con formato no reconocido.');
     const mid = requiredText(s, 'ho'), cid = requiredText(s, 'cinemaId'), name = requiredText(s, 'title');
-    if (raw.slice(0, 10) !== date || (q.cinema_id && cid !== q.cinema_id) || (q.movie_id && mid !== q.movie_id)) continue;
-    const url = `${CU}/pelicula/${encodeURIComponent(mid)}?${new URLSearchParams({ city })}`;
-    showtimes.push({ kind: 'showtime', id: requiredText(s, 'sessionId'), name, cinema_id: cid, movie_id: mid,
+    if (raw.slice(0, 10) !== date || (q.cinema_id && cid !== q.cinema_id) || (q.movie_id && mid !== q.movie_id)) return undefined;
+    const item: DataItem = { kind: 'showtime', id: requiredText(s, 'sessionId'), name, cinema_id: cid, movie_id: mid,
       date, time: raw.slice(11, 16), starts_at: `${raw}-04:00`, screen: text(s.screenNumber), format: text(s.format),
-      language: text(s.language), url });
-    if (!movies.has(mid)) movies.set(mid, { kind: 'movie', id: mid, name, city, url });
+      language: text(s.language), url: `${CU}/pelicula/${encodeURIComponent(mid)}?${new URLSearchParams({ city })}` };
+    // Apply the service's result validation here, so an invalid ID or an
+    // oversized title fails this title only, not the whole response.
+    operationItemSchema('showtimes').parse(item); Id.parse(item.id);
+    return item;
+  };
+  const showtimes: DataItem[] = [];
+  const failures: unknown[] = [];
+  const work = titles.slice(0, cuGatewayTitles);
+  const deadline = Date.now() + cuGatewayBudgetMs;
+  let next = 0, succeeded = 0;
+  // Two workers match the HTTP client's two reads per origin, whose 15 s
+  // deadline includes queue time; more would only time out waiting.
+  const worker = async () => {
+    while (next < work.length && Date.now() < deadline) {
+      const title = work[next++];
+      try {
+        showtimes.push(...rows(await c.json(`${base}/sessions?${new URLSearchParams({ Title: title })}`), 'gateway sessions')
+          .map(normalize).filter((item): item is DataItem => item !== undefined));
+        succeeded++;
+      } catch (error) { failures.push(error); }
+      c.progress(`Cines Unidos: ${succeeded + failures.length} de ${work.length} títulos consultados.`);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(cuGatewayWorkers, work.length) }, worker));
+  const skipped = work.length - next;
+  // One failed title must not discard every other title's schedule.
+  if (failures.length) {
+    c.partial = true;
+    c.warnings.push(`No se pudieron consultar las funciones de ${failures.length} de ${work.length} títulos de Cines Unidos; el resultado es parcial.`);
   }
+  if (skipped) {
+    c.partial = true;
+    c.warnings.push(`Se agotó el tiempo de consulta antes de leer ${skipped} de ${work.length} títulos de Cines Unidos; usa query con el título para consultarlos.`);
+  }
+  if (work.length && !succeeded) throw failures[0] ?? new DataError('unavailable', 'Se agotó el tiempo de consulta de Cines Unidos; usa query con el título de la película.');
+  const movies = new Map<string, DataItem>();
+  for (const s of showtimes) if (!movies.has(s.movie_id!)) movies.set(s.movie_id!, { kind: 'movie', id: s.movie_id!, name: s.name, city, url: s.url });
   return op === 'showtimes' ? showtimes : [...movies.values()];
 }
 
@@ -321,30 +357,51 @@ export function parseCinexMovies(html: string): DataItem[] {
   return [...items.values()];
 }
 export function parseCinexShowtimes(html: string, movieId: string, date: string, c?: ReadContext): DataItem[] {
-  const $ = load(html), items = new Map<string, DataItem>();
+  const $ = load(html);
   const title = decodeLabel($('h1').first().text() || movieId);
   const nodes = $('[onclick*="checkLogin("]');
   if (!nodes.length) throw new DataError('unavailable', 'La ficha Cinex no contiene funciones reconocibles.');
   let malformed = 0;
+  // Read every date on the page first: a session ID reported on two dates is
+  // as contradictory as one reported at two times, and filtering by the
+  // requested date first would hide the other occurrence.
+  const occurrences = new Map<string, DataItem[]>();
   nodes.each((_, e) => {
     const match = ($(e).attr('onclick') ?? '').match(/checkLogin\('([^']+)','([^']+)'\)/);
     const epoch = number($(e).attr('alt'));
     if (!match || epoch === undefined || !Number.isInteger(epoch) || epoch < 1e9 || epoch > 1e11) { malformed++; return; }
     const local = new Date(epoch * 1000 - 4 * 3600000).toISOString().slice(0, 19);
-    if (local.slice(0, 10) !== date) return;
     const readable = $(e).clone(); readable.find('br').replaceWith('\n');
-    const body = readable.text(), screen = body.match(/Sala\s+(\d+)/i)?.[1];
-    items.set(`${match[2]}:${match[1]}`, { kind: 'showtime', id: match[1], name: title,
-      movie_id: movieId, cinema_id: match[2], date, time: local.slice(11, 16), starts_at: `${local}-04:00`, screen,
+    // Same room syntax as the venue page (Sala 3, Sala VIP).
+    const body = readable.text(), screen = body.match(/Sala\s+([A-Za-z0-9_-]+)/i)?.[1];
+    const key = `${match[2]}:${match[1]}`;
+    const list = occurrences.get(key) ?? []; occurrences.set(key, list);
+    list.push({ kind: 'showtime', id: match[1], name: title,
+      movie_id: movieId, cinema_id: match[2], date: local.slice(0, 10), time: local.slice(11, 16), starts_at: `${local}-04:00`, screen,
       language: cinexLanguage($(e).find('img.icoIdioma').attr('src')),
       url: `${CX}/sinopsis-${movieId}.html` });
   });
+  const items: DataItem[] = [];
+  for (const list of occurrences.values()) {
+    if (!list.some(item => item.date === date)) continue;
+    if (list.some(item => cinexSessionConflict(list[0], item))) {
+      if (c) { c.partial = true; providerWarning(c, 'cinex-movie-conflict', () => `Cinex devolvió horarios contradictorios para la función ${warningLabel(list[0].id)}; se omitió.`); }
+      continue;
+    }
+    items.push(list[0]);
+  }
   if (malformed && c) {
     c.partial = true;
     providerWarning(c, 'cinex-movie-malformed-session', 'Cinex devolvió una o más funciones de película con epoch o identificador malformado; se omitieron.');
-    providerWarningSummary(c);
   }
-  return [...items.values()];
+  if (c) providerWarningSummary(c);
+  return items;
+}
+
+/** The same session ID with another film, date, time or room cannot drive a price or seat lookup. */
+function cinexSessionConflict(a: DataItem, b: DataItem) {
+  // starts_at keeps the provider's seconds; time is rounded to the minute.
+  return a.movie_id !== b.movie_id || a.date !== b.date || a.time !== b.time || a.starts_at !== b.starts_at || (a.screen ?? null) !== (b.screen ?? null);
 }
 
 function cinexLanguage(src?: string): string | undefined {
@@ -355,7 +412,7 @@ function cinexLanguage(src?: string): string | undefined {
 const cinexMovieTitle = (name: string) => folded(name).replace(/[^a-z0-9]/g, '');
 
 /** Parse the calendar-style cinema page, whose blocks have titles but no movie slugs. */
-export function parseCinexCinemaShowtimes(html: string, movies: DataItem[], cinemaId: string, date: string, c: ReadContext, url: string): DataItem[] {
+export function parseCinexCinemaShowtimes(html: string, movies: DataItem[], cinemaId: string, date: string, c: ReadContext, url: string, cinemaName?: string): DataItem[] {
   if (!Id.safeParse(cinemaId).success) throw new DataError('error', 'Código de sede Cinex inválido.');
   const byTitle = new Map<string, DataItem[]>();
   for (const movie of movies) {
@@ -365,6 +422,21 @@ export function parseCinexCinemaShowtimes(html: string, movies: DataItem[], cine
   const $ = load(html), items = new Map<string, DataItem>();
   const suppressed = new Set<string>();
   let blocks = 0, nodes = 0;
+  const sessionCall = /checkLogin\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]\s*\)/i;
+  // A session ID must have one film, start and room across the whole page,
+  // not only within the requested date: compare every occurrence first.
+  const identities = new Map<string, string>(), contradictory = new Set<string>();
+  $('.sessionslist').each((_, block) => {
+    const blockTitle = cinexMovieTitle(decodeLabel($(block).find('h5.title').first().text()));
+    $(block).find('[onclick*="checkLogin("]').each((_, e) => {
+      const match = ($(e).attr('onclick') ?? '').match(sessionCall), epoch = number($(e).attr('alt'));
+      if (!match || match[2] !== cinemaId || epoch === undefined || !Number.isInteger(epoch)) return;
+      const readable = $(e).clone(); readable.find('br').replaceWith('\n');
+      const identity = JSON.stringify([blockTitle, epoch, readable.text().match(/Sala\s+([A-Za-z0-9_-]+)/i)?.[1] ?? null]);
+      const key = `${cinemaId}:${match[1]}`, previous = identities.get(key);
+      if (previous === undefined) identities.set(key, identity); else if (previous !== identity) contradictory.add(key);
+    });
+  });
   $('.sessionslist').each((_, block) => {
     blocks++;
     const title = decodeLabel($(block).find('h5.title').first().text());
@@ -411,13 +483,13 @@ export function parseCinexCinemaShowtimes(html: string, movies: DataItem[], cine
       if (local.slice(0, 10) !== date) return;
       const readable = $(e).clone(); readable.find('br').replaceWith('\n');
       const body = readable.text(), screen = body.match(/Sala\s+([A-Za-z0-9_-]+)/i)?.[1];
-      const item: DataItem = { kind: 'showtime', id: sessionId, name: movie.name, cinema_id: cinemaId, movie_id: movie.id,
+      const item: DataItem = { kind: 'showtime', id: sessionId, name: movie.name, cinema_id: cinemaId, cinema_name: cinemaName, movie_id: movie.id,
         date, time: local.slice(11, 16), starts_at: `${local}-04:00`, screen,
         language: cinexLanguage($(e).find('img.icoIdioma').attr('src')), url };
       const key = `${cinemaId}:${sessionId}`;
       if (suppressed.has(key)) return;
       const previous = items.get(key);
-      if (previous && (previous.movie_id !== item.movie_id || previous.time !== item.time || previous.date !== item.date)) {
+      if (contradictory.has(key) || (previous && cinexSessionConflict(previous, item))) {
         c.partial = true; providerWarning(c, 'cinex-cinema-conflict', () => `Cinex devolvió horarios contradictorios para la función ${warningLabel(sessionId)}; se omitió.`); items.delete(key); suppressed.add(key); return;
       }
       items.set(key, item);
@@ -435,15 +507,12 @@ export async function cinex(op: Operation, q: Query, c: ReadContext, catalog = n
   }
   if (op === 'cinemas') return catalog.list(q, c);
   if (op === 'prices') {
-    if (q.session_id) {
-      if ((await c.authenticated('cinex', `${CX}/checklogin.php`)).trim() !== 'on') throw new DataError('auth_required', 'La sesión Cinex expiró. Ejecuta npm run login -- cinex en una terminal local.');
-      const url = `${CX}/boletos.php?${new URLSearchParams({ sessionid: q.session_id, cinemaid: requireArg(q, 'cinema_id') })}`;
-      c.warnings.push('Importe VES de la función, con boleto y otros cargos desglosados; no es un total final de compra.');
-      return parseCinexPrices(await c.authenticated('cinex', url), q, url);
-    }
-    const body = (await c.get(cxSource('preparepricecinema', requireArg(q, 'cinema_id')), 60000)).trim();
-    if (!body || body.includes('NO DISPONIBLE')) throw new DataError('unavailable', 'Cinex no devuelve un listado de tarifas para esta sede.');
-    throw new DataError('unavailable', 'Cinex devolvió un listado cuyo formato de tarifas todavía no está validado.');
+    // Cinex publishes ticket prices only on the authenticated function page.
+    const sessionId = requireArg(q, 'session_id');
+    if ((await c.authenticated('cinex', `${CX}/checklogin.php`)).trim() !== 'on') throw new DataError('auth_required', 'La sesión Cinex expiró. Ejecuta npm run login -- cinex en una terminal local.');
+    const url = `${CX}/boletos.php?${new URLSearchParams({ sessionid: sessionId, cinemaid: requireArg(q, 'cinema_id') })}`;
+    c.warnings.push('Importe VES de la función, con boleto y otros cargos desglosados; no es un total final de compra.');
+    return parseCinexPrices(await c.authenticated('cinex', url), q, url);
   }
   if (op === 'concessions') {
     if ((await c.authenticated('cinex', `${CX}/checklogin.php`)).trim() !== 'on') throw new DataError('auth_required', 'La sesión Cinex expiró. Ejecuta npm run login -- cinex en una terminal local.');
@@ -456,14 +525,86 @@ export async function cinex(op: Operation, q: Query, c: ReadContext, catalog = n
     return parseCinexMovies(await c.get(`${CX}/cartelera.html`));
   }
   const date = isoDate(q);
-  if (q.movie_id) {
+  // With a venue, its page is authoritative: some synopsis pages list no
+  // functions while the venue page shows that film. Filter it by movie.
+  if (q.movie_id && !q.cinema_id) {
     const mid = q.movie_id;
-    const items = parseCinexShowtimes(await c.get(`${CX}/sinopsis-${encodeURIComponent(mid)}.html`), mid, date, c);
-    return items.filter(r => !q.cinema_id || r.cinema_id === q.cinema_id);
+    try {
+      return parseCinexShowtimes(await c.get(`${CX}/sinopsis-${encodeURIComponent(mid)}.html`), mid, date, c);
+    } catch (error) {
+      if (error instanceof DataError && error.status === 'unavailable') throw new DataError('unavailable', 'La ficha Cinex de esta película no lista funciones. Consulta get_showtimes con el cinema_id de cada sede (list_cinemas), que lee la programación de la sede.');
+      throw error;
+    }
   }
+  if (q.city && !q.cinema_id) return cinexCityShowtimes(q, c, catalog, date);
   const cinemaId = requireArg(q, 'cinema_id');
   const venue = await catalog.resolve(cinemaId, c);
   const page = venue.body === undefined ? await c.page(venue.url, 120000) : { body: venue.body };
   const movies = parseCinexMovies(await c.get(`${CX}/cartelera.html`, 120000));
-  return parseCinexCinemaShowtimes(page.body, movies, cinemaId, date, c, venue.url);
+  const items = parseCinexCinemaShowtimes(page.body, movies, cinemaId, date, c, venue.url, venue.name ? warningLabel(decodeLabel(venue.name), 200) || undefined : undefined);
+  return q.movie_id ? items.filter(r => r.movie_id === q.movie_id) : items;
+}
+
+const cinexCityVenues = 16;
+// One deadline for discovery, catalog and venue reads; with at most one read
+// in flight per worker past it (15 s), a call stays well under the hosted 90 s.
+const cinexCityBudgetMs = 45000;
+// The HTTP client admits two reads per origin and each read's 15 s deadline
+// includes its queue time, so more workers would only time out in the queue.
+const cinexCityWorkers = 2;
+/**
+ * All verified venues of one city in one call. A model would otherwise list
+ * the city's venues and query each one: ten round trips for Caracas. The
+ * upstream reads are the same ones (directory, one page per venue, catalog),
+ * served from the same cache.
+ */
+async function cinexCityShowtimes(q: Query, c: ReadContext, catalog: CinexCinemaCatalog, date: string): Promise<DataItem[]> {
+  const deadline = Date.now() + cinexCityBudgetMs;
+  const listed = await catalog.list({ provider: 'cinex', city: q.city }, c);
+  const venues = listed.filter((v): v is DataItem & { cinema_id: string } => v.code_status === 'verified' && !!v.cinema_id);
+  // Known venues without a verified code are unread schedules, not an empty
+  // city: report a failure. Only a city with no Cinex venue at all is empty.
+  if (listed.length && !venues.length) throw new DataError('unavailable', 'No se pudo verificar el código de ninguna sede Cinex de esta ciudad, así que no se leyó su programación; consulta list_cinemas y sus enlaces oficiales.');
+  if (!venues.length) {
+    c.warnings.push('No se encontraron sedes Cinex en esta ciudad; consulta list_cities para ver los nombres disponibles.');
+    return [];
+  }
+  const work = venues.slice(0, cinexCityVenues);
+  if (venues.length > work.length) {
+    c.partial = true;
+    c.warnings.push(`Se consultaron ${work.length} de ${venues.length} sedes Cinex de la ciudad; usa cinema_id para las demás.`);
+  }
+  const timedOut = () => new DataError('unavailable', 'Se agotó el tiempo de consulta de las sedes Cinex de la ciudad; consulta get_showtimes con el cinema_id de cada sede (list_cinemas).');
+  if (Date.now() >= deadline) throw timedOut();
+  const movies = parseCinexMovies(await c.get(`${CX}/cartelera.html`, 120000));
+  const items: DataItem[] = [], failed: string[] = [];
+  let next = 0, succeeded = 0, firstError: unknown;
+  const worker = async () => {
+    while (next < work.length && Date.now() < deadline) {
+      const v = work[next++];
+      try {
+        const venue = await catalog.resolve(v.cinema_id, c);
+        const page = venue.body === undefined ? await c.page(venue.url, 120000) : { body: venue.body };
+        items.push(...parseCinexCinemaShowtimes(page.body, movies, v.cinema_id, date, c, venue.url, warningLabel(decodeLabel(v.name), 200) || undefined));
+        succeeded++;
+      } catch (error) {
+        failed.push(v.name); firstError ??= error;
+      }
+      c.progress(`Cinex: ${succeeded + failed.length} de ${work.length} sedes leídas.`);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(cinexCityWorkers, work.length) }, worker));
+  const skipped = work.slice(next).map(v => v.name);
+  const names = (list: string[]) => list.map(n => warningLabel(n, 60)).join(', ');
+  if (failed.length) {
+    c.partial = true;
+    c.warnings.push(`No se pudieron leer las funciones de ${failed.length} sedes Cinex (${names(failed)}); consulta su cinema_id por separado.`);
+  }
+  if (skipped.length) {
+    c.partial = true;
+    c.warnings.push(`Se agotó el tiempo de consulta antes de leer ${skipped.length} sedes Cinex (${names(skipped)}); consulta su cinema_id por separado.`);
+  }
+  // No venue read means no schedule was observed: that is a failure, not "empty".
+  if (!succeeded) throw firstError ?? timedOut();
+  return items;
 }

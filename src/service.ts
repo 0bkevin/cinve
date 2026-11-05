@@ -3,6 +3,7 @@ import { CinexCinemaCatalog } from './cinex-cinemas.js';
 import { DataError, folded, operationItemSchema, PublicUrl, Result, today, Id } from './core.js';
 import type { DataItem, Operation, Query, QueryResult } from './core.js';
 import { HttpClient, ReadContext } from './http.js';
+import type { CallOptions } from './http.js';
 import { cinepic, cinesunidos, cinex } from './providers.js';
 
 const resultWarningLimit = 64;
@@ -37,6 +38,23 @@ function boundedWarnings(warnings: string[]): string[] {
   return output;
 }
 
+const resultSourceLimit = 10;
+
+/**
+ * Fan-out reads (one search per film title, one metadata read per venue) can
+ * cite dozens of URLs, which costs the model more tokens than the data itself.
+ * Keep the first sources in read order (directory and catalog pages first)
+ * and always the oldest one, so data age stays visible, and count the rest.
+ */
+function boundedSources(sources: QueryResult['sources'], warnings: string[]): QueryResult['sources'] {
+  if (sources.length <= resultSourceLimit) return sources;
+  const oldest = sources.reduce((a, b) => (Date.parse(b.fetched_at) < Date.parse(a.fetched_at) ? b : a));
+  const kept = sources.slice(0, resultSourceLimit - 1);
+  kept.push(kept.includes(oldest) ? sources[resultSourceLimit - 1] : oldest);
+  warnings.push(`Se consultaron ${sources.length} fuentes; se listan ${kept.length}, incluida la más antigua (${oldest.fetched_at}).`);
+  return kept;
+}
+
 export const capabilities = {
   cinepic: { seats: 'public_page_data_ascii', cities: 'public', cinemas: 'public', movies: 'public_api', showtimes: 'public_api', prices: 'page_data_ves_and_derived_usd', concessions: 'public_api_empty_in_samples' },
   cinesunidos: { seats: 'authenticated_api_ascii', cities: 'public_api', cinemas: 'page_data', movies: 'page_data', showtimes: 'page_data', prices: 'authenticated_api', concessions: 'public_api' },
@@ -44,12 +62,12 @@ export const capabilities = {
 };
 export class CinemaService {
   constructor(private http = new HttpClient(), private cinexCatalog = new CinexCinemaCatalog()) {}
-  async seats(q: Query) { return getSeatMap(this.http, q); }
+  async seats(q: Query, call?: CallOptions) { return getSeatMap(this.http, q, call); }
   async authStatus() { return Promise.all((['cinex', 'cinesunidos'] as const).map(p => this.http.sessions.status(p))); }
-  async query(op: Operation, q: Query): Promise<QueryResult> {
+  async query(op: Operation, q: Query, call?: CallOptions): Promise<QueryResult> {
     // One commercial date for the entire operation, including midnight boundaries.
     if (!q.date && (op === 'showtimes' || (op === 'movies' && q.provider !== 'cinex'))) q = { ...q, date: today() };
-    const c = new ReadContext(this.http, q.refresh);
+    const c = new ReadContext(this.http, q.refresh, call);
     const result: QueryResult = { provider: q.provider, status: 'empty', queried_at: new Date().toISOString(), timezone: 'America/Caracas', sources: [], items: [], warnings: [], total: 0, next_offset: null, partial: false };
     try {
       if (q.cinema_id?.startsWith('directory-')) throw new DataError('unavailable', 'Esta sede no tiene código de consulta verificado. Consulta el enlace oficial devuelto por list_cinemas; el ID directory- solo identifica la sede conocida.');
@@ -97,7 +115,7 @@ export class CinemaService {
       result.status = error instanceof DataError ? error.status : 'error';
       c.warnings.push(error instanceof DataError ? error.message : 'Falló la interpretación de la respuesta del proveedor.');
     }
-    result.sources = c.sources;
+    result.sources = boundedSources(c.sources, c.warnings);
     result.partial = c.partial;
     result.warnings = boundedWarnings(c.warnings);
     return Result.parse(result);

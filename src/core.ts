@@ -10,8 +10,13 @@ export const DateInput = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(s => {
 }, 'Fecha calendario válida YYYY-MM-DD');
 // Provider identifiers. Interior dots are allowed because Cinex publishes movie
 // slugs such as seres.parte1lainvasion; leading/trailing dots and '..' are not,
-// so an ID can never form a relative path segment.
-export const Id = z.string().regex(/^(?!.*\.\.)[a-zA-Z0-9_-](?:[a-zA-Z0-9._-]{0,98}[a-zA-Z0-9_-])?$/);
+// so an ID can never form a relative path segment. The published pattern is a
+// plain character class: no lookaround (rejected by RE2-based validators) and
+// no large bounded group (limited in strict function-calling modes). The dot
+// rules are a server-side refinement, so accepted IDs are unchanged.
+export const idString = (params?: Parameters<typeof z.string>[0]) => z.string(params).regex(/^[a-zA-Z0-9._-]{1,100}$/)
+  .refine(value => !value.startsWith('.') && !value.endsWith('.') && !value.includes('..'), 'Identificador no válido.');
+export const Id = idString();
 export const PublicUrl = z.string().max(4096).refine(value => {
   try { const u = new URL(value); return u.protocol === 'https:' && !u.username && !u.password && !u.port; } catch { return false; }
 }, 'URL HTTPS sin credenciales');
@@ -20,7 +25,7 @@ export type Operation = 'cities' | 'cinemas' | 'movies' | 'showtimes' | 'prices'
 export const Item = z.object({
   kind: z.enum(['provider', 'city', 'cinema', 'movie', 'showtime', 'ticket_price', 'concession']),
   id: z.string().min(1).max(200), name: z.string().min(1).max(512),
-  cinema_id: Id.optional(), movie_id: Id.optional(), session_id: Id.optional(),
+  cinema_id: Id.optional(), cinema_name: z.string().min(1).max(200).optional(), movie_id: Id.optional(), session_id: Id.optional(),
   code_status: z.enum(['verified', 'unverified']).optional().describe('Código confirmado por los datos oficiales actuales; unverified no implica cierre.'),
   directory_status: z.enum(['listed', 'not_listed']).optional().describe('Presencia en el directorio recibido en esta consulta; not_listed no implica cierre.'),
   city: z.string().optional(), address: z.string().optional(),
@@ -60,13 +65,14 @@ const operationItemSchemas = {
     id: Id.describe('ID de película devuelto por list_movies.'),
   }),
   showtimes: Item.pick({
-    kind: true, id: true, name: true, cinema_id: true, movie_id: true,
+    kind: true, id: true, name: true, cinema_id: true, cinema_name: true, movie_id: true,
     date: true, time: true, starts_at: true, format: true, language: true,
     screen: true, url: true,
   }).extend({
     kind: z.literal('showtime'),
     id: Id.describe('Identificador de la función; úsalo como session_id al consultar tarifas.'),
     cinema_id: Item.shape.cinema_id.unwrap().describe('ID de sede que devuelve list_cinemas.'),
+    cinema_name: Item.shape.cinema_name.describe('Nombre de la sede cuando la fuente lo publica junto a la función.'),
     movie_id: Item.shape.movie_id.unwrap().describe('ID de película confirmado por list_movies o por el catálogo Cinex al consultar una sede completa.'),
     date: Item.shape.date.unwrap().describe('Fecha comercial de la función en America/Caracas (YYYY-MM-DD).'),
     time: Item.shape.time.unwrap().describe('Hora local de inicio (HH:mm).'),

@@ -82,9 +82,24 @@ test('queue wait consumes the deadline and expired queued work never reaches fet
   release(); await Promise.all(active); assert.equal(count, 2);
 });
 test('cache eviction has a byte budget in addition to an entry count', async () => {
-  let count = 0; const http = new HttpClient(async () => { count++; return new Response('x'.repeat(2 * 1024 * 1024)); });
-  for (let i = 0; i < 5; i++) await http.get(`https://gateway.cinesunidos.com/big/${i}`);
-  await http.get('https://gateway.cinesunidos.com/big/0'); assert.equal(count, 6);
+  // 3.5 MB bodies count 7 MB each against the 64 MB budget: ten do not fit.
+  let count = 0; const http = new HttpClient(async () => { count++; return new Response('x'.repeat(3.5 * 1024 * 1024)); });
+  for (let i = 0; i < 10; i++) await http.get(`https://gateway.cinesunidos.com/big/${i}`);
+  await http.get('https://gateway.cinesunidos.com/big/0'); assert.equal(count, 11);
+});
+test('cache eviction removes the least recently used entry, not the oldest one', async () => {
+  let count = 0; const http = new HttpClient(async () => { count++; return new Response('x'.repeat(3.5 * 1024 * 1024)); });
+  for (let i = 0; i < 9; i++) await http.get(`https://gateway.cinesunidos.com/big/${i}`);
+  await http.get('https://gateway.cinesunidos.com/big/0'); // a hit: big/0 is now the most recent
+  await http.get('https://gateway.cinesunidos.com/big/9'); // evicts big/1
+  assert.equal(count, 10);
+  await http.get('https://gateway.cinesunidos.com/big/0'); assert.equal(count, 10, 'the frequently read entry survives');
+  await http.get('https://gateway.cinesunidos.com/big/1'); assert.equal(count, 11);
+});
+test('public Cinex HTML is cached with whitespace collapsed; JSON pages are left intact', async () => {
+  const http = new HttpClient(async input => new Response(String(input).endsWith('.html') ? '<div>\n    <h5 class="title">A</h5>\n\n  </div>' : '{"a": "x  y"}'));
+  assert.equal((await http.get('https://www.cinex.com.ve/cartelera.html')).body, '<div> <h5 class="title">A</h5> </div>');
+  assert.equal((await http.get('https://gateway.cinesunidos.com/search/cities')).body, '{"a": "x  y"}');
 });
 test('queued authenticated work rechecks logout before sending credentials', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'cinev-queued-auth-')); t.after(() => rm(dir, { recursive: true, force: true }));

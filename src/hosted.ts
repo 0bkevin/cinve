@@ -1,6 +1,8 @@
 import { landingPage, servePublicAsset } from './public-web.js';
 import { hostedAuthInstructions } from './hosted-auth-guidance.js';
 import { HostedOAuth } from './oauth.js';
+import { ClientMetadataCache } from './client-metadata.js';
+import type { ClientMetadataFetcher } from './client-metadata.js';
 import { serveInstall } from './install.js';
 import { createServer as nodeServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -16,6 +18,7 @@ import { HostedHttpClient } from './hosted-http.js';
 import { SessionStore, login } from './auth.js';
 import type { AuthSession, AuthProviderId } from './auth.js';
 import type { Operation, Query } from './core.js';
+import type { CallOptions } from './http.js';
 import { ConnectionLinks } from './hosted-links.js';
 import { EncryptedSessionStore, HostedUsers, digest } from './hosted-store.js';
 import { loginPage, loginScript } from './auth-web.js';
@@ -32,11 +35,16 @@ class AnonymousSessions extends SessionStore {
 
 class HostedService extends CinemaService {
   constructor(http: HttpClient, catalog: CinexCinemaCatalog) { super(http, catalog); }
-  override async query(op: Operation, q: Query) {
-    const result = await super.query(op, q);
+  override async query(op: Operation, q: Query, call?: CallOptions) {
+    const result = await super.query(op, q, call);
     if (result.status === 'auth_required') result.warnings = ['Conecta tu cuenta con connect_account. Introduce tus credenciales solo en el enlace privado, nunca en el chat.'];
     return result;
   }
+}
+/** A serialized web origin (scheme://host[:port]), or "null" from sandboxed documents. */
+function wellFormedOrigin(value: string): boolean {
+  if (value === 'null') return true;
+  try { const u = new URL(value); return ['http:', 'https:'].includes(u.protocol) && u.origin === value; } catch { return false; }
 }
 class HttpError extends Error { constructor(readonly status: number, message: string) { super(message); } }
 async function body(req: IncomingMessage, max: number, deadlineMs = 10000): Promise<unknown> {
@@ -63,14 +71,14 @@ function refreshCalls(message: unknown): number {
 }
 export async function createHostedApp(options: {
   publicUrl: string; pool: Pool; key: Buffer; allowLocal?: boolean; trustedVercelProxy?: boolean; cleanupSecret?: string;
-  authenticate?: typeof login; request?: typeof fetch; bodyTimeoutMs?: number;
+  authenticate?: typeof login; request?: typeof fetch; bodyTimeoutMs?: number; clientMetadata?: ClientMetadataFetcher;
 }) {
   const publicUrl = new URL(options.publicUrl);
   if (publicUrl.pathname !== '/' || publicUrl.search || publicUrl.hash || publicUrl.username || publicUrl.password ||
       (publicUrl.protocol !== 'https:' && !(options.allowLocal && publicUrl.protocol === 'http:' && publicUrl.hostname === '127.0.0.1'))) throw new Error('CINEV_PUBLIC_URL debe ser un origen HTTPS.');
   if (options.key.length !== 32) throw new Error('Clave de cifrado no válida.');
   let origin = publicUrl.origin;
-  const oauth = new HostedOAuth(options.pool, () => origin);
+  const oauth = new HostedOAuth(options.pool, () => origin, new ClientMetadataCache(options.clientMetadata));
   const users = new HostedUsers(options.pool);
   const links = new ConnectionLinks(options.pool);
   // Public cache and in-flight deduplication live for this hosted app. The
@@ -97,11 +105,19 @@ export async function createHostedApp(options: {
       const ip = typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : req.socket.remoteAddress ?? 'unknown';
       if (await oauth.handle(req, res, ip)) return;
       if (req.url === '/mcp') {
-        // MCP authorization is exclusively bearer-based; cookies are never used.
+        // MCP authorization is exclusively bearer-based; cookies are never used,
+        // so any web origin may call it. The Host check above blocks DNS
+        // rebinding; a present but malformed Origin is still refused, as the
+        // Streamable HTTP transport requires for invalid origins.
+        if (req.headers.origin !== undefined && !wellFormedOrigin(req.headers.origin)) throw new HttpError(403, 'Origen no permitido.');
         res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, MCP-Protocol-Version, MCP-Session-Id, Last-Event-ID');
-        res.setHeader('Access-Control-Expose-Headers', 'WWW-Authenticate, MCP-Session-Id');
+        // The endpoint is stateless: it answers POST only (GET and DELETE get
+        // 405) and never issues a session, so the session and SSE-resumption
+        // headers that protocol 2026-07-28 removed are not offered. Mcp-Method
+        // and Mcp-Name are required request headers since that revision.
+        res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, MCP-Protocol-Version, Mcp-Method, Mcp-Name');
+        res.setHeader('Access-Control-Expose-Headers', 'WWW-Authenticate');
         if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
       } else if (req.headers.origin && req.headers.origin !== origin) throw new HttpError(403, 'Origen no permitido.');
       if (req.method === 'GET' && req.url === '/internal/cleanup') {
