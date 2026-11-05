@@ -28,8 +28,29 @@ export const SeatResult = z.object({
   occupied: z.number().int().nonnegative(), unavailable: z.number().int().nonnegative(),
   unknown: z.number().int().nonnegative(), total: z.number().int().nonnegative(),
   availability_complete: z.boolean().describe('True only when a nonempty map has no unknown seat states. Does not promise purchase eligibility or a reservation.'),
+  layout: z.object({
+    screen: z.enum(['top', 'bottom', 'unverified']).describe('Lado de la pantalla en el mapa ascii y en la imagen, como lo dibuja la web del proveedor; unverified si no se pudo confirmar.'),
+    column_order: z.enum(['ascending', 'descending']).describe('descending: la web del proveedor dibuja column_index de derecha a izquierda; el mapa ascii y la imagen lo respetan.'),
+  }),
   ascii: z.string(),
 });
+export type SeatMapResult = z.infer<typeof SeatResult>;
+type Layout = SeatMapResult['layout'];
+/**
+ * Orientation as each provider's own seat page draws it (checked in their web
+ * code on 2026-11-05): Cinepic puts the screen above row 1 and draws "invertida"
+ * rooms right to left; Cines Unidos draws rows by index downwards with the
+ * screen underneath. The Cinex seat page needs a session to inspect, so its
+ * screen side is not claimed.
+ */
+export function seatLayout(provider: string, cinepicData?: unknown): Layout {
+  if (provider === 'cinepic') {
+    const first = Array.isArray(object(cinepicData).butacas) ? object((object(cinepicData).butacas as unknown[])[0]) : {};
+    return { screen: 'top', column_order: text(first.invertida) === '1' ? 'descending' : 'ascending' };
+  }
+  if (provider === 'cinesunidos') return { screen: 'bottom', column_order: 'ascending' };
+  return { screen: 'unverified', column_order: 'ascending' };
+}
 
 function validateSeats(seats: SeatData[]): SeatData[] {
   const result = z.array(Seat).min(1).max(10000).parse(seats);
@@ -108,9 +129,12 @@ export function parseCinexSeats(html: string, q: Query): SeatData[] {
   return validateSeats(result);
 }
 
-export function renderSeats(seats: SeatData[]): string {
+export function renderSeats(seats: SeatData[], layout: Layout = { screen: 'unverified', column_order: 'ascending' }): string {
   const symbols = { available: 'O', occupied: 'X', unavailable: '-', unknown: '?' };
-  const lines = ['O libre | X ocupado | - restringido/no disponible | ? desconocido', 'Coordenadas del proveedor; orientacion de pantalla no verificada.'];
+  const lines = ['O libre | X ocupado | - restringido/no disponible | ? desconocido',
+    layout.screen === 'unverified' ? 'Coordenadas del proveedor; orientacion de pantalla no verificada.' : `Orientado como la web del proveedor: pantalla ${layout.screen === 'top' ? 'arriba' : 'abajo'}.`];
+  const screen = '[ PANTALLA ]';
+  if (layout.screen === 'top') lines.push(screen);
   let cells = 0;
   for (const area of [...new Set(seats.map(s => s.area))]) {
     const group = seats.filter(s => s.area === area);
@@ -122,12 +146,14 @@ export function renderSeats(seats: SeatData[]): string {
     for (let row = 0; row <= Math.max(...group.map(s => s.row_index)); row++) {
       const rowSeats = group.filter(s => s.row_index === row);
       if (!rowSeats.length) { lines.push(''); continue; }
-      lines.push(Array.from({ length: maxColumn + 1 }, (_, col) => {
+      lines.push(Array.from({ length: maxColumn + 1 }, (_, shown) => {
+        const col = layout.column_order === 'descending' ? maxColumn - shown : shown;
         const s = rowSeats.find(s => s.column_index === col);
         return (s ? `${s.label}${symbols[s.status]}` : '').padEnd(width);
       }).join('').trimEnd());
     }
   }
+  if (layout.screen === 'bottom') lines.push(screen);
   return lines.join('\n');
 }
 
@@ -135,13 +161,16 @@ export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions)
   const result: z.infer<typeof SeatResult> = {
     provider: q.provider, cinema_id: requireArg(q, 'cinema_id'), session_id: requireArg(q, 'session_id'),
     status: 'unavailable', queried_at: new Date().toISOString(), timezone: 'America/Caracas',
-    sources: [], warnings: [], seats: [], available: 0, occupied: 0, unavailable: 0, unknown: 0, total: 0, availability_complete: false, ascii: '',
+    sources: [], warnings: [], seats: [], available: 0, occupied: 0, unavailable: 0, unknown: 0, total: 0, availability_complete: false,
+    layout: seatLayout(q.provider), ascii: '',
   };
   const c = new ReadContext(http, true, call);
   try {
     if (q.provider === 'cinepic') {
       const { records, f } = await cpBuy(q, c);
-      result.seats = parseCinepicSeats(findField(records, 'butacasData'));
+      const map = findField(records, 'butacasData');
+      result.seats = parseCinepicSeats(map);
+      result.layout = seatLayout('cinepic', map);
       const count = Number(rows(f.datos, 'datos')[0]?.entradasDisponibles);
       if (Number.isFinite(count) && count !== result.seats.filter(s => s.status === 'available').length) c.warnings.push('El contador de entradas del proveedor difiere del mapa; se conserva el estado de cada butaca, sin prometer cupos de venta.');
       c.warnings.push('La disponibilidad de Cinepic depende también del tipo de entrada elegido. El campo seleccionada del proveedor no indica una reserva del usuario.');
@@ -165,7 +194,7 @@ export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions)
     result.total = seats.length;
     result.availability_complete = result.unknown === 0 && result.total > 0;
     if (result.unknown) c.warnings.push(`Mapa parcialmente interpretado por Cinve: ${result.unknown} asientos con estado desconocido (?). Los ${result.available} libres son únicamente los confirmados; cero libres confirmados no significa agotado.`);
-    result.ascii = renderSeats(seats);
+    result.ascii = renderSeats(seats, result.layout);
     result.status = 'available';
     c.warnings.push('Lectura sin reserva, sin caché local. La disponibilidad puede cambiar; confirma en la web antes de comprar.');
   } catch (e) {

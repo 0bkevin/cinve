@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseCinepicSeats, parseCinesUnidosSeats, parseCinexSeats, renderSeats } from '../src/seats.js';
+import { parseCinepicSeats, parseCinesUnidosSeats, parseCinexSeats, renderSeats, seatLayout } from '../src/seats.js';
 import { CinemaService } from '../src/service.js';
 import { HttpClient } from '../src/http.js';
 import { assertPrivateRead } from '../src/auth.js';
@@ -117,4 +117,15 @@ test('a Cinepic movie_id from another function is reported as a mismatched pair'
   const r = await service.seats({ provider: 'cinepic', cinema_id: '123301', session_id: '3720', movie_id: '981' });
   assert.equal(r.status, 'unavailable');
   assert.match(r.warnings.join(' '), /usa session_id y movie_id de una misma función/);
+});
+
+test('the ASCII map is oriented as each provider website draws it', () => {
+  // Cinepic Candelaria on 2026-11-05: invertida "1", drawn right to left under the screen.
+  const map = { butacas: [cp({ butaca: 'A-15-1', columna: '15', nombre_butaca: 'A:5', invertida: '1' }), cp({ butaca: 'A-23-1', columna: '23', nombre_butaca: 'A:1', invertida: '1' })] };
+  const lines = renderSeats(parseCinepicSeats(map), seatLayout('cinepic', map)).split('\n');
+  assert.equal(lines[1], 'Orientado como la web del proveedor: pantalla arriba.'); assert.equal(lines[2], '[ PANTALLA ]');
+  assert.ok(lines[4].indexOf('A:1O') < lines[4].indexOf('A:5O'), lines[4]);
+  assert.deepEqual(seatLayout('cinesunidos'), { screen: 'bottom', column_order: 'ascending' });
+  assert.deepEqual(seatLayout('cinex'), { screen: 'unverified', column_order: 'ascending' });
+  assert.match(renderSeats(parseCinepicSeats(map)), /orientacion de pantalla no verificada/, 'no layout claims nothing');
 });
