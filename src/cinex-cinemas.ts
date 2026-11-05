@@ -155,7 +155,13 @@ export class CinexCinemaCatalog {
         // matches now. A remembered association remains a hint for the detail
         // URL, and never suppresses current identity verification.
         const needsDetail = present ? !code : !mapped;
-        if (needsDetail) {
+        // The budget is checked before every follow-up read, not only when a
+        // batch starts: one venue can need metadata, detail and metadata again.
+        if (needsDetail && Date.now() >= deadline) {
+          c.partial = true;
+          warn(`Se agotó el tiempo de comprobación de ${venue.name}; repite la consulta para completarla. Esto no indica cierre.`);
+          if (!present && !this.known.has(venue.href)) return undefined;
+        } else if (needsDetail) {
           try {
             const page = await c.page(mapped?.url ?? url, cinemaPageTtl);
             const detail = load(page.body);
@@ -177,7 +183,7 @@ export class CinexCinemaCatalog {
             if (codes.size === 1) {
               if (!titleMatches) throw new DataError('unavailable', 'La página no confirma la identidad de la sede.');
               code = [...codes][0]; metadataConfirmed = false;
-            } else if (codes.size === 0 && !code) {
+            } else if (codes.size === 0 && !code && Date.now() < deadline) {
               code = await this.verifyImage(detail('img[src*="cinemas/"]').first().attr('src'), venue.name, c);
               metadataConfirmed = !!code;
             }

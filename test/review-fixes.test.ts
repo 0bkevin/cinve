@@ -228,3 +228,19 @@ test('Cinex ticket prices require a function, since no public listing can supply
   assert.equal(r.success, false);
   assert.ok(r.error!.issues.some(i => i.path[0] === 'session_id'));
 });
+
+test('Cinex venue discovery checks its budget before each follow-up read of an admitted venue', async () => {
+  const card = `<a href="cinex-a.html" title="Cinex A, Caracas"><img src="https://www.cinex.com.ve/assets/images/cinemas/xA.jpg"><h3>A</h3></a>`;
+  const reads: string[] = [];
+  const http = new HttpClient(async input => {
+    const url = new URL(String(input)); reads.push(url.pathname);
+    if (url.pathname === '/cines.html') return new Response(card);
+    await new Promise(r => setTimeout(r, 30));
+    if (url.pathname === '/assets/php/datasource.php') return Response.json({ data: [] });
+    return new Response('<h3 class="title">A</h3>');
+  });
+  const r = await new CinemaService(http, new CinexCinemaCatalog(10)).query('cinemas', { provider: 'cinex', city: 'Caracas' });
+  assert.deepEqual(reads, ['/cines.html', '/assets/php/datasource.php'], 'no detail read after the budget is spent');
+  assert.equal(r.partial, true); assert.equal(r.items[0].code_status, 'unverified');
+  assert.ok(r.warnings.some(w => /tiempo de comprobación de A/.test(w)), r.warnings.join(' | '));
+});
