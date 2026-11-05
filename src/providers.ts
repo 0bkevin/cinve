@@ -141,32 +141,46 @@ export async function cinepic(op: Operation, q: Query, c: ReadContext): Promise<
       }
       let rate: number | undefined;
       try { rate = number(object(object(await c.json(`${api}/configuration`)).datos).tasaConversion); } catch (e) { if (e instanceof CallStopped) throw e; }
-      if (rate === undefined || rate <= 0) { rate = undefined; c.warnings.push('Sin tasa de conversión de Cinepic; se omite la equivalencia USD.'); }
-      c.warnings.push('Precios en VES del catálogo en línea de Cinepic (su web los muestra en Bs.); USD con su tasa de conversión, no una tasa BCV verificada. Cinepic no publica stock; cargos finales no verificados.');
+      if (rate === undefined || rate <= 0) rate = undefined;
+      c.warnings.push(`Precios en VES del catálogo en línea de Cinepic (su web los muestra en Bs.); ${rate ? 'USD con su tasa de conversión, no una tasa BCV verificada' : 'sin tasa de conversión de Cinepic, se omite la equivalencia USD'}. Cinepic no publica stock; cargos finales no verificados.`);
+      // JSON API strings are literal: a leading "$" is a name, not a Next.js reference as text() assumes.
+      const str = (v: unknown) => typeof v === 'string' ? v.trim() : typeof v === 'number' && Number.isFinite(v) ? String(v) : '';
+      const cut = (v: string, max: number) => { const chars = Array.from(v); return chars.length > max ? `${chars.slice(0, max - 1).join('').trimEnd()}…` : v; };
+      const list = (v: unknown) => Array.isArray(v) ? v.filter((x): x is Obj => !!x && typeof x === 'object' && !Array.isArray(x)) : undefined;
       const items: DataItem[] = [], seen = new Set<string>();
+      let skipped = 0;
+      const add = (r: Obj, unit: Obj, category: string) => {
+        const id = str(r.id), name = str(r.nombre);
+        if (!Id.safeParse(id).success || !name) { skipped++; return; }
+        if (seen.has(id)) return;
+        seen.add(id);
+        const amount = number(r.precio);
+        const prices: NonNullable<DataItem['prices']> = amount !== undefined && amount >= 0 ? [{ currency: 'VES', amount, basis: 'provider' }] : [];
+        if (amount !== undefined && amount >= 0 && rate) prices.push({ currency: 'USD', amount: Number((amount / rate).toFixed(2)), basis: 'provider_conversion' });
+        if (!prices.length) c.warnings.push(`Producto ${warningLabel(id)} sin precio verificable.`);
+        const contents = str(r.descripcion), image = str(r.imagen);
+        items.push({ kind: 'concession', id, name: cut(contents && contents !== name ? `${name} (${contents})` : name, 512),
+          cinema_id: q.cinema_id, category: cut([units.length > 1 ? str(unit.nombre_empresa) : '', category].filter(Boolean).join(' · '), 200) || undefined,
+          prices, final_total_verified: false, url: `${site.host}/es-AR`,
+          // "dinamico" items and items with productos ask the buyer to pick options.
+          options_required: str(r.formato) === 'dinamico' || (Array.isArray(r.productos) && r.productos.length > 0),
+          ...(image.length <= 4096 && /^https:\/\/[^\s]+$/.test(image) ? { image_url: image } : {}) });
+      };
       for (const unit of units) {
-        // The purchase JS reads unidades_negocios[].categorias[].items[] and adds a
-        // client-side "TODOS" category holding every item; a server copy is skipped.
-        for (const category of rows(unit.categorias, 'candy.categorias')) {
-          if (folded(text(category.nombre)) === 'todos') continue;
-          for (const r of rows(category.items, 'candy.items')) {
-            const id = requiredText(r, 'id');
-            if (seen.has(id)) continue;
-            seen.add(id);
-            const amount = number(r.precio);
-            const prices: NonNullable<DataItem['prices']> = amount !== undefined && amount >= 0 ? [{ currency: 'VES', amount, basis: 'provider' }] : [];
-            if (amount !== undefined && amount >= 0 && rate) prices.push({ currency: 'USD', amount: Number((amount / rate).toFixed(2)), basis: 'provider_conversion' });
-            if (!prices.length) c.warnings.push(`Producto ${warningLabel(r.id)} sin precio verificable.`);
-            const contents = text(r.descripcion), image = text(r.imagen);
-            items.push({ kind: 'concession', id, name: contents && contents !== requiredText(r, 'nombre') ? `${requiredText(r, 'nombre')} (${contents})` : requiredText(r, 'nombre'),
-              cinema_id: q.cinema_id, category: [units.length > 1 ? text(unit.nombre_empresa) : '', text(category.nombre)].filter(Boolean).join(' · ') || undefined,
-              prices, final_total_verified: false, url: `${site.host}/es-AR`,
-              // "dinamico" items and items with productos ask the buyer to pick options.
-              options_required: text(r.formato) === 'dinamico' || (Array.isArray(r.productos) && r.productos.length > 0),
-              ...(/^https:\/\/[^\s]+$/.test(image) ? { image_url: image } : {}) });
-          }
+        // The purchase JS reads unidades_negocios[].categorias[].items[]. It adds its own
+        // "TODOS" category only when the server sent none, so a server "TODOS" is shown
+        // too: read named categories first, then any TODOS items not already listed.
+        const categories = list(unit.categorias);
+        if (!categories) { skipped++; continue; }
+        const todos = (cat: Obj) => folded(str(cat.nombre)) === 'todos';
+        for (const cat of [...categories.filter(x => !todos(x)), ...categories.filter(todos)]) {
+          const rowsOf = list(cat.items);
+          if (!rowsOf) { skipped++; continue; }
+          for (const r of rowsOf) add(r, unit, todos(cat) ? '' : str(cat.nombre));
         }
       }
+      if (skipped) { c.partial = true; c.warnings.push(`Cinepic: ${skipped} productos o grupos del catálogo sin identificador, nombre o lista válidos se omitieron.`); }
+      if (!items.length && !skipped) c.warnings.push('El catálogo de caramelería que Cinepic publica para esta sede no tiene productos; su web de compra usa ese mismo catálogo. No implica que no venda en taquilla.');
       return items;
   }
   if (op === 'prices') {

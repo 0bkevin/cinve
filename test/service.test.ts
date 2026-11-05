@@ -92,6 +92,26 @@ test('a Cinepic snack catalog is read the way its checkout shows it', async () =
   assert.deepEqual(noRate.items.find(i => i.id === '1')?.prices, [{ currency: 'VES', amount: 3579.52, basis: 'provider' }]);
   assert.match(noRate.warnings.join(' '), /se omite la equivalencia USD/);
 });
+test('one odd Cinepic snack item or group is skipped, not the whole catalog', async () => {
+  const catalog = (categorias: unknown) => ({ tiene_unidades_negocios: true, unidades_negocios: [{ id: 'u1', nombre_empresa: 'Cinepic', categorias }] });
+  const run = async (candy: unknown, rate: unknown = '0') => new CinemaService(new HttpClient(async url => Response.json(String(url).endsWith('/configuration') ? { datos: { tasaConversion: rate } } : candy))).query('concessions', { provider: 'cinepic', cinema_id: '123300' });
+  const r = await run(catalog([
+    { nombre: 'BEBIDAS', items: [{ id: '1', nombre: '$Refresco', precio: '100' }, { nombre: 'Sin id', precio: '5' }, { id: 'x'.repeat(300), nombre: 'Id largo', precio: '5' }, { id: '2', nombre: 'N'.repeat(400), descripcion: 'D'.repeat(400), precio: '7' }] },
+    { nombre: 'ROTA' },
+  ]));
+  assert.equal(r.status, 'available'); assert.equal(r.partial, true);
+  assert.deepEqual(r.items.map(i => i.id).sort(), ['1', '2']);
+  assert.equal(r.items.find(i => i.id === '1')?.name, '$Refresco', 'a leading $ is part of the name');
+  assert.ok(r.items.find(i => i.id === '2')!.name.length <= 512);
+  assert.match(r.warnings.join(' '), /3 productos o grupos del catálogo .* se omitieron/);
+  assert.equal(r.warnings.filter(w => /USD/.test(w)).length, 1, 'one consistent USD note when the rate is missing');
+  assert.match(r.warnings.join(' '), /se omite la equivalencia USD/);
+  // A server-sent TODOS category is shown by the site, so its items are kept.
+  const todos = await run(catalog([{ nombre: 'TODOS', items: [{ id: '9', nombre: 'Cotufa', precio: '10' }] }]), '10');
+  assert.deepEqual(todos.items.map(i => [i.id, i.category, i.prices?.map(p => p.amount)]), [['9', undefined, [10, 1]]]);
+  const units = await run({ tiene_unidades_negocios: true, unidades_negocios: [{ id: 'u1' }] });
+  assert.equal(units.partial, true); assert.deepEqual(units.items, []);
+});
 test('Cinepic does not invent a USD price if the provider rate is zero', async () => {
   const props = structuredClone(cpBuy); props.configData.tasaConversion = '0';
   const s = new CinemaService(new HttpClient(async () => new Response(page(props))));
