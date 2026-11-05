@@ -109,3 +109,12 @@ test('Cines Unidos reports confirmed and unknown counts independently, including
   assert.equal(unknown.availability_complete, false);
   assert.match(unknown.warnings.join(' '), /no significa agotado/);
 });
+
+test('a Cinepic movie_id from another function is reported as a mismatched pair', async () => {
+  // Observed on 2026-11-05: the purchase page for a valid session with another
+  // film's pid renders without functionData.
+  const service = new CinemaService(new HttpClient(async () => new Response(page({ shell: true })), 15000, new EmptySessionStore()));
+  const r = await service.seats({ provider: 'cinepic', cinema_id: '123301', session_id: '3720', movie_id: '981' });
+  assert.equal(r.status, 'unavailable');
+  assert.match(r.warnings.join(' '), /usa session_id y movie_id de una misma función/);
+});

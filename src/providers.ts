@@ -79,6 +79,9 @@ export async function cpBuy(q: Query, c: ReadContext) {
   if (functionData === undefined) {
     const $ = load(html); $('script,style').remove();
     if (/No pudimos mostrar la función/.test($.text()) && /\bAC-001\b/.test($.text())) throw new DataError('unavailable', 'Cinepic informa que no pudo cargar la función (AC-001). Inténtalo nuevamente más tarde.');
+    // A movie_id from another film renders the page without function data;
+    // that is a mismatched pair, not a provider format change.
+    throw new DataError('unavailable', 'Cinepic no devolvió esa función; usa session_id y movie_id de una misma función de get_showtimes.');
   }
   const f = object(functionData);
   const functions = rows(f.datos, 'functionData.datos');
