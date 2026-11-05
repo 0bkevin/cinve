@@ -1,5 +1,4 @@
 import { installationPage } from './public-web.js';
-import { codexClientScript } from './codex-client-script.js';
 import { seatInstructions } from './seat-guidance.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
@@ -138,7 +137,7 @@ Users do not need to mention Cinve or MCP in their cinema questions.
 
 export function serveInstall(req: IncomingMessage, res: ServerResponse, publicUrl: string): boolean {
   const path = req.url?.split('?')[0];
-  if (!['/install', '/codex-client.mjs'].includes(path ?? '')) return false;
+  if (path !== '/install') return false;
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -147,11 +146,10 @@ export function serveInstall(req: IncomingMessage, res: ServerResponse, publicUr
     res.end('Method not allowed\n');
     return true;
   }
-  const browser = path === '/install' && req.headers.accept?.includes('text/html') && new URL(req.url!, publicUrl).searchParams.get('format') !== 'text';
-  const guide = path === '/codex-client.mjs' ? codexClientScript : browser ? installationPage(publicUrl) : installGuide(publicUrl);
+  const browser = req.headers.accept?.includes('text/html') && new URL(req.url!, publicUrl).searchParams.get('format') !== 'text';
+  const guide = browser ? installationPage(publicUrl) : installGuide(publicUrl);
   if (browser) res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Vary', 'Accept');
-  if (path === '/codex-client.mjs') res.setHeader('Content-Type', 'text/javascript; charset=utf-8');
   res.writeHead(200);
   res.end(req.method === 'HEAD' ? undefined : guide);
   return true;
