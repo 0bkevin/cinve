@@ -221,7 +221,8 @@ test('the Cines Unidos search fallback searches only matching titles and keeps t
   const all = await s.query('showtimes', { provider: 'cinesunidos', city: 'Caracas', date: '2026-11-04' });
   assert.equal(all.status, 'available'); assert.equal(all.partial, true);
   assert.deepEqual(all.items.map(i => i.name).sort(), ['El Silbón', 'Good Film', 'Otra']);
-  assert.ok(all.warnings.some(w => /2 de 5 títulos/.test(w)), all.warnings.join(' | '), 'a malformed title fails alone, like a failed request');
+  // A malformed title fails alone, like a failed request.
+  assert.ok(all.warnings.some(w => /2 de 5 títulos/.test(w)), all.warnings.join(' | '));
 });
 
 test('Cinex ticket prices require a function, since no public listing can supply them', () => {
@@ -263,5 +264,12 @@ test('null arguments from strict function-calling adapters are treated as absent
     assert.equal(r.isError, false); assert.equal((r.structuredContent as { total: number }).total, 1);
     const seats = await client.callTool({ name: 'get_seats', arguments: { provider: 'cinepic', cinema_id: '123300', session_id: '1', movie_id: null } });
     assert.match(JSON.stringify(seats.content), /movie_id/, 'a null required-by-provider field still reports it as missing');
+    const typo = await client.callTool({ name: 'list_cities', arguments: { provider: 'cinepic', typo: null } });
+    assert.equal(typo.isError, true, 'an unknown key is rejected even when null');
+    const required = (name: string) => (tools.tools.find(t => t.name === name)!.inputSchema as { required?: string[] }).required;
+    assert.deepEqual(required('get_ticket_prices')?.sort(), ['cinema_id', 'provider', 'session_id']);
+    assert.deepEqual(required('get_concessions')?.sort(), ['cinema_id', 'provider']);
+    const noSession = await client.callTool({ name: 'get_ticket_prices', arguments: { provider: 'cinex', cinema_id: 'TLN', session_id: null } });
+    assert.match(JSON.stringify(noSession.content), /Se requiere session_id; obtenlo con get_showtimes/);
   } finally { await client.close(); }
 });

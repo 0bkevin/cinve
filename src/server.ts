@@ -3,7 +3,7 @@ import { seatInstructions } from './seat-guidance.js';
 import { hostedAuthInstructions } from './hosted-auth-guidance.js';
 import { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod';
-import { DateInput, Id, Provider, outputSchema } from './core.js';
+import { DateInput, Id, Provider, idString, outputSchema } from './core.js';
 import type { Operation, Query } from './core.js';
 import { AuthProvider } from './auth.js';
 import type { AuthProviderId } from './auth.js';
@@ -19,6 +19,10 @@ const provider = Provider.describe('Proveedor de cine; obtén capacidades y limi
 const cinemaId = Id.describe('ID de sede devuelto por list_cinemas del mismo proveedor. No mezcles IDs entre proveedores. Si la sede incluye code_status, usa cinema_id solo cuando sea verified; los IDs directory-* no permiten consultas.');
 const movieId = Id.describe('ID de película devuelto por list_movies del mismo proveedor; opcional en Cinex cuando se consulta una sede completa.');
 const sessionId = Id.describe('ID de función devuelto por get_showtimes del mismo proveedor.');
+// A missing required ID gets the same guidance as the provider-specific checks.
+const missing = (field: string, source: string) => (issue: { input?: unknown }) => issue.input === undefined ? `Se requiere ${field}; obtenlo con ${source}.` : undefined;
+const requiredCinemaId = idString({ error: missing('cinema_id', 'list_cinemas') }).describe(cinemaId.description!);
+const requiredSessionId = idString({ error: missing('session_id', 'get_showtimes') }).describe(sessionId.description!);
 const schema = z.object({
   provider,
   city: z.string().trim().min(1).max(80).optional().describe('Nombre de ciudad tal como lo devuelve list_cities del mismo proveedor (p. ej. Caracas); no distingue tildes ni mayúsculas en Cines Unidos.'),
@@ -31,11 +35,13 @@ const schema = z.object({
  * Strict function-calling adapters (OpenAI strict mode, some Gemini bridges)
  * make every optional property required-but-nullable, so models send
  * `"query": null` for "not given". Treat a null argument as an absent one.
- * The published JSON Schema is the inner schema, unchanged.
+ * Only declared properties are dropped: an unknown key, null or not, must
+ * still reach .strict() and fail. The published JSON Schema is unchanged.
  */
-function absentNulls(value: unknown) {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? Object.fromEntries(Object.entries(value).filter(([, v]) => v !== null))
+function absentNulls(shape: object) {
+  const known = new Set(Object.keys(shape));
+  return (value: unknown) => value && typeof value === 'object' && !Array.isArray(value)
+    ? Object.fromEntries(Object.entries(value).filter(([key, v]) => !(v === null && known.has(key))))
     : value;
 }
 
@@ -43,10 +49,12 @@ export function inputSchema(op: Operation): z.ZodType<Query> {
   // Keep each tool's arguments small and expose conditional requirements in validation.
   const base = op === 'cities' ? schema.pick({ provider: true, offset: true, limit: true, query: true, refresh: true })
     : op === 'cinemas' ? schema.pick({ provider: true, city: true, offset: true, limit: true, query: true, refresh: true })
-    : op === 'prices' ? schema.pick({ provider: true, cinema_id: true, movie_id: true, session_id: true, offset: true, limit: true, refresh: true })
-    : op === 'concessions' ? schema.pick({ provider: true, cinema_id: true, query: true, offset: true, limit: true, refresh: true })
+    // Every provider needs these, so the published schema marks them required;
+    // provider-specific requirements stay in the descriptions and validation.
+    : op === 'prices' ? schema.pick({ provider: true, movie_id: true, offset: true, limit: true, refresh: true }).extend({ cinema_id: requiredCinemaId, session_id: requiredSessionId })
+    : op === 'concessions' ? schema.pick({ provider: true, query: true, offset: true, limit: true, refresh: true }).extend({ cinema_id: requiredCinemaId })
     : schema.omit({ session_id: true });
-  return z.preprocess(absentNulls, base.superRefine((value, ctx) => {
+  return z.preprocess(absentNulls(base.shape), base.superRefine((value, ctx) => {
     const q = value as Query;
     const need = (field: 'city' | 'cinema_id' | 'movie_id' | 'session_id') => {
       // Cinepic has two fixed venues: naming them saves the model a discovery call.
@@ -147,7 +155,7 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
   server.registerTool('get_seats', {
     title: 'Consultar asientos y mapa ASCII',
     description: 'Mapa real sin reservar: Cinex y Cines Unidos requieren cinema_id, session_id y cuenta conectada; Cinepic requiere también movie_id, sin login. Usa IDs de get_showtimes. Devuelve contadores y el mapa ASCII completo, donde cada asiento aparece con su etiqueta y estado (O = status available); include_seats=true añade el detalle por asiento, mucho más extenso. Sin caché local. ' + seatInstructions,
-    inputSchema: z.preprocess(absentNulls, z.object({ provider, cinema_id: cinemaId, session_id: sessionId, movie_id: movieId.optional(),
+    inputSchema: z.preprocess(absentNulls({ provider, cinema_id: cinemaId, session_id: sessionId, movie_id: movieId, include_seats: true }), z.object({ provider, cinema_id: cinemaId, session_id: sessionId, movie_id: movieId.optional(),
       include_seats: z.boolean().optional().describe('true: añade seats con id, fila, coordenadas y estado del proveedor de cada asiento. Omítelo para responder sobre disponibilidad: el mapa ascii basta y ocupa una fracción del tamaño.') }).strict().superRefine((q, ctx) => {
       if (q.provider === 'cinepic' && !q.movie_id) ctx.addIssue({ code: 'custom', path: ['movie_id'], message: 'Cinepic requiere movie_id de get_showtimes.' });
     })),
