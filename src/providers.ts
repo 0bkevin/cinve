@@ -1,7 +1,7 @@
 import { parseCinemaDirectory } from './cinema-directory.js';
 import { CinexCinemaCatalog } from './cinex-cinemas.js';
 import { load } from 'cheerio';
-import { DataError, DateInput, folded, Id, number, requireArg, text, today } from './core.js';
+import { DataError, DateInput, folded, Id, number, operationItemSchema, requireArg, text, today } from './core.js';
 import type { DataItem, Operation, Query } from './core.js';
 import { ReadContext } from './http.js';
 import { decodeLabel, findField, pageFields, flight, object, objects, requiredText, rows } from './parsers.js';
@@ -270,6 +270,11 @@ async function cinesUnidosCity(city: string, q: Query, c: ReadContext): Promise<
 }
 
 const cuGatewayTitles = 80;
+// One deadline for the whole fan-out: forty slow titles at two reads at a
+// time could otherwise run past the hosted 90 s limit while every single read
+// stays within its own 15 s.
+const cuGatewayBudgetMs = 45000;
+const cuGatewayWorkers = 2;
 /** Cines Unidos public search API: directory, billboard titles and sessions by title. */
 async function cinesUnidosGateway(op: Operation, q: Query, c: ReadContext, requestedCity: string): Promise<DataItem[]> {
   const city = await cinesUnidosCity(requestedCity, q, c);
@@ -295,29 +300,43 @@ async function cinesUnidosGateway(op: Operation, q: Query, c: ReadContext, reque
     if (!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/.test(raw) || !DateInput.safeParse(raw.slice(0, 10)).success) throw new DataError('error', 'Fecha Cines Unidos con formato no reconocido.');
     const mid = requiredText(s, 'ho'), cid = requiredText(s, 'cinemaId'), name = requiredText(s, 'title');
     if (raw.slice(0, 10) !== date || (q.cinema_id && cid !== q.cinema_id) || (q.movie_id && mid !== q.movie_id)) return undefined;
-    return { kind: 'showtime', id: requiredText(s, 'sessionId'), name, cinema_id: cid, movie_id: mid,
+    const item: DataItem = { kind: 'showtime', id: requiredText(s, 'sessionId'), name, cinema_id: cid, movie_id: mid,
       date, time: raw.slice(11, 16), starts_at: `${raw}-04:00`, screen: text(s.screenNumber), format: text(s.format),
       language: text(s.language), url: `${CU}/pelicula/${encodeURIComponent(mid)}?${new URLSearchParams({ city })}` };
+    // Apply the service's result validation here, so an invalid ID or an
+    // oversized title fails this title only, not the whole response.
+    operationItemSchema('showtimes').parse(item); Id.parse(item.id);
+    return item;
   };
   const showtimes: DataItem[] = [];
   const failures: unknown[] = [];
-  // Small batches stay within the per-origin queue and keep the fan-out explicit.
   const work = titles.slice(0, cuGatewayTitles);
-  for (let i = 0; i < work.length; i += 4) {
-    const batch = await Promise.allSettled(work.slice(i, i + 4).map(async title =>
-      rows(await c.json(`${base}/sessions?${new URLSearchParams({ Title: title })}`), 'gateway sessions')
-        .map(normalize).filter((item): item is DataItem => item !== undefined)));
-    for (const outcome of batch) {
-      if (outcome.status === 'fulfilled') showtimes.push(...outcome.value);
-      else failures.push(outcome.reason);
+  const deadline = Date.now() + cuGatewayBudgetMs;
+  let next = 0, succeeded = 0;
+  // Two workers match the HTTP client's two reads per origin, whose 15 s
+  // deadline includes queue time; more would only time out waiting.
+  const worker = async () => {
+    while (next < work.length && Date.now() < deadline) {
+      const title = work[next++];
+      try {
+        showtimes.push(...rows(await c.json(`${base}/sessions?${new URLSearchParams({ Title: title })}`), 'gateway sessions')
+          .map(normalize).filter((item): item is DataItem => item !== undefined));
+        succeeded++;
+      } catch (error) { failures.push(error); }
     }
-  }
+  };
+  await Promise.all(Array.from({ length: Math.min(cuGatewayWorkers, work.length) }, worker));
+  const skipped = work.length - next;
   // One failed title must not discard every other title's schedule.
   if (failures.length) {
-    if (failures.length === work.length) throw failures[0];
     c.partial = true;
     c.warnings.push(`No se pudieron consultar las funciones de ${failures.length} de ${work.length} títulos de Cines Unidos; el resultado es parcial.`);
   }
+  if (skipped) {
+    c.partial = true;
+    c.warnings.push(`Se agotó el tiempo de consulta antes de leer ${skipped} de ${work.length} títulos de Cines Unidos; usa query con el título para consultarlos.`);
+  }
+  if (work.length && !succeeded) throw failures[0] ?? new DataError('unavailable', 'Se agotó el tiempo de consulta de Cines Unidos; usa query con el título de la película.');
   const movies = new Map<string, DataItem>();
   for (const s of showtimes) if (!movies.has(s.movie_id!)) movies.set(s.movie_id!, { kind: 'movie', id: s.movie_id!, name: s.name, city, url: s.url });
   return op === 'showtimes' ? showtimes : [...movies.values()];
