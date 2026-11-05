@@ -55,6 +55,8 @@ const CP = {
   '123300': { name: 'Cinepic Candelaria', host: 'https://cinepiccandelaria.com' },
   '123301': { name: 'Cinepic VVIP', host: 'https://cinepicvip.com' },
 } as const;
+/** The configured name of a Cinepic venue, if it is one. */
+export const cinepicVenueName = (id: string): string | undefined => (CP as Record<string, { name: string }>)[id]?.name;
 function cpSite(q: Query) {
   const id = requireArg(q, 'cinema_id');
   if (!(id in CP)) throw new DataError('unavailable', 'Cinepic admite las sedes 123300 (Candelaria) y 123301 (VVIP Lido).');

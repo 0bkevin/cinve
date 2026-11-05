@@ -98,6 +98,22 @@ se obtuvo un mapa, no que todas sus butacas estén libres. Si `unknown` es mayor
 que cero, el mapa es parcial; cero asientos libres confirmados no significa que
 la función esté agotada.
 
+`layout` indica cómo se orientan el mapa ASCII y la imagen, igual que en la web
+de cada cine (comprobado en su código el 5 de noviembre de 2026):
+
+| Proveedor | Pantalla | Columnas |
+| --- | --- | --- |
+| Cinepic | Arriba, junto a la fila 1 | De derecha a izquierda en las salas marcadas `invertida` |
+| Cines Unidos | Abajo | De izquierda a derecha |
+| Cinex | No verificada: su página de asientos requiere sesión | De izquierda a derecha |
+
+Además de los datos, `get_seats` devuelve el mapa como imagen PNG (hasta 1200 px
+de ancho) para mostrarla o compartirla, con la leyenda, los contadores y la hora
+de consulta. `image=svg` devuelve el mismo mapa como SVG embebido e
+`image=none`, solo los datos. Si la imagen no se puede generar, la respuesta
+conserva los datos y lo advierte. La imagen se dibuja con resvg (WebAssembly) y
+la fuente Inter incluida en `src/assets`, sin depender de fuentes del sistema.
+
 ## Caché, red y seguridad
 
 - Las lecturas HTTP tienen un plazo de 15 segundos y un cuerpo máximo de 4 MiB.

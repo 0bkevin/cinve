@@ -1,5 +1,7 @@
 import { SeatResult } from './seats.js';
 import { seatInstructions } from './seat-guidance.js';
+import { renderSeatMapPng, renderSeatMapSvg } from './seat-image.js';
+import { cinepicVenueName } from './providers.js';
 import { hostedAuthInstructions } from './hosted-auth-guidance.js';
 import { McpServer } from '@modelcontextprotocol/server';
 import type { ServerContext } from '@modelcontextprotocol/server';
@@ -179,18 +181,32 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
   }
   server.registerTool('get_seats', {
     title: 'Consultar asientos y mapa ASCII',
-    description: 'Mapa real sin reservar: Cinex y Cines Unidos requieren cinema_id, session_id y cuenta conectada; Cinepic requiere también movie_id, sin login. Usa IDs de get_showtimes. Devuelve contadores y el mapa ASCII completo, donde cada asiento aparece con su etiqueta y estado (O = status available); include_seats=true añade el detalle por asiento, mucho más extenso. Sin caché local. ' + seatInstructions,
-    inputSchema: z.preprocess(absentNulls({ provider, cinema_id: cinemaId, session_id: sessionId, movie_id: movieId, include_seats: true }), z.object({ provider, cinema_id: cinemaId, session_id: sessionId, movie_id: movieId.optional(),
-      include_seats: z.boolean().optional().describe('true: añade seats con id, fila, coordenadas y estado del proveedor de cada asiento. Omítelo para responder sobre disponibilidad: el mapa ascii basta y ocupa una fracción del tamaño.') }).strict().superRefine((q, ctx) => {
+    description: 'Mapa real sin reservar: Cinex y Cines Unidos requieren cinema_id, session_id y cuenta conectada; Cinepic requiere también movie_id, sin login. Usa IDs de get_showtimes. Devuelve contadores, una imagen PNG del mapa orientada como la web del cine (image=svg la da como SVG) y el mapa ASCII completo, donde cada asiento aparece con su etiqueta y estado (O = status available); include_seats=true añade el detalle por asiento, mucho más extenso. Sin caché local. ' + seatInstructions,
+    inputSchema: z.preprocess(absentNulls({ provider, cinema_id: cinemaId, session_id: sessionId, movie_id: movieId, include_seats: true, image: true }), z.object({ provider, cinema_id: cinemaId, session_id: sessionId, movie_id: movieId.optional(),
+      include_seats: z.boolean().optional().describe('true: añade seats con id, fila, coordenadas y estado del proveedor de cada asiento. Omítelo para responder sobre disponibilidad: el mapa ascii basta y ocupa una fracción del tamaño.'),
+      image: z.enum(['png', 'svg', 'none']).optional().describe('png (por defecto): imagen del mapa para mostrar y compartir. svg: el mismo mapa como archivo SVG embebido, más extenso. none: solo datos.') }).strict().superRefine((q, ctx) => {
       if (q.provider === 'cinepic' && !q.movie_id) ctx.addIssue({ code: 'custom', path: ['movie_id'], message: 'Cinepic requiere movie_id de get_showtimes.' });
     })),
     outputSchema: SeatResult, annotations,
-  }, async ({ include_seats, ...args }, ctx) => {
+  }, async ({ include_seats, image = 'png', ...args }, ctx) => {
     const data = await service.seats(args, callOptions(ctx));
+    // The picture is built from the verified map before the per-seat list is
+    // dropped; a rendering failure leaves the data answer intact.
+    let picture: { type: 'image'; data: string; mimeType: 'image/png' } | { type: 'resource'; resource: { uri: string; mimeType: 'image/svg+xml'; text: string } } | undefined;
+    if (data.status === 'available' && data.seats?.length && image !== 'none') {
+      try {
+        const svg = renderSeatMapSvg(data.seats, data.layout, { provider: data.provider, cinema: cinepicVenueName(data.cinema_id) ?? `Sede ${data.cinema_id}`, session: data.session_id, queriedAt: data.queried_at });
+        picture = image === 'svg'
+          ? { type: 'resource', resource: { uri: `cinve://seats/${data.provider}/${data.cinema_id}/${data.session_id}.svg`, mimeType: 'image/svg+xml', text: svg } }
+          : { type: 'image', data: Buffer.from(await renderSeatMapPng(svg)).toString('base64'), mimeType: 'image/png' };
+      } catch {
+        data.warnings.push('No se pudo generar la imagen del mapa; usa el mapa ascii.');
+      }
+    }
     // The ASCII map carries every label and state; the per-seat list is ~10x larger.
     if (!include_seats) delete data.seats;
     if ((publicHosted || accounts) && data.status === 'auth_required') data.warnings = ['Conecta tu cuenta mediante connect_account y repite get_seats. ' + hostedAuthInstructions];
-    return { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data, isError: data.status !== 'available' };
+    return { content: [{ type: 'text', text: JSON.stringify(data) }, ...(picture ? [picture] : [])], structuredContent: data, isError: data.status !== 'available' };
   });
   const tools: Array<[string, Operation, string]> = [
     ['list_cities', 'cities', 'Lista ciudades del proveedor. Usa sus nombres al consultar Cines Unidos.'],

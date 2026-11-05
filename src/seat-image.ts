@@ -1,0 +1,127 @@
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { initWasm, Resvg } from '@resvg/resvg-wasm';
+
+export type SeatStatus = 'available' | 'occupied' | 'unavailable' | 'unknown';
+export type MapSeat = { label: string; row: string; area: string; row_index: number; column_index: number; status: SeatStatus };
+/** The provider-verified orientation from SeatResult.layout. */
+export type MapLayout = { screen: 'top' | 'bottom' | 'unverified'; column_order: 'ascending' | 'descending' };
+/** cinema: the venue's name when known, else its ID. */
+export type MapHeader = { provider: string; cinema: string; session: string; queriedAt: string };
+
+const providerNames: Record<string, string> = { cinex: 'Cinex', cinesunidos: 'Cines Unidos', cinepic: 'Cinepic' };
+const palette: Record<SeatStatus, { fill: string; stroke: string; text: string; name: string }> = {
+  available: { fill: '#1e8e3e', stroke: '#176f30', text: '#ffffff', name: 'Libre' },
+  occupied: { fill: '#80868b', stroke: '#5f6368', text: '#ffffff', name: 'Ocupado' },
+  unavailable: { fill: '#eceff1', stroke: '#9aa0a6', text: '#5f6368', name: 'No disponible' },
+  unknown: { fill: '#f9ab00', stroke: '#c58900', text: '#202124', name: 'Desconocido' },
+};
+const CELL = 30, SEAT = 26, LABEL = 30, PAD = 28;
+
+const escape = (value: string) => value.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+/** The seat's number within its row: "A:5" and "B12" in row A or B give 5 and 12. */
+export function seatNumber(seat: Pick<MapSeat, 'label' | 'row'>): string {
+  const rest = seat.label.startsWith(seat.row) ? seat.label.slice(seat.row.length).replace(/^[\s:._-]+/, '') : seat.label;
+  return rest || seat.label;
+}
+const caracasTime = (iso: string) => new Intl.DateTimeFormat('es-VE', { timeZone: 'America/Caracas', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso));
+
+/** A self-contained SVG of the seat map, oriented as the provider's own seat page. */
+export function renderSeatMapSvg(seats: MapSeat[], layout: MapLayout, header: MapHeader): string {
+  const areas = [...new Set(seats.map(s => s.area))];
+  const showAreaNames = areas.length > 1;
+  const groups = areas.map(area => {
+    const group = seats.filter(s => s.area === area);
+    const minRow = Math.min(...group.map(s => s.row_index)), maxRow = Math.max(...group.map(s => s.row_index));
+    const minCol = Math.min(...group.map(s => s.column_index)), maxCol = Math.max(...group.map(s => s.column_index));
+    return { area, group, minRow, rows: maxRow - minRow + 1, minCol, cols: maxCol - minCol + 1 };
+  });
+  const gridWidth = Math.max(...groups.map(g => g.cols)) * CELL;
+  const width = Math.max(PAD * 2 + LABEL * 2 + gridWidth, 560);
+  const left = (width - gridWidth) / 2;
+  const out: string[] = [];
+  let y = PAD;
+  out.push(`<text x="${PAD}" y="${y + 18}" font-size="20" font-weight="700" fill="#202124">Mapa de asientos</text>`);
+  const provider = providerNames[header.provider] ?? header.provider;
+  const venue = header.cinema.toLowerCase().startsWith(provider.toLowerCase()) ? header.cinema : `${provider} · ${header.cinema}`;
+  out.push(`<text x="${PAD}" y="${y + 40}" font-size="13" fill="#5f6368">${escape(`${venue} · Función ${header.session}`)}</text>`);
+  out.push(`<text x="${width - PAD}" y="${y + 18}" font-size="12" fill="#5f6368" text-anchor="end">${escape(`Consultado ${caracasTime(header.queriedAt)}`)}</text>`);
+  out.push(`<text x="${width - PAD}" y="${y + 36}" font-size="12" fill="#5f6368" text-anchor="end">hora de Caracas</text>`);
+  y += 64;
+  // The screen arc bows toward the seats, with its label on the seat side.
+  const screen = (top: number, side: 'top' | 'bottom') => {
+    const x0 = left, x1 = left + gridWidth, mid = (x0 + x1) / 2;
+    const [edge, bow, label] = side === 'top' ? [top + 2, top + 18, top + 34] : [top + 30, top + 14, top + 8];
+    out.push(`<path d="M ${x0} ${edge} Q ${mid} ${bow} ${x1} ${edge}" fill="none" stroke="#9aa0a6" stroke-width="5" stroke-linecap="round"/>`);
+    out.push(`<text x="${mid}" y="${label}" font-size="11" font-weight="700" fill="#80868b" text-anchor="middle" letter-spacing="3">PANTALLA</text>`);
+  };
+  if (layout.screen === 'top') { screen(y, 'top'); y += 50; }
+  for (const g of groups) {
+    if (showAreaNames) { out.push(`<text x="${left}" y="${y + 12}" font-size="12" font-weight="700" fill="#3c4043">${escape(`Área ${g.area}`)}</text>`); y += 22; }
+    for (let r = 0; r < g.rows; r++) {
+      const rowSeats = g.group.filter(s => s.row_index - g.minRow === r);
+      const cy = y + r * CELL;
+      const name = rowSeats[0]?.row;
+      if (name) {
+        out.push(`<text x="${left - LABEL / 2}" y="${cy + SEAT / 2 + 4}" font-size="12" font-weight="700" fill="#5f6368" text-anchor="middle">${escape(name)}</text>`);
+        out.push(`<text x="${left + gridWidth + LABEL / 2}" y="${cy + SEAT / 2 + 4}" font-size="12" font-weight="700" fill="#5f6368" text-anchor="middle">${escape(name)}</text>`);
+      }
+      for (const s of rowSeats) {
+        const col = s.column_index - g.minCol, shown = layout.column_order === 'descending' ? g.cols - 1 - col : col;
+        const x = left + shown * CELL + (CELL - SEAT) / 2, c = palette[s.status], number = seatNumber(s);
+        const size = number.length > 3 ? 8 : number.length === 3 ? 9.5 : 11;
+        out.push(`<g><title>${escape(`${s.label}: ${c.name.toLowerCase()}`)}</title><rect x="${x}" y="${cy}" width="${SEAT}" height="${SEAT}" rx="6" fill="${c.fill}" stroke="${c.stroke}" stroke-width="1"${s.status === 'unavailable' ? ' stroke-dasharray="3 2"' : ''}/>`
+          + `<text x="${x + SEAT / 2}" y="${cy + SEAT / 2 + size / 2.8}" font-size="${size}" font-weight="700" fill="${c.text}" text-anchor="middle">${escape(number)}</text></g>`);
+      }
+    }
+    y += g.rows * CELL + 14;
+  }
+  if (layout.screen === 'bottom') { screen(y, 'bottom'); y += 44; }
+  y += 6;
+  const counts = Object.fromEntries((Object.keys(palette) as SeatStatus[]).map(k => [k, seats.filter(s => s.status === k).length])) as Record<SeatStatus, number>;
+  const legend = (Object.keys(palette) as SeatStatus[]).filter(k => k === 'available' || k === 'occupied' || counts[k] > 0);
+  let lx = PAD;
+  for (const k of legend) {
+    const c = palette[k], label = `${c.name} (${counts[k]})`;
+    out.push(`<rect x="${lx}" y="${y}" width="16" height="16" rx="4" fill="${c.fill}" stroke="${c.stroke}"${k === 'unavailable' ? ' stroke-dasharray="3 2"' : ''}/>`);
+    out.push(`<text x="${lx + 22}" y="${y + 12.5}" font-size="12" fill="#3c4043">${escape(label)}</text>`);
+    lx += 22 + label.length * 7 + 22;
+  }
+  out.push(`<text x="${width - PAD}" y="${y + 12.5}" font-size="12" font-weight="700" fill="#202124" text-anchor="end">${counts.available} libres de ${seats.length}</text>`);
+  y += 32;
+  const notes = [
+    ...(layout.screen === 'unverified' ? ['Posición de la pantalla no verificada para este proveedor.'] : []),
+    ...(counts.unknown ? ['Desconocido: Cinve no pudo interpretar el estado; no significa libre ni agotado.'] : []),
+    'Solo consulta: no reserva asientos. La disponibilidad puede cambiar antes de comprar.',
+  ];
+  for (const note of notes) { out.push(`<text x="${PAD}" y="${y + 10}" font-size="11" fill="#80868b">${escape(note)}</text>`); y += 17; }
+  const height = y + PAD - 6;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" font-family="Inter, 'Helvetica Neue', Arial, sans-serif">`
+    + `<rect width="${width}" height="${height}" rx="14" fill="#ffffff"/>${out.join('')}</svg>`;
+}
+
+let ready: Promise<{ fonts: Uint8Array[] }> | undefined;
+const asset = (name: string) => readFileSync(new URL(`./assets/${name}`, import.meta.url));
+/** resvg needs its WebAssembly and real font files; both ship in assets/. */
+function renderer() {
+  return ready ??= (async () => {
+    let wasm: Buffer;
+    try { wasm = asset('resvg.wasm'); } catch { wasm = readFileSync(createRequire(import.meta.url).resolve('@resvg/resvg-wasm/index_bg.wasm')); }
+    await initWasm(wasm);
+    return { fonts: [asset('inter-latin-400.ttf'), asset('inter-latin-700.ttf')].map(b => new Uint8Array(b)) };
+  })().catch(error => { ready = undefined; throw error; });
+}
+
+/** Rasterizes the map for clients that show images inline; at most 1200 px wide. */
+export async function renderSeatMapPng(svg: string): Promise<Uint8Array> {
+  const { fonts } = await renderer();
+  const width = Number(svg.match(/width="(\d+(?:\.\d+)?)"/)?.[1] ?? 800);
+  const resvg = new Resvg(svg, {
+    fitTo: { mode: 'width', value: Math.round(Math.min(1200, width * 1.5)) },
+    font: { fontBuffers: fonts, loadSystemFonts: false, defaultFontFamily: 'Inter' },
+  });
+  try {
+    const image = resvg.render();
+    try { return image.asPng(); } finally { image.free(); }
+  } finally { resvg.free(); }
+}
