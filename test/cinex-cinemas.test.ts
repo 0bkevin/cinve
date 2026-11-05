@@ -522,3 +522,27 @@ test('long fan-outs report increasing progress to clients that send a progress t
     assert.ok(updates.some(u => u.message === 'Cinex: 3 de 3 sedes leídas.'), JSON.stringify(updates));
   } finally { await client.close(); }
 });
+
+test('one Cinex venue with an invalid item fails alone instead of emptying the city result', async () => {
+  const epoch = (time: string) => String(Date.parse(`2026-09-18T${time}:00-04:00`) / 1000);
+  const long = 'X'.repeat(513);
+  const http = new HttpClient(async input => {
+    const url = new URL(String(input));
+    if (url.pathname === '/cines.html') return new Response(card('sambil', 'Sambil', 'xSBC.jpg') + card('lider', 'Lider', 'xLDR.jpg'));
+    if (url.pathname === '/assets/php/datasource.php') {
+      const id = url.searchParams.get('cinemaid');
+      return Response.json({ data: [{ siglas: id, name: id === 'SBC' ? 'Sambil' : 'Lider' }] });
+    }
+    if (url.pathname === '/cartelera.html') return new Response(`<div class="poster" onclick="x('sinopsis-clayface.html')" title="CLAYFACE"></div><div class="poster" onclick="x('sinopsis-long.html')" title="${long}"></div>`);
+    if (url.pathname === '/cinex-sambil.html') return new Response(`<h3 class="title">SAMBIL</h3><div class="sessionslist"><h5 class="title">CLAYFACE</h5><button onclick="checkLogin('1','SBC')" alt="${epoch('20:30')}"></button></div>`);
+    if (url.pathname === '/cinex-lider.html') return new Response(`<h3 class="title">LIDER</h3><div class="sessionslist"><h5 class="title">${long}</h5><button onclick="checkLogin('2','LDR')" alt="${epoch('21:00')}"></button></div>`);
+    return new Response('missing', { status: 404 });
+  });
+  const venue = await new CinemaService(http, new CinexCinemaCatalog()).query('showtimes', { provider: 'cinex', cinema_id: 'LDR', date: '2026-09-18' });
+  assert.equal(venue.status, 'error', 'the invalid item itself is still rejected');
+  const r = await new CinemaService(http, new CinexCinemaCatalog()).query('showtimes', { provider: 'cinex', city: 'Caracas', date: '2026-09-18' });
+  assert.equal(r.status, 'available', r.warnings.join(' | '));
+  assert.deepEqual(r.items.map(i => [i.id, i.cinema_id]), [['1', 'SBC']]);
+  assert.equal(r.partial, true);
+  assert.ok(r.warnings.some(w => /1 sedes Cinex \(Lider\)/.test(w)), r.warnings.join(' | '));
+});

@@ -269,6 +269,15 @@ async function cinesUnidosCity(city: string, q: Query, c: ReadContext): Promise<
   return canonical;
 }
 
+/**
+ * Applies the service's result validation to one fan-out item, so an invalid
+ * ID or an oversized title fails its own title or venue, not the response.
+ */
+function checkedShowtime(item: DataItem): DataItem {
+  operationItemSchema('showtimes').parse(item); Id.parse(item.id);
+  return item;
+}
+
 const cuGatewayTitles = 80;
 // One deadline for the whole fan-out: forty slow titles at two reads at a
 // time could otherwise run past the hosted 90 s limit while every single read
@@ -304,10 +313,7 @@ async function cinesUnidosGateway(op: Operation, q: Query, c: ReadContext, reque
     const item: DataItem = { kind: 'showtime', id: requiredText(s, 'sessionId'), name, cinema_id: cid, movie_id: mid,
       date, time: raw.slice(11, 16), starts_at: `${raw}-04:00`, screen: text(s.screenNumber), format: text(s.format),
       language: text(s.language), url: `${CU}/pelicula/${encodeURIComponent(mid)}?${new URLSearchParams({ city })}` };
-    // Apply the service's result validation here, so an invalid ID or an
-    // oversized title fails this title only, not the whole response.
-    operationItemSchema('showtimes').parse(item); Id.parse(item.id);
-    return item;
+    return checkedShowtime(item);
   };
   const showtimes: DataItem[] = [];
   const failures: unknown[] = [];
@@ -587,7 +593,7 @@ async function cinexCityShowtimes(q: Query, c: ReadContext, catalog: CinexCinema
       try {
         const venue = await catalog.resolve(v.cinema_id, c);
         const page = venue.body === undefined ? await c.page(venue.url, 120000) : { body: venue.body };
-        items.push(...parseCinexCinemaShowtimes(page.body, movies, v.cinema_id, date, c, venue.url, warningLabel(decodeLabel(v.name), 200) || undefined));
+        items.push(...parseCinexCinemaShowtimes(page.body, movies, v.cinema_id, date, c, venue.url, warningLabel(decodeLabel(v.name), 200) || undefined).map(checkedShowtime));
         succeeded++;
       } catch (error) {
         failed.push(v.name); firstError ??= error;
