@@ -177,7 +177,7 @@ export async function cinepic(op: Operation, q: Query, c: ReadContext): Promise<
       c.partial = true;
       providerWarning(c, 'cinepic-unknown-subtitle', () => `Función ${warningLabel(id)}: Cinepic no confirmó el estado de subtítulos; se omite language.`);
     }
-    return { kind: 'showtime', id, name: text(movie?.peliculas_nombre) || `Película ${mid}`, cinema_id: q.cinema_id, movie_id: mid,
+    return { kind: 'showtime', id, name: text(movie?.peliculas_nombre) || `Película ${mid}`, cinema_id: q.cinema_id, cinema_name: site.name, movie_id: mid,
       date, time, starts_at: overnight === true ? undefined : overnight === false ? `${date}T${time}:00-04:00` : undefined,
       format: text(r.formato), language: subtitled === undefined ? undefined : subtitled ? 'subtitulada' : 'no_subtitulada',
       url: `${site.host}/es-AR/compra?${new URLSearchParams({ cid: q.cinema_id!, fid: id, pid: mid })}` };
@@ -250,7 +250,7 @@ export async function cinesunidos(op: Operation, q: Query, c: ReadContext): Prom
         const raw = requiredText(s, 'date');
         if (!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/.test(raw) || !DateInput.safeParse(raw.slice(0, 10)).success) throw new DataError('error', 'Fecha Cines Unidos con formato no reconocido.');
         if (raw.slice(0, 10) !== isoDate(q)) continue;
-        sessions.push({ kind: 'showtime', id: requiredText(s, 'id'), name: requiredText(m, 'title'), cinema_id: cid, movie_id: mid,
+        sessions.push({ kind: 'showtime', id: requiredText(s, 'id'), name: requiredText(m, 'title'), cinema_id: cid, cinema_name: warningLabel(text(cinema.name), 200) || undefined, movie_id: mid,
           date: raw.slice(0, 10), time: raw.slice(11, 16), starts_at: `${raw}-04:00`, screen: text(s.screen), format: text(s.format),
           url: `${CU}/pelicula/${encodeURIComponent(mid)}?${new URLSearchParams({ city })}` });
       }
@@ -383,7 +383,7 @@ function cinexLanguage(src?: string): string | undefined {
 const cinexMovieTitle = (name: string) => folded(name).replace(/[^a-z0-9]/g, '');
 
 /** Parse the calendar-style cinema page, whose blocks have titles but no movie slugs. */
-export function parseCinexCinemaShowtimes(html: string, movies: DataItem[], cinemaId: string, date: string, c: ReadContext, url: string): DataItem[] {
+export function parseCinexCinemaShowtimes(html: string, movies: DataItem[], cinemaId: string, date: string, c: ReadContext, url: string, cinemaName?: string): DataItem[] {
   if (!Id.safeParse(cinemaId).success) throw new DataError('error', 'Código de sede Cinex inválido.');
   const byTitle = new Map<string, DataItem[]>();
   for (const movie of movies) {
@@ -439,7 +439,7 @@ export function parseCinexCinemaShowtimes(html: string, movies: DataItem[], cine
       if (local.slice(0, 10) !== date) return;
       const readable = $(e).clone(); readable.find('br').replaceWith('\n');
       const body = readable.text(), screen = body.match(/Sala\s+([A-Za-z0-9_-]+)/i)?.[1];
-      const item: DataItem = { kind: 'showtime', id: sessionId, name: movie.name, cinema_id: cinemaId, movie_id: movie.id,
+      const item: DataItem = { kind: 'showtime', id: sessionId, name: movie.name, cinema_id: cinemaId, cinema_name: cinemaName, movie_id: movie.id,
         date, time: local.slice(11, 16), starts_at: `${local}-04:00`, screen,
         language: cinexLanguage($(e).find('img.icoIdioma').attr('src')), url };
       const key = `${cinemaId}:${sessionId}`;
@@ -496,6 +496,6 @@ export async function cinex(op: Operation, q: Query, c: ReadContext, catalog = n
   const venue = await catalog.resolve(cinemaId, c);
   const page = venue.body === undefined ? await c.page(venue.url, 120000) : { body: venue.body };
   const movies = parseCinexMovies(await c.get(`${CX}/cartelera.html`, 120000));
-  const items = parseCinexCinemaShowtimes(page.body, movies, cinemaId, date, c, venue.url);
+  const items = parseCinexCinemaShowtimes(page.body, movies, cinemaId, date, c, venue.url, venue.name ? warningLabel(decodeLabel(venue.name), 200) || undefined : undefined);
   return q.movie_id ? items.filter(r => r.movie_id === q.movie_id) : items;
 }

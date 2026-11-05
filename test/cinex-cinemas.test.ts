@@ -418,7 +418,7 @@ test('a Cinex venue plus movie query reads the venue page, not the synopsis page
   const s = new CinemaService(http, new CinexCinemaCatalog());
   const r = await s.query('showtimes', { provider: 'cinex', cinema_id: 'SBC', movie_id: 'elsilbon', date: '2026-09-18' });
   assert.equal(r.status, 'available');
-  assert.deepEqual(r.items.map(i => [i.id, i.movie_id, i.time]), [['24013', 'elsilbon', '20:30']]);
+  assert.deepEqual(r.items.map(i => [i.id, i.movie_id, i.time, i.cinema_name]), [['24013', 'elsilbon', '20:30', 'Sambil']]);
   assert.ok(!requests.includes('/sinopsis-elsilbon.html'));
   // Movie-only queries still read the synopsis page, and an empty one points to the venue path.
   const movieOnly = await s.query('showtimes', { provider: 'cinex', movie_id: 'elsilbon', date: '2026-09-18' });
