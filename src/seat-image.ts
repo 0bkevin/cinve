@@ -23,8 +23,26 @@ const invalidXml = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]|[\uD800
 const escape = (value: string) => value.replace(invalidXml, '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 /** Thrown before drawing a map whose image would exceed MAX_MAP_HEIGHT; the data answer is unaffected. */
 export class MapTooLarge extends Error {}
-/** In SVG units: about 125 rows, far above any room seen, and ~9000 px tall as PNG at most. */
-export const MAX_MAP_HEIGHT = 6000;
+/** In SVG units: about 90 rows of seats, far above any room seen (13-16 rows). */
+export const MAX_MAP_HEIGHT = 3000;
+/** Output pixels per PNG: about 12 MB of RGBA. Taller maps are scaled down instead of refused. */
+export const MAX_PNG_PIXELS = 3_000_000;
+// Advance widths of the bundled Inter (per mille of an em) for ASCII 32-126,
+// read from src/assets with fontTools, so header text is fitted to the real glyphs.
+const advances = {
+  400: [281,288,466,633,642,982,644,300,365,365,501,662,288,460,288,360,631,407,610,618,646,593,620,566,619,620,288,302,662,662,662,511,966,690,654,730,722,601,590,746,743,269,571,672,565,903,753,765,639,765,644,642,646,744,690,985,682,679,629,365,360,365,471,456,323,562,612,571,612,583,370,613,591,242,242,549,242,876,591,600,612,612,376,528,327,591,562,818,546,562,552,426,333,426,662],
+  700: [237,338,551,649,655,1016,672,339,377,377,559,679,334,468,334,388,674,431,629,646,676,622,649,582,651,649,334,343,679,679,679,560,1016,747,662,740,722,607,587,750,747,281,584,719,565,932,762,771,648,777,657,655,667,732,747,1038,738,731,664,377,388,377,487,476,365,581,630,588,630,596,398,632,623,271,271,580,271,913,623,613,630,630,407,560,366,623,600,850,580,602,573,469,372,469,679],
+};
+/** Text width in SVG units. Accents count as their base letter; glyphs outside the Latin font as a full em. */
+export function textWidth(value: string, size: number, bold = false): number {
+  const table = advances[bold ? 700 : 400];
+  let em = 0;
+  for (const char of value) {
+    const code = char.normalize('NFD').charCodeAt(0);
+    em += code >= 32 && code <= 126 ? table[code - 32] / 1000 : 1;
+  }
+  return em * size;
+}
 /** The seat's number within its row: "A:5" and "B12" in row A or B give 5 and 12. */
 export function seatNumber(seat: Pick<MapSeat, 'label' | 'row'>): string {
   const rest = seat.label.startsWith(seat.row) ? seat.label.slice(seat.row.length).replace(/^[\s:._-]+/, '') : seat.label;
@@ -50,12 +68,14 @@ export function renderSeatMapSvg(seats: MapSeat[], layout: MapLayout, header: Ma
   const left = (width - gridWidth) / 2;
   const out: string[] = [];
   let y = PAD;
-  // Inter at these sizes averages about 0.6 em per character.
-  const fit = (value: string, size: number, room: number) => {
-    const max = Math.max(8, Math.floor(room / (size * 0.6))), chars = Array.from(value);
-    return chars.length > max ? `${chars.slice(0, max - 1).join('').trimEnd()}…` : value;
+  const fit = (value: string, size: number, room: number, bold = false) => {
+    value = value.replace(invalidXml, '');
+    if (textWidth(value, size, bold) <= room) return value;
+    const chars = Array.from(value);
+    while (chars.length > 1 && textWidth(`${chars.join('').trimEnd()}…`, size, bold) > room) chars.pop();
+    return `${chars.join('').trimEnd()}…`;
   };
-  out.push(`<text x="${PAD}" y="${y + 18}" font-size="20" font-weight="700" fill="#202124">${escape(fit(header.movie ?? 'Mapa de asientos', 20, width - PAD * 2))}</text>`);
+  out.push(`<text x="${PAD}" y="${y + 18}" font-size="20" font-weight="700" fill="#202124">${escape(fit(header.movie ?? 'Mapa de asientos', 20, width - PAD * 2, true))}</text>`);
   const provider = providerNames[header.provider] ?? header.provider;
   const venue = header.cinema.toLowerCase().startsWith(provider.toLowerCase()) ? header.cinema : `${provider} · ${header.cinema}`;
   const when = [header.date?.split('-').reverse().join('/'), header.time].filter(Boolean).join(' ');
@@ -99,11 +119,11 @@ export function renderSeatMapSvg(seats: MapSeat[], layout: MapLayout, header: Ma
     const c = palette[k], label = `${c.name} (${counts[k]})`;
     out.push(`<rect x="${lx}" y="${y}" width="16" height="16" rx="4" fill="${c.fill}" stroke="${c.stroke}"${k === 'unavailable' ? ' stroke-dasharray="3 2"' : ''}/>`);
     out.push(`<text x="${lx + 22}" y="${y + 12.5}" font-size="12" fill="#3c4043">${escape(label)}</text>`);
-    lx += 22 + label.length * 7 + 22;
+    lx += 22 + textWidth(label, 12) + 22;
   }
   // On narrow maps a full legend reaches the total; give the total its own line then.
   const total = `${counts.available} libres de ${seats.length}`;
-  if (lx > width - PAD - total.length * 7.5) y += 24;
+  if (lx > width - PAD - textWidth(total, 12, true)) y += 24;
   out.push(`<text x="${width - PAD}" y="${y + 12.5}" font-size="12" font-weight="700" fill="#202124" text-anchor="end">${total}</text>`);
   y += 32;
   const notes = [
@@ -137,12 +157,14 @@ async function renderer() {
   return { fonts: fonts ??= [asset('inter-latin-400.ttf'), asset('inter-latin-700.ttf')].map(b => new Uint8Array(b)) };
 }
 
-/** Rasterizes the map for clients that show images inline; at most 1200 px wide. */
+/** Rasterizes the map for clients that show images inline; at most 1200 px wide and MAX_PNG_PIXELS in all. */
 export async function renderSeatMapPng(svg: string): Promise<Uint8Array> {
   const { fonts } = await renderer();
-  const width = Number(svg.match(/width="(\d+(?:\.\d+)?)"/)?.[1] ?? 800);
+  const width = Number(svg.match(/width="(\d+(?:\.\d+)?)"/)?.[1] ?? 800), height = Number(svg.match(/height="(\d+(?:\.\d+)?)"/)?.[1] ?? 800);
+  // Width alone does not bound the raster: scale so the output stays within MAX_PNG_PIXELS.
+  const scale = Math.min(1.5, 1200 / width, Math.sqrt(MAX_PNG_PIXELS / (width * height)));
   const resvg = new Resvg(svg, {
-    fitTo: { mode: 'width', value: Math.round(Math.min(1200, width * 1.5)) },
+    fitTo: { mode: 'width', value: Math.max(1, Math.floor(width * scale)) },
     font: { fontBuffers: fonts, loadSystemFonts: false, defaultFontFamily: 'Inter' },
   });
   // free() after a failed render throws its own error; keep the original one.

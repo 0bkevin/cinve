@@ -238,7 +238,9 @@ export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions)
         date: /^\d{4}-\d{2}-\d{2}$/.test(text(fn?.fechaDate)) ? text(fn?.fechaDate) : undefined, time: at ? `${at[1]}:${at[2]}` : undefined });
       // The page sells a cupo per tariff, often below the free seats; report it as the page shows it.
       const free = result.seats.filter(s => s.status === 'available').length;
-      const left = (tariffs ?? []).map(t => [clean(t.descripcion, 60), cinepicTicketsLeft(t)] as const).filter(([name, n]) => name && n !== undefined);
+      // A long or missing tariff name only shortens the label; its counter still counts.
+      const tariffName = (t: Record<string, unknown>) => { const v = Array.from(text(t.descripcion).replace(/\s+/g, ' ')); return v.length ? (v.length > 60 ? `${v.slice(0, 59).join('').trimEnd()}…` : v.join('')) : 'sin nombre'; };
+      const left = (tariffs ?? []).map(t => [tariffName(t), cinepicTicketsLeft(t)] as const).filter(([, n]) => n !== undefined);
       if (left.some(([, n]) => n! < free)) c.warnings.push(`La web de Cinepic ofrece en línea ${left.map(([name, n]) => `${n} entradas ${name}`).join(', ')}; puede vender menos entradas que las ${free} butacas libres del mapa.`);
       c.warnings.push('La disponibilidad de Cinepic depende también del tipo de entrada elegido. El campo seleccionada del proveedor no indica una reserva del usuario.');
     } else if (q.provider === 'cinesunidos') {

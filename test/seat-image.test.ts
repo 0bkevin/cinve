@@ -4,7 +4,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/server';
 import { Client } from '@modelcontextprotocol/client';
 import { cinepicBookableTypes, parseCinepicSeats, parseCinexShowing, renderSeats, seatLayout } from '../src/seats.js';
 import { cinepicTicketsLeft } from '../src/providers.js';
-import { MapTooLarge, renderSeatMapPng, renderSeatMapSvg, seatNumber } from '../src/seat-image.js';
+import { MapTooLarge, MAX_PNG_PIXELS, renderSeatMapPng, renderSeatMapSvg, seatNumber, textWidth } from '../src/seat-image.js';
 import { CinemaService } from '../src/service.js';
 import { HttpClient } from '../src/http.js';
 import { createServer } from '../src/server.js';
@@ -204,4 +204,23 @@ test('Cinepic seats tolerate odd tariff lists, and Cinex drops impossible dates 
   const info = (fecha: string, hora: string) => `<div>CINEX X | Sala 1 | <b>Fecha:</b> ${fecha} | <b>Hora:</b> ${hora} | <b>Asientos disponibles:</b> 3 asiento(s)</div>`;
   assert.deepEqual([parseCinexShowing(info('31-02-2026', '02:99pm')).showing?.date, parseCinexShowing(info('31-02-2026', '02:99pm')).showing?.time], [undefined, undefined]);
   assert.deepEqual([parseCinexShowing(info('29-02-2028', '11:59pm')).showing?.date, parseCinexShowing(info('29-02-2028', '11:59pm')).showing?.time], ['2028-02-29', '23:59']);
+});
+
+test('second review: raster budget, real glyph widths, and long tariff names', async t => {
+  const s = (row: string, area: string, row_index: number, column_index: number) => ({ label: `${row}:${column_index + 1}`, row, area, row_index, column_index, status: 'available' as const });
+  // 100 one-seat areas (17.9 kB upstream) is refused; 40 still draws, within the pixel budget.
+  assert.throws(() => renderSeatMapSvg(Array.from({ length: 100 }, (_, a) => s('A', String(a), 0, 0)), seatLayout('cinesunidos'), header), MapTooLarge);
+  const png = Buffer.from(await renderSeatMapPng(renderSeatMapSvg(Array.from({ length: 40 }, (_, a) => s('A', String(a), 0, 0)), seatLayout('cinesunidos'), header)));
+  assert.ok(png.readUInt32BE(16) * png.readUInt32BE(20) <= MAX_PNG_PIXELS, `${png.readUInt32BE(16)}x${png.readUInt32BE(20)}`);
+  // Wide letters are measured, not counted: 42 W's do not fit a 560-wide header.
+  const svg = renderSeatMapSvg([s('A', '1', 0, 0)], seatLayout('cinesunidos'), { ...header, movie: 'W'.repeat(42) });
+  const title = svg.match(/font-size="20" font-weight="700" fill="#202124">([^<]*)</)![1];
+  assert.ok(title.endsWith('…') && textWidth(title, 20, true) <= 560 - 56, title);
+  assert.ok(textWidth('W', 20, true) > 2 * textWidth('i', 20, true));
+  // A tariff name over 60 characters still reports its counter in the warning.
+  const seat = { butaca: 'A-1-1', nombre_butaca: 'A:1', fila: '1', columna: '1', libre: '1', seleccionada: '1', tipo_butaca_id: '1', invertida: '0' };
+  const body = page({ ...cpBuy, butacasData: { butacas: [seat] }, functionData: { datos: [{ id: 'f1', codigo: 'p1' }], tarifas: [{ _id: '2', id: '1', descripcion: 'GENERAL '.repeat(9), precio: '1', tot: '0', vend: '0', temp: '0' }] } });
+  const r = await new CinemaService(new HttpClient(async () => new Response(body), 15000, new EmptySessionStore())).seats({ provider: 'cinepic', cinema_id: '123300', session_id: 'f1', movie_id: 'p1' });
+  assert.match(r.warnings.join(' '), /ofrece en línea 0 entradas GENERAL GENERAL.*…; puede vender menos entradas que las 1 butacas libres/);
+  t.diagnostic(`40-area PNG ${png.readUInt32BE(16)}x${png.readUInt32BE(20)}`);
 });
