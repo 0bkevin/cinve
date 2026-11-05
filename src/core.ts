@@ -10,11 +10,12 @@ export const DateInput = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(s => {
 }, 'Fecha calendario válida YYYY-MM-DD');
 // Provider identifiers. Interior dots are allowed because Cinex publishes movie
 // slugs such as seres.parte1lainvasion; leading/trailing dots and '..' are not,
-// so an ID can never form a relative path segment. The published pattern has
-// no lookahead: RE2-based schema validators (Go hosts, some model providers)
-// reject lookarounds, so the '..' rule is a server-side refinement instead.
-export const idString = (params?: Parameters<typeof z.string>[0]) => z.string(params).regex(/^[a-zA-Z0-9_-](?:[a-zA-Z0-9._-]{0,98}[a-zA-Z0-9_-])?$/)
-  .refine(value => !value.includes('..'), 'Identificador no válido.');
+// so an ID can never form a relative path segment. The published pattern is a
+// plain character class: no lookaround (rejected by RE2-based validators) and
+// no large bounded group (limited in strict function-calling modes). The dot
+// rules are a server-side refinement, so accepted IDs are unchanged.
+export const idString = (params?: Parameters<typeof z.string>[0]) => z.string(params).regex(/^[a-zA-Z0-9._-]{1,100}$/)
+  .refine(value => !value.startsWith('.') && !value.endsWith('.') && !value.includes('..'), 'Identificador no válido.');
 export const Id = idString();
 export const PublicUrl = z.string().max(4096).refine(value => {
   try { const u = new URL(value); return u.protocol === 'https:' && !u.username && !u.password && !u.port; } catch { return false; }
