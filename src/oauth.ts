@@ -154,7 +154,8 @@ export class HostedOAuth {
           issuer: origin, authorization_endpoint: origin + '/oauth/authorize', token_endpoint: origin + '/oauth/token',
           // Client ID Metadata Documents are the preferred registration. The
           // registration endpoint (Dynamic Client Registration, deprecated in
-          // 2026-07-28) stays for clients that do not support them yet.
+          // 2026-07-28) stays for clients that do not support them yet; its
+          // removal is tracked in https://github.com/0bkevin/cinve/issues/21.
           client_id_metadata_document_supported: true,
           registration_endpoint: origin + '/oauth/register', revocation_endpoint: origin + '/oauth/revoke',
           response_types_supported: ['code'], grant_types_supported: ['authorization_code', 'refresh_token'],

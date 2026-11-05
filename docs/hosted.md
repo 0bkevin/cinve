@@ -82,7 +82,8 @@ modo local `stdio`.
 - `POST /oauth/register`: registro dinámico de clientes públicos (Dynamic Client
   Registration) con sus redirecciones exactas. Se aceptan HTTPS y HTTP de
   loopback. El protocolo 2026-07-28 lo declara obsoleto; se mantiene para los
-  clientes que todavía no usan documentos de metadatos.
+  clientes que todavía no usan documentos de metadatos. Su retirada se sigue en
+  [#21](https://github.com/0bkevin/cinve/issues/21).
 - `GET|POST /oauth/authorize`: muestra y procesa la aprobación explícita.
 
 ### Documentos de metadatos de cliente
