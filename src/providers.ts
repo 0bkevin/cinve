@@ -337,40 +337,44 @@ export function parseCinexMovies(html: string): DataItem[] {
   return [...items.values()];
 }
 export function parseCinexShowtimes(html: string, movieId: string, date: string, c?: ReadContext): DataItem[] {
-  const $ = load(html), items = new Map<string, DataItem>();
+  const $ = load(html);
   const title = decodeLabel($('h1').first().text() || movieId);
   const nodes = $('[onclick*="checkLogin("]');
   if (!nodes.length) throw new DataError('unavailable', 'La ficha Cinex no contiene funciones reconocibles.');
   let malformed = 0;
-  const suppressed = new Set<string>();
+  // Read every date on the page first: a session ID reported on two dates is
+  // as contradictory as one reported at two times, and filtering by the
+  // requested date first would hide the other occurrence.
+  const occurrences = new Map<string, DataItem[]>();
   nodes.each((_, e) => {
     const match = ($(e).attr('onclick') ?? '').match(/checkLogin\('([^']+)','([^']+)'\)/);
     const epoch = number($(e).attr('alt'));
     if (!match || epoch === undefined || !Number.isInteger(epoch) || epoch < 1e9 || epoch > 1e11) { malformed++; return; }
     const local = new Date(epoch * 1000 - 4 * 3600000).toISOString().slice(0, 19);
-    if (local.slice(0, 10) !== date) return;
     const readable = $(e).clone(); readable.find('br').replaceWith('\n');
     const body = readable.text(), screen = body.match(/Sala\s+(\d+)/i)?.[1];
     const key = `${match[2]}:${match[1]}`;
-    if (suppressed.has(key)) return;
-    const item: DataItem = { kind: 'showtime', id: match[1], name: title,
-      movie_id: movieId, cinema_id: match[2], date, time: local.slice(11, 16), starts_at: `${local}-04:00`, screen,
+    const list = occurrences.get(key) ?? []; occurrences.set(key, list);
+    list.push({ kind: 'showtime', id: match[1], name: title,
+      movie_id: movieId, cinema_id: match[2], date: local.slice(0, 10), time: local.slice(11, 16), starts_at: `${local}-04:00`, screen,
       language: cinexLanguage($(e).find('img.icoIdioma').attr('src')),
-      url: `${CX}/sinopsis-${movieId}.html` };
-    const previous = items.get(key);
-    if (previous && cinexSessionConflict(previous, item)) {
-      items.delete(key); suppressed.add(key);
-      if (c) { c.partial = true; providerWarning(c, 'cinex-movie-conflict', () => `Cinex devolvió horarios contradictorios para la función ${warningLabel(match[1])}; se omitió.`); }
-      return;
-    }
-    items.set(key, item);
+      url: `${CX}/sinopsis-${movieId}.html` });
   });
+  const items: DataItem[] = [];
+  for (const list of occurrences.values()) {
+    if (!list.some(item => item.date === date)) continue;
+    if (list.some(item => cinexSessionConflict(list[0], item))) {
+      if (c) { c.partial = true; providerWarning(c, 'cinex-movie-conflict', () => `Cinex devolvió horarios contradictorios para la función ${warningLabel(list[0].id)}; se omitió.`); }
+      continue;
+    }
+    items.push(list[0]);
+  }
   if (malformed && c) {
     c.partial = true;
     providerWarning(c, 'cinex-movie-malformed-session', 'Cinex devolvió una o más funciones de película con epoch o identificador malformado; se omitieron.');
   }
   if (c) providerWarningSummary(c);
-  return [...items.values()];
+  return items;
 }
 
 /** The same session ID with another film, date, time or room cannot drive a price or seat lookup. */
@@ -396,6 +400,21 @@ export function parseCinexCinemaShowtimes(html: string, movies: DataItem[], cine
   const $ = load(html), items = new Map<string, DataItem>();
   const suppressed = new Set<string>();
   let blocks = 0, nodes = 0;
+  const sessionCall = /checkLogin\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]\s*\)/i;
+  // A session ID must have one film, start and room across the whole page,
+  // not only within the requested date: compare every occurrence first.
+  const identities = new Map<string, string>(), contradictory = new Set<string>();
+  $('.sessionslist').each((_, block) => {
+    const blockTitle = cinexMovieTitle(decodeLabel($(block).find('h5.title').first().text()));
+    $(block).find('[onclick*="checkLogin("]').each((_, e) => {
+      const match = ($(e).attr('onclick') ?? '').match(sessionCall), epoch = number($(e).attr('alt'));
+      if (!match || match[2] !== cinemaId || epoch === undefined || !Number.isInteger(epoch)) return;
+      const readable = $(e).clone(); readable.find('br').replaceWith('\n');
+      const identity = JSON.stringify([blockTitle, epoch, readable.text().match(/Sala\s+([A-Za-z0-9_-]+)/i)?.[1] ?? null]);
+      const key = `${cinemaId}:${match[1]}`, previous = identities.get(key);
+      if (previous === undefined) identities.set(key, identity); else if (previous !== identity) contradictory.add(key);
+    });
+  });
   $('.sessionslist').each((_, block) => {
     blocks++;
     const title = decodeLabel($(block).find('h5.title').first().text());
@@ -448,7 +467,7 @@ export function parseCinexCinemaShowtimes(html: string, movies: DataItem[], cine
       const key = `${cinemaId}:${sessionId}`;
       if (suppressed.has(key)) return;
       const previous = items.get(key);
-      if (previous && cinexSessionConflict(previous, item)) {
+      if (contradictory.has(key) || (previous && cinexSessionConflict(previous, item))) {
         c.partial = true; providerWarning(c, 'cinex-cinema-conflict', () => `Cinex devolvió horarios contradictorios para la función ${warningLabel(sessionId)}; se omitió.`); items.delete(key); suppressed.add(key); return;
       }
       items.set(key, item);
