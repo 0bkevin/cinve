@@ -1,6 +1,6 @@
 import { SeatResult } from './seats.js';
 import { seatInstructions } from './seat-guidance.js';
-import { renderSeatMapPng, renderSeatMapSvg } from './seat-image.js';
+import { MapTooLarge, renderSeatMapPng, renderSeatMapSvg } from './seat-image.js';
 import { cinepicVenueName } from './providers.js';
 import { hostedAuthInstructions } from './hosted-auth-guidance.js';
 import { McpServer } from '@modelcontextprotocol/server';
@@ -200,8 +200,8 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
         picture = image === 'svg'
           ? { type: 'resource', resource: { uri: `cinve://seats/${data.provider}/${data.cinema_id}/${data.session_id}.svg`, mimeType: 'image/svg+xml', text: svg } }
           : { type: 'image', data: Buffer.from(await renderSeatMapPng(svg)).toString('base64'), mimeType: 'image/png' };
-      } catch {
-        data.warnings.push('No se pudo generar la imagen del mapa; usa el mapa ascii.');
+      } catch (e) {
+        data.warnings.push(e instanceof MapTooLarge ? 'El mapa es demasiado grande para dibujarlo como imagen; usa el mapa ascii.' : 'No se pudo generar la imagen del mapa; usa el mapa ascii.');
       }
     }
     // The ASCII map carries every label and state; the per-seat list is ~10x larger.

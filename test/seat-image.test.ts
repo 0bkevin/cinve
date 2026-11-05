@@ -4,7 +4,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/server';
 import { Client } from '@modelcontextprotocol/client';
 import { cinepicBookableTypes, parseCinepicSeats, parseCinexShowing, renderSeats, seatLayout } from '../src/seats.js';
 import { cinepicTicketsLeft } from '../src/providers.js';
-import { renderSeatMapPng, renderSeatMapSvg, seatNumber } from '../src/seat-image.js';
+import { MapTooLarge, renderSeatMapPng, renderSeatMapSvg, seatNumber } from '../src/seat-image.js';
 import { CinemaService } from '../src/service.js';
 import { HttpClient } from '../src/http.js';
 import { createServer } from '../src/server.js';
@@ -141,4 +141,40 @@ test('Cinepic seats and ticket counters follow the purchase page', async t => {
   const { image: _, ...priceArgs } = args;
   const prices = (await client.callTool({ name: 'get_ticket_prices', arguments: priceArgs })).structuredContent as { items: { name: string; tickets_available?: number }[] };
   assert.deepEqual(prices.items.map(i => [i.name, i.tickets_available]), [['COMPLETO', 146], ['NIÑOS', 146]]);
+});
+
+test('the image survives hostile or oversized maps without hiding the data', async () => {
+  const s = (row: string, area: string, row_index: number, column_index: number, status: 'available' | 'unknown' | 'occupied' | 'unavailable' = 'available') => ({ label: `${row}:${column_index + 1}`, row, area, row_index, column_index, status });
+  // Control characters and lone surrogates would make the SVG invalid XML.
+  const svg = renderSeatMapSvg([s('A', '1', 0, 0)], seatLayout('cinepic', map), { ...header, movie: 'A\u0001B\u0000C￾\uD800' });
+  assert.match(svg, />ABC</);
+  assert.ok((await renderSeatMapPng(svg)).length > 100);
+  // Long titles are cut by characters, never inside an emoji.
+  assert.doesNotMatch(renderSeatMapSvg([s('A', '1', 0, 0)], seatLayout('cinepic', map), { ...header, movie: '🎬'.repeat(200) }), /[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+  // Areas share one column scale: C:5 sits under A:5, not under A:1.
+  const areas = renderSeatMapSvg([s('A', '1', 0, 0), s('A', '1', 0, 4), s('C', '2', 0, 4)], seatLayout('cinesunidos'), header);
+  assert.equal(xOf(areas, 'C:5'), xOf(areas, 'A:5'));
+  // A map far taller than any room is refused before drawing, and get_seats keeps its data.
+  const tall = Array.from({ length: 60 }, (_, a) => [s('A', String(a), 0, 0), s('B', String(a), 199, 0)]).flat();
+  assert.throws(() => renderSeatMapSvg(tall, seatLayout('cinesunidos'), header), MapTooLarge);
+  // On a narrow map the full legend no longer overlaps the total.
+  const narrow = renderSeatMapSvg([s('A', '1', 0, 0), s('A', '1', 0, 1, 'occupied'), s('A', '1', 0, 2, 'unavailable'), s('A', '1', 0, 3, 'unknown')], seatLayout('cinesunidos'), header);
+  const legendY = Number(narrow.match(/y="([\d.]+)" font-size="12" fill="#3c4043">Desconocido/)![1]);
+  const totalY = Number(narrow.match(/y="([\d.]+)" font-size="12" font-weight="700" fill="#202124" text-anchor="end">1 libres de 4/)![1]);
+  assert.ok(totalY > legendY, `${totalY} > ${legendY}`);
+});
+
+test('get_seats warns instead of failing when a map is too large to draw', async t => {
+  const sessions = new class extends EmptySessionStore { override async headers() { return { Authorization: 'Bearer synthetic' }; } };
+  const areas = Array.from({ length: 60 }, (_, a) => ({ number: a + 1, description: 'SALA 1 - X', rows: [0, 199].map(r => ({ rowIndexZeroBased: r, physicalName: r ? 'B' : 'A', seats: [{ id: '1', status: 0, position: { areaNumber: a + 1, rowIndex: r, columnIndex: 0 } }] })) }));
+  const server = createServer(new CinemaService(new HttpClient(async () => Response.json({ seats: { areas } }), 15000, sessions)));
+  const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: 'big-map', version: '1.0.0' });
+  await server.connect(serverTransport); await client.connect(clientTransport);
+  t.after(async () => { await client.close(); await server.close(); });
+  const r = await client.callTool({ name: 'get_seats', arguments: { provider: 'cinesunidos', cinema_id: '1008', session_id: 's1' } });
+  const data = SeatResult.parse(r.structuredContent);
+  assert.equal(data.status, 'available'); assert.equal(data.total, 120);
+  assert.deepEqual((r.content as { type: string }[]).map(c => c.type), ['text']);
+  assert.match(data.warnings.join(' '), /demasiado grande para dibujarlo como imagen/);
 });

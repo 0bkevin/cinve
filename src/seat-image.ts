@@ -18,7 +18,13 @@ const palette: Record<SeatStatus, { fill: string; stroke: string; text: string; 
 };
 const CELL = 30, SEAT = 26, LABEL = 30, PAD = 28;
 
-const escape = (value: string) => value.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+/** Characters XML 1.0 forbids (controls, lone surrogates, U+FFFE/FFFF); resvg and SVG viewers reject the whole document for one of them. */
+const invalidXml = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+const escape = (value: string) => value.replace(invalidXml, '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+/** Thrown before drawing a map whose image would exceed MAX_MAP_HEIGHT; the data answer is unaffected. */
+export class MapTooLarge extends Error {}
+/** In SVG units: about 125 rows, far above any room seen, and ~9000 px tall as PNG at most. */
+export const MAX_MAP_HEIGHT = 6000;
 /** The seat's number within its row: "A:5" and "B12" in row A or B give 5 and 12. */
 export function seatNumber(seat: Pick<MapSeat, 'label' | 'row'>): string {
   const rest = seat.label.startsWith(seat.row) ? seat.label.slice(seat.row.length).replace(/^[\s:._-]+/, '') : seat.label;
@@ -30,21 +36,24 @@ const caracasTime = (iso: string) => new Intl.DateTimeFormat('es-VE', { timeZone
 export function renderSeatMapSvg(seats: MapSeat[], layout: MapLayout, header: MapHeader): string {
   const areas = [...new Set(seats.map(s => s.area))];
   const showAreaNames = areas.length > 1;
+  // Columns share one scale across areas, as in the ASCII map, so an area keeps its horizontal place.
+  const minCol = Math.min(...seats.map(s => s.column_index)), cols = Math.max(...seats.map(s => s.column_index)) - minCol + 1;
   const groups = areas.map(area => {
     const group = seats.filter(s => s.area === area);
     const minRow = Math.min(...group.map(s => s.row_index)), maxRow = Math.max(...group.map(s => s.row_index));
-    const minCol = Math.min(...group.map(s => s.column_index)), maxCol = Math.max(...group.map(s => s.column_index));
-    return { area, group, minRow, rows: maxRow - minRow + 1, minCol, cols: maxCol - minCol + 1 };
+    return { area, group, minRow, rows: maxRow - minRow + 1 };
   });
-  const gridWidth = Math.max(...groups.map(g => g.cols)) * CELL;
+  const rowsHeight = groups.reduce((sum, g) => sum + g.rows * CELL + 14 + (areas.length > 1 ? 22 : 0), 0);
+  if (rowsHeight > MAX_MAP_HEIGHT) throw new MapTooLarge('El mapa es demasiado grande para dibujarlo como imagen.');
+  const gridWidth = cols * CELL;
   const width = Math.max(PAD * 2 + LABEL * 2 + gridWidth, 560);
   const left = (width - gridWidth) / 2;
   const out: string[] = [];
   let y = PAD;
   // Inter at these sizes averages about 0.6 em per character.
   const fit = (value: string, size: number, room: number) => {
-    const max = Math.max(8, Math.floor(room / (size * 0.6)));
-    return value.length > max ? `${value.slice(0, max - 1).trimEnd()}…` : value;
+    const max = Math.max(8, Math.floor(room / (size * 0.6))), chars = Array.from(value);
+    return chars.length > max ? `${chars.slice(0, max - 1).join('').trimEnd()}…` : value;
   };
   out.push(`<text x="${PAD}" y="${y + 18}" font-size="20" font-weight="700" fill="#202124">${escape(fit(header.movie ?? 'Mapa de asientos', 20, width - PAD * 2))}</text>`);
   const provider = providerNames[header.provider] ?? header.provider;
@@ -72,7 +81,7 @@ export function renderSeatMapSvg(seats: MapSeat[], layout: MapLayout, header: Ma
         out.push(`<text x="${left + gridWidth + LABEL / 2}" y="${cy + SEAT / 2 + 4}" font-size="12" font-weight="700" fill="#5f6368" text-anchor="middle">${escape(name)}</text>`);
       }
       for (const s of rowSeats) {
-        const col = s.column_index - g.minCol, shown = layout.column_order === 'descending' ? g.cols - 1 - col : col;
+        const col = s.column_index - minCol, shown = layout.column_order === 'descending' ? cols - 1 - col : col;
         const x = left + shown * CELL + (CELL - SEAT) / 2, c = palette[s.status], number = seatNumber(s);
         const size = number.length > 3 ? 8 : number.length === 3 ? 9.5 : 11;
         out.push(`<g><title>${escape(`${s.label}: ${c.name.toLowerCase()}`)}</title><rect x="${x}" y="${cy}" width="${SEAT}" height="${SEAT}" rx="6" fill="${c.fill}" stroke="${c.stroke}" stroke-width="1"${s.status === 'unavailable' ? ' stroke-dasharray="3 2"' : ''}/>`
@@ -92,7 +101,10 @@ export function renderSeatMapSvg(seats: MapSeat[], layout: MapLayout, header: Ma
     out.push(`<text x="${lx + 22}" y="${y + 12.5}" font-size="12" fill="#3c4043">${escape(label)}</text>`);
     lx += 22 + label.length * 7 + 22;
   }
-  out.push(`<text x="${width - PAD}" y="${y + 12.5}" font-size="12" font-weight="700" fill="#202124" text-anchor="end">${counts.available} libres de ${seats.length}</text>`);
+  // On narrow maps a full legend reaches the total; give the total its own line then.
+  const total = `${counts.available} libres de ${seats.length}`;
+  if (lx > width - PAD - total.length * 7.5) y += 24;
+  out.push(`<text x="${width - PAD}" y="${y + 12.5}" font-size="12" font-weight="700" fill="#202124" text-anchor="end">${total}</text>`);
   y += 32;
   const notes = [
     `Consultado ${caracasTime(header.queriedAt)}, hora de Caracas.`,
@@ -106,16 +118,23 @@ export function renderSeatMapSvg(seats: MapSeat[], layout: MapLayout, header: Ma
     + `<rect width="${width}" height="${height}" rx="14" fill="#ffffff"/>${out.join('')}</svg>`;
 }
 
-let ready: Promise<{ fonts: Uint8Array[] }> | undefined;
 const asset = (name: string) => readFileSync(new URL(`./assets/${name}`, import.meta.url));
+// initWasm may succeed only once per process, so its promise is kept apart from
+// the fonts: a font failure is retried on the next call without re-initializing.
+let wasmReady: Promise<void> | undefined, fonts: Uint8Array[] | undefined;
 /** resvg needs its WebAssembly and real font files; both ship in assets/. */
-function renderer() {
-  return ready ??= (async () => {
+async function renderer() {
+  await (wasmReady ??= (async () => {
     let wasm: Buffer;
     try { wasm = asset('resvg.wasm'); } catch { wasm = readFileSync(createRequire(import.meta.url).resolve('@resvg/resvg-wasm/index_bg.wasm')); }
     await initWasm(wasm);
-    return { fonts: [asset('inter-latin-400.ttf'), asset('inter-latin-700.ttf')].map(b => new Uint8Array(b)) };
-  })().catch(error => { ready = undefined; throw error; });
+  })().catch(error => {
+    // initWasm refuses any second call; that refusal means the module is ready.
+    if (/already initialized/i.test(String(error))) return;
+    wasmReady = undefined;
+    throw error;
+  }));
+  return { fonts: fonts ??= [asset('inter-latin-400.ttf'), asset('inter-latin-700.ttf')].map(b => new Uint8Array(b)) };
 }
 
 /** Rasterizes the map for clients that show images inline; at most 1200 px wide. */
@@ -126,8 +145,10 @@ export async function renderSeatMapPng(svg: string): Promise<Uint8Array> {
     fitTo: { mode: 'width', value: Math.round(Math.min(1200, width * 1.5)) },
     font: { fontBuffers: fonts, loadSystemFonts: false, defaultFontFamily: 'Inter' },
   });
+  // free() after a failed render throws its own error; keep the original one.
+  const release = (o: { free(): void }) => { try { o.free(); } catch { /* already released by the failure */ } };
   try {
     const image = resvg.render();
-    try { return image.asPng(); } finally { image.free(); }
-  } finally { resvg.free(); }
+    try { return image.asPng(); } finally { release(image); }
+  } finally { release(resvg); }
 }
