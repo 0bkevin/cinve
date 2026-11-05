@@ -74,7 +74,7 @@ que Cinve omitió o no pudo verificar parte de la respuesta.
 | --- | --- | --- |
 | Cinepic | Dos sedes configuradas; películas, funciones, precios, asientos y consulta de caramelería. | No descubre sedes nuevas automáticamente. La conversión a USD usa la tasa publicada por el proveedor. |
 | Cines Unidos | Ciudades, sedes, películas, funciones, caramelería, precios y asientos. | Precios y asientos requieren una cuenta conectada. Si su web exige un desafío anti-bots (ocurre desde algunas redes de centros de datos, como la del servicio alojado), sedes, películas y funciones se leen de su API pública de búsqueda y el resultado lo advierte. |
-| Cinex | Ciudades, sedes, catálogo, funciones, precios, caramelería y asientos. | Precios, caramelería y asientos requieren una cuenta conectada. Algunos cruces de títulos pueden ser parciales. El descubrimiento de sedes tiene un plazo de 40 s, comprobado antes de cada lectura; las sedes sin comprobar se devuelven como `unverified` y `partial`. Las funciones por ciudad leen hasta 16 sedes en 30 s y nombran las que no se pudieron leer. |
+| Cinex | Ciudades, sedes, catálogo, funciones, precios, caramelería y asientos. | Precios, caramelería y asientos requieren una cuenta conectada. Algunos cruces de títulos pueden ser parciales. El descubrimiento de sedes tiene un plazo de 40 s, comprobado antes de cada lectura; las sedes sin comprobar se devuelven como `unverified` y `partial`. Las funciones por ciudad leen hasta 16 sedes, dos a la vez, con un plazo total de 45 s; nombran las que no se pudieron leer y fallan si no se leyó ninguna. |
 
 La cobertura describe implementaciones, no certifica que cada proveedor esté
 disponible en todo momento ni que abarque todos los cines de Venezuela.

@@ -502,15 +502,20 @@ export async function cinex(op: Operation, q: Query, c: ReadContext, catalog = n
 }
 
 const cinexCityVenues = 16;
-const cinexCityBudgetMs = 30000;
+// One deadline for discovery, catalog and venue reads; with at most one read
+// in flight per worker past it (15 s), a call stays well under the hosted 90 s.
+const cinexCityBudgetMs = 45000;
+// The HTTP client admits two reads per origin and each read's 15 s deadline
+// includes its queue time, so more workers would only time out in the queue.
+const cinexCityWorkers = 2;
 /**
  * All verified venues of one city in one call. A model would otherwise list
  * the city's venues and query each one: ten round trips for Caracas. The
  * upstream reads are the same ones (directory, one page per venue, catalog),
- * served from the same cache, in batches that stay within the origin queue.
+ * served from the same cache.
  */
 async function cinexCityShowtimes(q: Query, c: ReadContext, catalog: CinexCinemaCatalog, date: string): Promise<DataItem[]> {
-  const started = Date.now();
+  const deadline = Date.now() + cinexCityBudgetMs;
   const listed = await catalog.list({ provider: 'cinex', city: q.city }, c);
   const venues = listed.filter((v): v is DataItem & { cinema_id: string } => v.code_status === 'verified' && !!v.cinema_id);
   if (!venues.length) {
@@ -524,29 +529,36 @@ async function cinexCityShowtimes(q: Query, c: ReadContext, catalog: CinexCinema
     c.partial = true;
     c.warnings.push(`Se consultaron ${work.length} de ${venues.length} sedes Cinex de la ciudad; usa cinema_id para las demás.`);
   }
+  const timedOut = () => new DataError('unavailable', 'Se agotó el tiempo de consulta de las sedes Cinex de la ciudad; consulta get_showtimes con el cinema_id de cada sede (list_cinemas).');
+  if (Date.now() >= deadline) throw timedOut();
   const movies = parseCinexMovies(await c.get(`${CX}/cartelera.html`, 120000));
-  const items: DataItem[] = [], failed: string[] = [], skipped: string[] = [];
-  let firstError: unknown;
-  for (let i = 0; i < work.length; i += 4) {
-    if (Date.now() - started >= cinexCityBudgetMs) { skipped.push(...work.slice(i).map(v => v.name)); break; }
-    const batch = await Promise.allSettled(work.slice(i, i + 4).map(async v => {
-      const venue = await catalog.resolve(v.cinema_id, c);
-      const page = venue.body === undefined ? await c.page(venue.url, 120000) : { body: venue.body };
-      return parseCinexCinemaShowtimes(page.body, movies, v.cinema_id, date, c, venue.url, warningLabel(decodeLabel(v.name), 200) || undefined);
-    }));
-    batch.forEach((outcome, j) => {
-      if (outcome.status === 'fulfilled') items.push(...outcome.value);
-      else { failed.push(work[i + j].name); firstError ??= outcome.reason; }
-    });
-  }
-  if (failed.length === work.length) throw firstError;
+  const items: DataItem[] = [], failed: string[] = [];
+  let next = 0, succeeded = 0, firstError: unknown;
+  const worker = async () => {
+    while (next < work.length && Date.now() < deadline) {
+      const v = work[next++];
+      try {
+        const venue = await catalog.resolve(v.cinema_id, c);
+        const page = venue.body === undefined ? await c.page(venue.url, 120000) : { body: venue.body };
+        items.push(...parseCinexCinemaShowtimes(page.body, movies, v.cinema_id, date, c, venue.url, warningLabel(decodeLabel(v.name), 200) || undefined));
+        succeeded++;
+      } catch (error) {
+        failed.push(v.name); firstError ??= error;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(cinexCityWorkers, work.length) }, worker));
+  const skipped = work.slice(next).map(v => v.name);
+  const names = (list: string[]) => list.map(n => warningLabel(n, 60)).join(', ');
   if (failed.length) {
     c.partial = true;
-    c.warnings.push(`No se pudieron leer las funciones de ${failed.length} sedes Cinex (${failed.map(n => warningLabel(n, 60)).join(', ')}); consulta su cinema_id por separado.`);
+    c.warnings.push(`No se pudieron leer las funciones de ${failed.length} sedes Cinex (${names(failed)}); consulta su cinema_id por separado.`);
   }
   if (skipped.length) {
     c.partial = true;
-    c.warnings.push(`Se agotó el tiempo de consulta antes de leer ${skipped.length} sedes Cinex (${skipped.map(n => warningLabel(n, 60)).join(', ')}); consulta su cinema_id por separado.`);
+    c.warnings.push(`Se agotó el tiempo de consulta antes de leer ${skipped.length} sedes Cinex (${names(skipped)}); consulta su cinema_id por separado.`);
   }
+  // No venue read means no schedule was observed: that is a failure, not "empty".
+  if (!succeeded) throw firstError ?? timedOut();
   return items;
 }

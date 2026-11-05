@@ -452,3 +452,29 @@ test('Cinex city showtimes read every verified venue of the city in one call and
   assert.equal(inputSchema('showtimes').safeParse({ provider: 'cinex', city: 'Caracas', cinema_id: 'SBC' }).success, false);
   assert.equal(inputSchema('showtimes').safeParse({ provider: 'cinex' }).success, false);
 });
+
+test('Cinex city showtimes keep reads within the per-origin limit, and a city with no readable venue is a failure', async () => {
+  const epoch = String(Date.parse('2026-09-18T20:30:00-04:00') / 1000);
+  const codes = ['AAA', 'BBB', 'CCC', 'DDD'];
+  const directory = codes.map(code => card(code.toLowerCase(), code, `x${code}.jpg`)).join('');
+  const venueServer = (venue: (code: string) => Promise<Response>) => new HttpClient(async input => {
+    const url = new URL(String(input));
+    if (url.pathname === '/cines.html') return new Response(directory);
+    if (url.pathname === '/assets/php/datasource.php') return Response.json({ data: [{ siglas: url.searchParams.get('cinemaid'), name: url.searchParams.get('cinemaid') }] });
+    if (url.pathname === '/cartelera.html') return new Response(`<div class="poster" onclick="x('sinopsis-film.html')" title="FILM"></div>`);
+    const m = url.pathname.match(/^\/cinex-([a-z]+)\.html$/);
+    return m ? venue(m[1].toUpperCase()) : new Response('missing', { status: 404 });
+  }, 300);
+  // Each venue page takes 200 ms against a 300 ms per-read deadline that includes queue time:
+  // four reads started together would leave two waiting 200 ms in the queue and time them out.
+  const slow = venueServer(async code => { await new Promise(r => setTimeout(r, 200)); return new Response(`<h3 class="title">${code}</h3><div class="sessionslist"><h5 class="title">FILM</h5><button onclick="checkLogin('${code}1','${code}')" alt="${epoch}"></button></div>`); });
+  const r = await new CinemaService(slow, new CinexCinemaCatalog()).query('showtimes', { provider: 'cinex', city: 'Caracas', date: '2026-09-18' });
+  assert.equal(r.partial, false, r.warnings.join(' | '));
+  assert.deepEqual(r.items.map(i => i.cinema_id).sort(), codes);
+
+  const down = venueServer(async () => new Response('down', { status: 503 }));
+  const none = await new CinemaService(down, new CinexCinemaCatalog()).query('showtimes', { provider: 'cinex', city: 'Caracas', date: '2026-09-18' });
+  assert.notEqual(none.status, 'empty', 'no venue was read, so there is no observed empty schedule');
+  assert.equal(none.status, 'error');
+  assert.ok(none.warnings.some(w => /4 sedes Cinex/.test(w)), none.warnings.join(' | '));
+});
