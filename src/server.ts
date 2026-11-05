@@ -27,6 +27,18 @@ const schema = z.object({
   ...paging,
 }).strict();
 
+/**
+ * Strict function-calling adapters (OpenAI strict mode, some Gemini bridges)
+ * make every optional property required-but-nullable, so models send
+ * `"query": null` for "not given". Treat a null argument as an absent one.
+ * The published JSON Schema is the inner schema, unchanged.
+ */
+function absentNulls(value: unknown) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? Object.fromEntries(Object.entries(value).filter(([, v]) => v !== null))
+    : value;
+}
+
 export function inputSchema(op: Operation): z.ZodType<Query> {
   // Keep each tool's arguments small and expose conditional requirements in validation.
   const base = op === 'cities' ? schema.pick({ provider: true, offset: true, limit: true, query: true, refresh: true })
@@ -34,7 +46,7 @@ export function inputSchema(op: Operation): z.ZodType<Query> {
     : op === 'prices' ? schema.pick({ provider: true, cinema_id: true, movie_id: true, session_id: true, offset: true, limit: true, refresh: true })
     : op === 'concessions' ? schema.pick({ provider: true, cinema_id: true, query: true, offset: true, limit: true, refresh: true })
     : schema.omit({ session_id: true });
-  return base.superRefine((value, ctx) => {
+  return z.preprocess(absentNulls, base.superRefine((value, ctx) => {
     const q = value as Query;
     const need = (field: 'city' | 'cinema_id' | 'movie_id' | 'session_id') => {
       // Cinepic has two fixed venues: naming them saves the model a discovery call.
@@ -60,7 +72,7 @@ export function inputSchema(op: Operation): z.ZodType<Query> {
       if (op === 'movies' && (q.date || q.cinema_id || q.city || q.movie_id)) ctx.addIssue({ code: 'custom', message: 'Cinex movies ofrece catálogo general: usa query para buscar y get_showtimes para filtrar fecha/sede.' });
       if (op === 'showtimes' && q.city) ctx.addIssue({ code: 'custom', path: ['city'], message: 'Filtra funciones Cinex mediante cinema_id, obtenido con list_cinemas.' });
     }
-  });
+  })) as unknown as z.ZodType<Query>;
 }
 
 export type AccountTools = {
@@ -135,9 +147,9 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
   server.registerTool('get_seats', {
     title: 'Consultar asientos y mapa ASCII',
     description: 'Mapa real sin reservar: Cinex y Cines Unidos requieren cinema_id, session_id y cuenta conectada; Cinepic requiere también movie_id, sin login. Usa IDs de get_showtimes. Devuelve filas, números, estados y ASCII completo. Sin caché local. ' + seatInstructions,
-    inputSchema: z.object({ provider, cinema_id: cinemaId, session_id: sessionId, movie_id: movieId.optional() }).strict().superRefine((q, ctx) => {
+    inputSchema: z.preprocess(absentNulls, z.object({ provider, cinema_id: cinemaId, session_id: sessionId, movie_id: movieId.optional() }).strict().superRefine((q, ctx) => {
       if (q.provider === 'cinepic' && !q.movie_id) ctx.addIssue({ code: 'custom', path: ['movie_id'], message: 'Cinepic requiere movie_id de get_showtimes.' });
-    }),
+    })),
     outputSchema: SeatResult, annotations,
   }, async args => {
     const data = await service.seats(args);

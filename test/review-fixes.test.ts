@@ -244,3 +244,23 @@ test('Cinex venue discovery checks its budget before each follow-up read of an a
   assert.equal(r.partial, true); assert.equal(r.items[0].code_status, 'unverified');
   assert.ok(r.warnings.some(w => /tiempo de comprobación de A/.test(w)), r.warnings.join(' | '));
 });
+
+test('null arguments from strict function-calling adapters are treated as absent', async () => {
+  const { Client } = await import('@modelcontextprotocol/client');
+  const { InMemoryTransport } = await import('@modelcontextprotocol/server');
+  const { createServer } = await import('../src/server.js');
+  const server = createServer(new CinemaService(new HttpClient(async () => new Response('unexpected', { status: 500 }))));
+  const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  const client = new Client({ name: 'strict-adapter', version: '1' });
+  await client.connect(clientTransport);
+  try {
+    const tools = await client.listTools();
+    assert.ok(!JSON.stringify(tools.tools.map(t => t.inputSchema)).includes('null'), 'published schemas are unchanged');
+    assert.ok(!JSON.stringify(tools.tools.map(t => t.inputSchema)).includes('(?!'), 'published patterns have no lookaround');
+    const r = await client.callTool({ name: 'list_cities', arguments: { provider: 'cinepic', query: null, offset: null, limit: null, refresh: null } });
+    assert.equal(r.isError, false); assert.equal((r.structuredContent as { total: number }).total, 1);
+    const seats = await client.callTool({ name: 'get_seats', arguments: { provider: 'cinepic', cinema_id: '123300', session_id: '1', movie_id: null } });
+    assert.match(JSON.stringify(seats.content), /movie_id/, 'a null required-by-provider field still reports it as missing');
+  } finally { await client.close(); }
+});
