@@ -93,3 +93,26 @@ test('service caps distinct and repeated provider warnings with an explicit aggr
   assert.ok(result.warnings.join('').length <= 8192);
   assert.ok(result.warnings.some(w => /Se omitieron/.test(w)));
 });
+
+test('a Cinex session ID reported with two times or rooms is suppressed, not silently overwritten', () => {
+  const c = context();
+  const items = parseCinexShowtimes(
+    `<h1>Known</h1><button onclick="checkLogin('same','C')" alt="${epoch('2026-09-18', '19:00')}">Sala 1</button>` +
+    `<button onclick="checkLogin('same','C')" alt="${epoch('2026-09-18', '20:00')}">Sala 2</button>` +
+    `<button onclick="checkLogin('ok','C')" alt="${epoch('2026-09-18', '21:00')}">Sala 3</button>` +
+    `<button onclick="checkLogin('ok','C')" alt="${epoch('2026-09-18', '21:00')}">Sala 3</button>`,
+    'm', '2026-09-18', c,
+  );
+  assert.deepEqual(items.map(i => i.id), ['ok'], 'identical repeats are kept once; conflicts are dropped');
+  assert.equal(c.partial, true);
+  assert.ok(c.warnings.some(w => /contradictorios/.test(w) && /same/.test(w)), c.warnings.join(' | '));
+
+  const venue = context();
+  const venueItems = parseCinexCinemaShowtimes(
+    `<div class="sessionslist"><h5 class="title">KNOWN</h5><button onclick="checkLogin('same','C')" alt="${epoch('2026-09-18')}">Sala 1</button>` +
+    `<button onclick="checkLogin('same','C')" alt="${epoch('2026-09-18')}">Sala 2</button></div>`,
+    [movie], 'C', '2026-09-18', venue, 'https://www.cinex.com.ve/cinex-c.html',
+  );
+  assert.deepEqual(venueItems, [], 'a room-only difference is also a conflict');
+  assert.equal(venue.partial, true);
+});

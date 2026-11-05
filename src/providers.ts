@@ -326,6 +326,7 @@ export function parseCinexShowtimes(html: string, movieId: string, date: string,
   const nodes = $('[onclick*="checkLogin("]');
   if (!nodes.length) throw new DataError('unavailable', 'La ficha Cinex no contiene funciones reconocibles.');
   let malformed = 0;
+  const suppressed = new Set<string>();
   nodes.each((_, e) => {
     const match = ($(e).attr('onclick') ?? '').match(/checkLogin\('([^']+)','([^']+)'\)/);
     const epoch = number($(e).attr('alt'));
@@ -334,17 +335,31 @@ export function parseCinexShowtimes(html: string, movieId: string, date: string,
     if (local.slice(0, 10) !== date) return;
     const readable = $(e).clone(); readable.find('br').replaceWith('\n');
     const body = readable.text(), screen = body.match(/Sala\s+(\d+)/i)?.[1];
-    items.set(`${match[2]}:${match[1]}`, { kind: 'showtime', id: match[1], name: title,
+    const key = `${match[2]}:${match[1]}`;
+    if (suppressed.has(key)) return;
+    const item: DataItem = { kind: 'showtime', id: match[1], name: title,
       movie_id: movieId, cinema_id: match[2], date, time: local.slice(11, 16), starts_at: `${local}-04:00`, screen,
       language: cinexLanguage($(e).find('img.icoIdioma').attr('src')),
-      url: `${CX}/sinopsis-${movieId}.html` });
+      url: `${CX}/sinopsis-${movieId}.html` };
+    const previous = items.get(key);
+    if (previous && cinexSessionConflict(previous, item)) {
+      items.delete(key); suppressed.add(key);
+      if (c) { c.partial = true; providerWarning(c, 'cinex-movie-conflict', () => `Cinex devolvió horarios contradictorios para la función ${warningLabel(match[1])}; se omitió.`); }
+      return;
+    }
+    items.set(key, item);
   });
   if (malformed && c) {
     c.partial = true;
     providerWarning(c, 'cinex-movie-malformed-session', 'Cinex devolvió una o más funciones de película con epoch o identificador malformado; se omitieron.');
-    providerWarningSummary(c);
   }
+  if (c) providerWarningSummary(c);
   return [...items.values()];
+}
+
+/** The same session ID with another film, date, time or room cannot drive a price or seat lookup. */
+function cinexSessionConflict(a: DataItem, b: DataItem) {
+  return a.movie_id !== b.movie_id || a.date !== b.date || a.time !== b.time || (a.screen ?? null) !== (b.screen ?? null);
 }
 
 function cinexLanguage(src?: string): string | undefined {
@@ -417,7 +432,7 @@ export function parseCinexCinemaShowtimes(html: string, movies: DataItem[], cine
       const key = `${cinemaId}:${sessionId}`;
       if (suppressed.has(key)) return;
       const previous = items.get(key);
-      if (previous && (previous.movie_id !== item.movie_id || previous.time !== item.time || previous.date !== item.date)) {
+      if (previous && cinexSessionConflict(previous, item)) {
         c.partial = true; providerWarning(c, 'cinex-cinema-conflict', () => `Cinex devolvió horarios contradictorios para la función ${warningLabel(sessionId)}; se omitió.`); items.delete(key); suppressed.add(key); return;
       }
       items.set(key, item);
