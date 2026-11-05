@@ -59,23 +59,23 @@ test('companion reads original queries but rejects mutation and credential tools
   assert.equal(r.code, 0); assert.match(r.out, /verified result/);
   const bad = await runFixture(t, 'existing', ['call', 'disconnect_account', '{}']); assert.equal(bad.code, 2);
 });
-test('served instructions direct local stale connections to continuation', () => {
-  for (const s of [hostedAuthInstructions('https://example.test'), installGuide('https://example.test')]) {
-    assert.match(s, /codex-client.mjs/); assert.match(s, /get_seats/);
+test('served instructions never ask agents to download or run code to recover a stale connection', () => {
+  for (const s of [hostedAuthInstructions, installGuide('https://example.test')]) {
+    assert.doesNotMatch(s, /codex-client|\.mjs|node RUTA|node \/path/);
+    assert.match(s, /config\/mcpServer\/reload/);
   }
+  assert.match(hostedAuthInstructions, /abrir una conversación nueva o reconectar Cinve/);
+  assert.match(installGuide('https://example.test'), /open a new conversation or reconnect Cinve/);
 });
 test('served instructions require telling the user and getting approval before running anything locally', () => {
-  const es = hostedAuthInstructions('https://example.test'), en = installGuide('https://example.test');
-  assert.match(es, /nunca ejecutes comandos ni descargues o ejecutes código en el equipo del usuario sin antes explicarle/);
-  assert.match(es, /codex mcp login cinve[^.]*ejecútalo solo con su aprobación/);
-  assert.match(es, /descárgalo o ejecútalo solo con su aprobación explícita/);
+  const es = hostedAuthInstructions, en = installGuide('https://example.test');
+  assert.match(es, /nunca ejecutes comandos en el equipo del usuario sin antes explicarle/);
+  assert.match(es, /codex mcp login cinve[^.]*ejecutarlo solo con su aprobación/);
   assert.match(en, /never run a command, or download or run code, on the user's\s+computer without first telling the user/);
-  assert.match(en, /run it only\s+after they approve/); assert.match(en, /download or\s+run it only after they explicitly approve/);
+  assert.match(en, /run it\s+only after they approve/);
   // No wording that tells the agent to proceed without the user.
   for (const s of [es, en]) assert.doesNotMatch(s, /continue automatically|NO te detengas|descarga e inspecciona/);
 });
-test('hosted guidance references the companion on the serving origin only', () => {
-  const s = hostedAuthInstructions('https://self-hosted.example');
-  assert.match(s, /https:\/\/self-hosted\.example\/codex-client\.mjs/);
-  assert.doesNotMatch(s, /vercel\.app|kevinbravo\.com/);
+test('connection guidance stays short because every client receives it with auth_required', () => {
+  assert.ok(hostedAuthInstructions.length <= 1700, String(hostedAuthInstructions.length));
 });

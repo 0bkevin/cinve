@@ -106,8 +106,7 @@ export type AccountTools = {
   connect(provider: AuthProviderId): Promise<{ url: string; expires_at: string }>;
   disconnect(provider: AuthProviderId): Promise<void>;
 };
-export function createServer(service = new CinemaService(), accounts?: AccountTools, publicHosted = false, origin = 'https://cinve.kevinbravo.com') {
-  const authGuidance = hostedAuthInstructions(origin);
+export function createServer(service = new CinemaService(), accounts?: AccountTools, publicHosted = false) {
   const server = new McpServer({ name: 'cinve', version: '0.1.0' }, {
     // Clients truncate long instructions (Claude Code keeps the first 4,096
     // characters; OpenAI asks for the essentials in the first 512), so the
@@ -190,7 +189,7 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
     const data = await service.seats(args, callOptions(ctx));
     // The ASCII map carries every label and state; the per-seat list is ~10x larger.
     if (!include_seats) delete data.seats;
-    if ((publicHosted || accounts) && data.status === 'auth_required') data.warnings = ['Conecta tu cuenta mediante connect_account y repite get_seats. ' + authGuidance];
+    if ((publicHosted || accounts) && data.status === 'auth_required') data.warnings = ['Conecta tu cuenta mediante connect_account y repite get_seats. ' + hostedAuthInstructions];
     return { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data, isError: data.status !== 'available' };
   });
   const tools: Array<[string, Operation, string]> = [
@@ -209,7 +208,7 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
     description, inputSchema: inputSchema(op), outputSchema: outputSchema(op), annotations,
   }, async (args, ctx) => {
     const data = await service.query(op, args as Query, callOptions(ctx));
-    if (publicHosted && data.status === 'auth_required') data.warnings = ['El proveedor exige una cuenta para esta consulta. Llama connect_account con este proveedor para iniciar la autorización de Cinve y obtener el enlace privado del cine. Presenta el enlace al usuario; después de conectar, comprueba get_auth_status y repite esta consulta. No busques páginas de acceso en la web ni pidas contraseñas o tokens en el chat. Los datos públicos siguen disponibles. ' + authGuidance];
+    if (publicHosted && data.status === 'auth_required') data.warnings = ['El proveedor exige una cuenta para esta consulta. Llama connect_account con este proveedor para iniciar la autorización de Cinve y obtener el enlace privado del cine. Presenta el enlace al usuario; después de conectar, comprueba get_auth_status y repite esta consulta. No busques páginas de acceso en la web ni pidas contraseñas o tokens en el chat. Los datos públicos siguen disponibles. ' + hostedAuthInstructions];
     // A provider-level failure is still a valid Result payload, but MCP clients
     // need isError to distinguish it from an empty/available business result.
     const isError = !['available', 'empty'].includes(data.status);

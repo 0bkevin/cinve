@@ -24,12 +24,11 @@ import { EncryptedSessionStore, HostedUsers, digest } from './hosted-store.js';
 import { loginPage, loginScript } from './auth-web.js';
 
 class AnonymousSessions extends SessionStore {
-  constructor(private readonly origin: string) { super(); }
   override async read(): Promise<AuthSession | undefined> { return undefined; }
   override async save(): Promise<void> { throw new Error("Anonymous sessions cannot persist credentials."); }
   override async remove(): Promise<void> { throw new Error("Anonymous sessions cannot modify credentials."); }
   override async status(p: AuthProviderId) {
-    return { ...await super.status(p), status: 'client_authorization_required', login_command: hostedAuthInstructions(this.origin) };
+    return { ...await super.status(p), status: 'client_authorization_required', login_command: hostedAuthInstructions };
   }
 }
 
@@ -150,14 +149,14 @@ export async function createHostedApp(options: {
               parsed.params && typeof parsed.params === 'object' && 'name' in parsed.params &&
               ['connect_account', 'disconnect_account'].includes(String(parsed.params.name))) {
             res.setHeader('WWW-Authenticate', oauth.challenge());
-            throw new HttpError(401, hostedAuthInstructions(origin));
+            throw new HttpError(401, hostedAuthInstructions);
           }
           // refresh bypasses the shared public cache and can fan out to many
           // provider reads (for example, Cinex venue discovery). Keep it scarce so
           // one client cannot get the shared egress address blocked upstream.
           const refreshes = refreshCalls(parsed);
           if (refreshes && !await links.budget(`refresh:${clientKey}`, 10)) throw new HttpError(429, 'Demasiadas consultas con refresh=true. Repite sin refresh o inténtalo en un minuto.');
-          const store = principal ? storeFor(principal.id) : new AnonymousSessions(origin);
+          const store = principal ? storeFor(principal.id) : new AnonymousSessions();
           const service = new HostedService(new HostedHttpClient(options.request ?? fetch, 15000, store, publicHttp), cinexCatalog);
           handler = createMcpHandler(() => createServer(service, principal ? {
             connect: async provider => {
@@ -166,7 +165,7 @@ export async function createHostedApp(options: {
               return { url: `${origin}/connect#${link.token}`, expires_at: link.expires_at };
             },
             disconnect: async provider => { await store.remove(provider); },
-          } : undefined, !principal, origin), { maxSubscriptions: 0, keepAliveMs: 0 });
+          } : undefined, !principal), { maxSubscriptions: 0, keepAliveMs: 0 });
           await toNodeHandler(handler)(req, res, parsed);
         } finally {
           await handler?.close();

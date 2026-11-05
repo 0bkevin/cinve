@@ -101,35 +101,20 @@ why, and getting their explicit approval. If they decline, do not do it; use
 the client's own connection control instead.
 
 For Codex running locally with access to the user's own installed
-configuration, offer to run \`codex mcp login cinve\` (use the actual configured
-server name if different) to authorize Cinve in their Codex, and run it only
-after they approve. Keep the process running,
-present its authorization URL as a clickable progress update, and observe
-completion instead of asking the user to type "done". Do not capture all output
-until completion or use a short timeout while waiting for human approval.
-If the user cancels or requests a new link, stop the previous attempt.
-For local Codex without an exposed native refresh action, or when CLI OAuth
-completed but this conversation remains anonymous, offer the local companion at
-${new URL('/codex-client.mjs', publicUrl).href} before asking the user to
-reconnect. Explain that you will download it into a temporary .mjs file,
-inspect it, and run \`node /path/to/cinve-codex.mjs connect cinex\` (or
-cinesunidos) to connect their cinema account; that it uses the installed Codex
-App Server and their saved OAuth configuration without reading or showing it;
-and that it runs no model turns. Offer to show its contents, and download or
-run it only after they explicitly approve. It emits the browser links
-immediately and waits for account connection. Show each emitted
-URL as a clickable progress update; keep the process running until event=ready.
-Do not read credentials, approve browser consent, or ask the user to type done.
-Cancel the process if the user cancels. No retry loop after denial or expiry.
-With that same approval, and telling the user, if native tools still use the
-old connection, continue the ORIGINAL queries via
-\`node /path/to/cinve-codex.mjs call get_ticket_prices '<JSON arguments>'\`
-(or get_concessions/get_seats/get_auth_status). Pass --server NAME before connect
-or call if the configured server has a different name. This starts a fresh tool
-connection; it does not refresh or restart the existing conversation and does
-not run model turns. Do not tell a local user to reconnect before offering
-this supported continuation; if they decline it, explain how to reconnect.
-Do not use it on an unrelated remote machine.
+configuration, you may offer to run \`codex mcp login cinve\` (use the actual
+configured server name if different) to authorize Cinve in their Codex; run it
+only after they approve. Keep the process running in a cancellable terminal,
+present its authorization URL immediately as a clickable progress update, and
+observe completion instead of asking the user to type "done". Do not capture
+all output until completion or use a short timeout while waiting for human
+approval. If the user cancels or requests a new link, stop the previous attempt.
+After login, check get_auth_status: connection.client_authorized=false means
+this conversation is still anonymous, not that the cinema login failed. Use the
+client's native connection refresh when it exposes one (Codex integrations:
+config/mcpServer/reload), then retry connect_account. Otherwise ask the user to
+open a new conversation or reconnect Cinve in their client, then repeat the
+original query. Do not repeat completed OAuth, and never download or run other
+code to work around a stale connection.
 This is assistant authorization, not a cinema password prompt. Never use
 \`npm run login\` for hosted connections. Do not make the user navigate Settings
 or run commands themselves when you can start the authorization yourself with
