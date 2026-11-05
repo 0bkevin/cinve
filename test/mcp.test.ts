@@ -10,7 +10,7 @@ import { Result } from '../src/core.js';
 import { SeatResult } from '../src/seats.js';
 import { createServer } from '../src/server.js';
 import { CinemaService } from '../src/service.js';
-import { createRemoteServer } from '../src/remote.js';
+import { createRemoteServer, upstreamCallTimeoutMs } from '../src/remote.js';
 
 test('official MCP client discovers tools, validates arguments and reads structured results over stdio', async () => {
   const client = new Client({ name: 'cinev-test', version: '1.0.0' });
@@ -171,4 +171,38 @@ test('stdio bridge follows upstream tool changes made while it runs', async t =>
   // Concurrent lists reconcile once each without registering a name twice.
   const lists = await Promise.all([client.listTools(), client.listTools(), client.listTools()]);
   assert.ok(lists.every(l => l.tools.length === 2));
+});
+
+test('stdio bridge waits for upstream calls longer than the SDK default and the hosted limit', async t => {
+  assert.ok(upstreamCallTimeoutMs > 90_000, 'the hosted deadline, not the bridge, ends a slow call');
+  const upstream = () => {
+    const s = new McpServer({ name: 'upstream-fixture', version: '1.0.0' });
+    s.registerTool('slow', { inputSchema: z.object({}) }, async () => {
+      await new Promise(resolve => setTimeout(resolve, 300));
+      return { content: [{ type: 'text', text: 'done' }] };
+    });
+    return s;
+  };
+  const handler = createMcpHandler(upstream, { maxSubscriptions: 0, keepAliveMs: 0 });
+  const http = nodeServer((req, res) => { void toNodeHandler(handler)(req, res); });
+  await new Promise<void>(resolve => http.listen(0, '127.0.0.1', resolve));
+  const address = http.address(); assert.ok(address && typeof address !== 'string');
+  const url = `http://127.0.0.1:${address.port}/mcp`;
+  const clients: Client[] = [], bridges: McpServer[] = [];
+  t.after(async () => {
+    for (const c of clients) await c.close();
+    for (const b of bridges) await b.close();
+    await handler.close(); http.closeAllConnections(); await new Promise<void>(resolve => http.close(() => resolve()));
+  });
+  const call = async (timeout?: number) => {
+    const bridge = await createRemoteServer({ url, token: 'unused' }, timeout); bridges.push(bridge);
+    const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: 'bridge-timeout-test', version: '1.0.0' }); clients.push(client);
+    await bridge.connect(serverTransport); await client.connect(clientTransport);
+    return client.callTool({ name: 'slow', arguments: {} });
+  };
+  assert.equal(((await call()).content[0] as { text: string }).text, 'done');
+  const cut = await call(100);
+  assert.equal(cut.isError, true, 'the configured timeout is what bounds the upstream call');
+  assert.match(JSON.stringify(cut.content), /timed out/i);
 });

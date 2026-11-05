@@ -26,7 +26,9 @@ export async function remoteConfig(path: string) {
     return { url: url.href, token: data.token as string };
   } finally { await file.close(); }
 }
-export async function createRemoteServer(config: { url: string; token: string }) {
+/** Longer than the hosted function's 90 s limit, so the server's own deadline answers first. */
+export const upstreamCallTimeoutMs = 95_000;
+export async function createRemoteServer(config: { url: string; token: string }, callTimeoutMs = upstreamCallTimeoutMs) {
   const client = new Client({ name: 'cinev-stdio-bridge', version: '0.1.0' });
   await client.connect(new StreamableHTTPClientTransport(new URL(config.url), { requestInit: { headers: { Authorization: `Bearer ${config.token}` }, redirect: 'error' } }));
   // Preserve the upstream usage guidance so a stdio client receives the same
@@ -56,6 +58,9 @@ export async function createRemoteServer(config: { url: string; token: string })
       { name, arguments: args as Record<string, unknown>, ...(Object.keys(meta).length ? { _meta: meta } : {}) },
       {
         signal: ctx.mcpReq.signal,
+        // The SDK's default 60 s would cut off a city-wide fan-out that the
+        // hosted server finishes in up to about 75 s (its own limit is 90 s).
+        timeout: callTimeoutMs,
         ...(progressToken === undefined ? {} : {
           onprogress: progress => {
             void ctx.mcpReq.notify({ method: 'notifications/progress', params: { ...progress, progressToken } }).catch(() => {});
