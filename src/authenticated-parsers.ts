@@ -25,13 +25,18 @@ export function parseCinesUnidosPrices(value: unknown, q: Query, url: string): D
   });
 }
 
+/** "Bs. 21.477,36", and whole amounts such as the "Bs. 0" of a membership ticket. */
 function bolivars(raw: string) {
-  const value = raw.match(/Bs\.\s*([\d.]+,\d{2})/i)?.[1];
+  const value = raw.match(/Bs\.\s*(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+(?:,\d{1,2})?)(?![\d.,])/i)?.[1];
   return value ? Number(value.replaceAll('.', '').replace(',', '.')) : undefined;
 }
+/** Cinex's own notice when a venue's online sales are switched off. */
+const salesClosed = (html: string, what: 'boletos' | 'dulceria') =>
+  new RegExp(what === 'boletos' ? 'la compra de boletos en este complejo no est[aá] disponible' : 'la venta de dulcer[ií]a web para este complejo no est[aá] disponible', 'i').test(html);
 export function parseCinexPrices(html: string, q: Query, url: string): DataItem[] {
   const $ = load(html), items: DataItem[] = [];
   if (/listado tickets no disp\.|error al obtener los boletos/i.test(html)) throw new DataError('unavailable', 'Cinex no ofrece boletos para esta función; puede haber comenzado o cerrado la venta.');
+  if (salesClosed(html, 'boletos')) throw new DataError('unavailable', 'Cinex indica que la compra de boletos en línea en esta sede no está disponible en este momento.');
   $('#frmboletos input[id^=amount]').each((_, el) => {
     const field = $(el), id = field.attr('id')!.slice('amount'.length), row = field.closest('.row'), description = row.find('.col-md-8').first();
     const name = description.find('span').first().text().trim(), amount = number(field.attr('value'));
@@ -42,9 +47,12 @@ export function parseCinexPrices(html: string, q: Query, url: string): DataItem[
     if (!name || amount === undefined || amount < 0 || base === undefined || fees === undefined || Math.abs(base + fees - amount) > 0.025) {
       throw new DataError('error', 'Cambió la estructura o la suma de tarifas Cinex.');
     }
+    // Account perks ("1 entrada gratis VIP al mes") carry their remaining quota.
+    const quota = lines.map(s => s.match(/Total disponible:\s*(\d+)/i)?.[1]).find(Boolean);
     items.push({ kind: 'ticket_price', id, name, cinema_id: q.cinema_id, session_id: q.session_id,
       prices: [{ currency: 'VES', amount, basis: 'provider' }], final_total_verified: false,
-      price_components: [{ name: 'Boleto', currency: 'VES', amount: base }, { name: 'Otros cargos', currency: 'VES', amount: fees }], url });
+      price_components: [{ name: 'Boleto', currency: 'VES', amount: base }, { name: 'Otros cargos', currency: 'VES', amount: fees }], url,
+      ...(quota !== undefined ? { redemption_only: true, tickets_available: Number(quota) } : {}) });
   });
   if (!items.length) throw new DataError('unavailable', 'Cinex no devolvió una estructura de tarifas reconocida.');
   return items;
@@ -52,6 +60,7 @@ export function parseCinexPrices(html: string, q: Query, url: string): DataItem[
 
 export function parseCinexConcessions(html: string, q: Query, url: string): DataItem[] {
   const $ = load(html), items: DataItem[] = [];
+  if (salesClosed(html, 'dulceria')) throw new DataError('unavailable', 'Cinex indica que la venta de caramelería en línea en esta sede no está disponible en este momento.');
   $('#frmconcesiones .itemstyle').each((_, el) => {
     const card = $(el), id = card.attr('id')?.match(/^item(\d+)$/)?.[1];
     if (!id) return;

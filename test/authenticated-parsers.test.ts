@@ -29,3 +29,21 @@ test('CU uses UI price fields, preserves restrictions and checks cinema/session/
   assert.ok(!JSON.stringify(items).includes('PRIVATE_PROFILE'));
   for (const change of [{ cinema_id: '1005' }, { session_id: 'other' }, { movie_id: 'other' }]) assert.throws(() => parseCinesUnidosPrices(value, { ...query, ...change }, url));
 });
+
+// Markup as cinex.com.ve's boletos page sent it on 2026-11-05 for a VIP room,
+// to an account with a Cinexclusivo perk (one free VIP ticket a month).
+const cinexRow = (id: string, name: string, base: string, fees: string, amount: string, extra = '', klass = 'row') =>
+  `<div class="${klass}"><div class="col-md-8"><p><span style="color:black; font-size:18px;"><img src="" class="seatimgclass">${name}</span><br>Precio Boleto: ${base} <br>Otros Cargos: ${fees}${extra}</p> </div> <div class="col-md-4"><input type="hidden" name="amount${id}" id="amount${id}" value="${amount}" disabled></div></div>`;
+test('Cinex VIP prices keep membership tickets, and closed online sales are reported as Cinex words them', () => {
+  const q = { provider: 'cinex' as const, cinema_id: 'PCV', session_id: '2097' };
+  const html = `<form id="frmboletos">${cinexRow('0130', 'Adulto VIP', 'Bs. 894,89', 'Bs. 21.477,36', '22372.25')}${cinexRow('0163', '1 entrada gratis VIP al mes (Expires 30/11/2026)', 'Bs. 0,00', 'Bs. 0', '0', '<br>Total disponible: 1', 'row beneficiocinexclusivo')}</form>`;
+  const items = parseCinexPrices(html, q, 'https://www.cinex.com.ve/boletos.php');
+  assert.deepEqual(items.map(i => [i.name, i.prices?.[0].amount, i.price_components?.map(c => c.amount), i.redemption_only, i.tickets_available]), [
+    ['Adulto VIP', 22372.25, [894.89, 21477.36], undefined, undefined],
+    ['1 entrada gratis VIP al mes (Expires 30/11/2026)', 0, [0, 0], true, 1],
+  ]);
+  // A sum that does not add up still stops the read.
+  assert.throws(() => parseCinexPrices(`<form id="frmboletos">${cinexRow('1', 'X', 'Bs. 1,00', 'Bs. 1,00', '5')}</form>`, q, 'https://www.cinex.com.ve/boletos.php'), /suma de tarifas/);
+  assert.throws(() => parseCinexPrices('<div>Disculpe, la compra de boletos en este complejo no esta disponible en este momento.</div>', q, 'https://www.cinex.com.ve/boletos.php'), /compra de boletos en línea en esta sede no está disponible/);
+  assert.throws(() => parseCinexConcessions('<div>Disculpe, la venta de dulceria web para este complejo no esta disponible en este momento.</div>', q, 'https://www.cinex.com.ve/concesiones.php'), /venta de caramelería en línea en esta sede no está disponible/);
+});
