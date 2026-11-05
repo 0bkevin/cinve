@@ -78,16 +78,25 @@ El método de registro preferido es el *Client ID Metadata Document*: el
 URL), `client_name` y `redirect_uris`. Los metadatos del servidor lo anuncian con
 `client_id_metadata_document_supported: true`. Al autorizar, Cinve:
 
-- acepta solo URL HTTPS con ruta, sin puerto, credenciales, fragmento,
-  segmentos `.`/`..` ni IP literal;
-- resuelve el dominio y se conecta únicamente a la dirección comprobada,
-  rechazando loopback, redes privadas, link-local, CGNAT, documentación y
-  multidifusión, para evitar SSRF y DNS rebinding;
-- no sigue redirecciones, exige `application/json`, lee como máximo 16 KiB y
-  abandona a los 5 s;
+- acepta solo URL HTTPS con ruta, sin credenciales, fragmento (ni vacío) ni
+  segmentos `.`/`..` (tampoco codificados), y compara el `client_id` como cadena
+  exacta. Por decisión propia, más estricta que el borrador, tampoco admite IP
+  literales ni puertos distintos de 443;
+- resuelve el dominio y se conecta únicamente a una dirección comprobada, sin
+  segunda resolución, para evitar SSRF y DNS rebinding. Solo admite unicast
+  global, decidido sobre los bytes de la dirección: en IPv4 rechaza los rangos
+  de uso especial (privadas, loopback, link-local, CGNAT, documentación,
+  multidifusión, reservadas); en IPv6 solo admite `2000::/3` sin documentación,
+  asignaciones de protocolo del IETF ni 6to4. Una IPv4 mapeada (`::ffff:a.b.c.d`)
+  se juzga como su IPv4, y cualquier otra IPv4 incrustada se rechaza;
+- no sigue redirecciones, exige `application/json`, lee como máximo 16 KiB,
+  corta de inmediato una respuesta rechazada sin leer su cuerpo y abandona a
+  los 5 s;
 - exige que el documento coincida con su URL, que sea un cliente público
-  (`token_endpoint_auth_method: none`, sin secreto) y que la redirección
-  solicitada figure en `redirect_uris`;
+  (`token_endpoint_auth_method` y `token_endpoint_auth_methods_supported`
+  coherentes con `none`), que no incluya secretos ni claves privadas o
+  simétricas (ni `jwks` junto a `jwks_uri`) y que la redirección solicitada
+  figure en `redirect_uris`;
 - guarda en caché los documentos válidos según `max-age`, entre 1 minuto y
   24 horas (5 minutos por defecto), con un cupo de 20 lecturas por minuto e IP;
 - muestra en la aprobación el dominio que publica el documento, porque el nombre

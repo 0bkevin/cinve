@@ -6,17 +6,21 @@ const url = 'https://assistant.example/oauth/client.json';
 const doc = { client_id: url, client_name: 'Assistant', redirect_uris: ['https://assistant.example/callback'], token_endpoint_auth_method: 'none' };
 
 test('client_id URLs must be plain https URLs with a path', () => {
-  for (const ok of [url, 'https://a.example/c', 'https://a.example/client?v=1']) assert.ok(isClientIdUrl(ok), ok);
+  // The raw identifier is kept for exact comparison, so forms the URL parser would normalize are accepted.
+  for (const ok of [url, 'https://a.example/c', 'https://a.example/client?v=1', 'https://A.example/c', 'https://a.example:443/c']) assert.ok(isClientIdUrl(ok), ok);
   for (const bad of ['http://a.example/c', 'https://a.example', 'https://a.example/', 'https://a.example:8443/c', 'https://u:p@a.example/c',
-    'https://a.example/c#x', 'https://a.example/a/../c', 'https://127.0.0.1/c', 'https://[::1]/c', 'cvapp_x', 'https://A.example/c'])
+    'https://a.example/c#x', 'https://a.example/c#', 'https://a.example/a/../c', 'https://a.example/a/%2E%2E/c', 'https://a.example/./c',
+    'https://127.0.0.1/c', 'https://0x7f.1/c', 'https://[::1]/c', 'https://a.example/c d', 'cvapp_x'])
     assert.equal(isClientIdUrl(bad), false, bad);
 });
 
 test('metadata fetches refuse non-public addresses', () => {
-  for (const blocked of ['127.0.0.1', '10.1.2.3', '172.16.0.1', '192.168.1.1', '169.254.169.254', '100.64.0.1', '0.0.0.0', '224.0.0.1',
-    '::1', '::', 'fe80::1', 'fd00::1', '::ffff:127.0.0.1', '2001:db8::1', 'not-an-ip']) assert.ok(isBlockedAddress(blocked), blocked);
-  for (const ok of ['93.184.216.34', '1.1.1.1', '2606:4700:4700::1111', '::ffff:1.1.1.1']) assert.equal(isBlockedAddress(ok), false, ok);
-  assert.ok(isBlockedAddress('::ffff:7f00:1'), 'hex-form mapped addresses are refused');
+  for (const blocked of ['127.0.0.1', '10.1.2.3', '172.16.0.1', '192.168.1.1', '169.254.169.254', '100.64.0.1', '0.0.0.0', '224.0.0.1', '255.255.255.255',
+    '::1', '::', 'fe80::1', 'fec0::1', 'fd00::1', 'ff02::1', '100:0:0:1::1', '5f00::1', '3fff::1', '2001:db8::1', '2001::1', '2002:c0a8::1',
+    '::ffff:127.0.0.1', '::ffff:7f00:1', '0:0:0:0:0:ffff:7f00:1', '::127.0.0.1', '::ffff:0:7f00:1', '0:0:0:0:ffff:0:7f00:1', '64:ff9b::1.1.1.1', 'not-an-ip'])
+    assert.ok(isBlockedAddress(blocked), blocked);
+  for (const ok of ['93.184.216.34', '1.1.1.1', '2606:4700:4700::1111', '2001:4860:4860::8888', '::ffff:1.1.1.1', '::ffff:101:101'])
+    assert.equal(isBlockedAddress(ok), false, ok);
 });
 
 test('a host that resolves to loopback is refused before any connection', async () => {

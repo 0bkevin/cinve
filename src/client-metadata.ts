@@ -1,7 +1,7 @@
 import { lookup } from 'node:dns';
 import type { LookupAddress } from 'node:dns';
 import { request } from 'node:https';
-import { BlockList, isIP } from 'node:net';
+import { isIP } from 'node:net';
 import * as z from 'zod';
 
 /**
@@ -26,39 +26,88 @@ import * as z from 'zod';
 export const metadataDocumentLimitBytes = 16 * 1024;
 const metadataTimeoutMs = 5000;
 
+/**
+ * Structural checks on the raw identifier, which stays the exact string used
+ * for comparisons (the draft requires simple string comparison). The WHATWG
+ * parser is used only to read components: it would silently drop an empty
+ * fragment, a default port or dot segments, so those are checked on the raw
+ * text. Deliberate restrictions beyond the draft: no IP-literal host and no
+ * port other than 443, so a document can only come from a named HTTPS site.
+ */
 export function isClientIdUrl(value: string): boolean {
-  if (value.length > 2048 || !value.startsWith('https://')) return false;
+  if (value.length > 2048 || !/^https:\/\//i.test(value) || /[#\\\s\u0000-\u001f\u007f]/.test(value)) return false;
+  const raw = value.match(/^https:\/\/([^/?]+)(\/[^?]*)(?:\?.*)?$/i);
+  if (!raw) return false;
+  const [, authority, path] = raw;
+  if (authority.includes('@')) return false;
+  if (path.split('/').some(segment => ['.', '..'].includes(segment.toLowerCase().replace(/%2e/g, '.')))) return false;
+  if (path === '/') return false;
   try {
     const u = new URL(value);
-    if (u.protocol !== 'https:' || u.username || u.password || u.hash || u.port || u.href !== value) return false;
-    if (isIP(u.hostname.replace(/^\[|\]$/g, ''))) return false;
-    if (u.pathname === '/' || u.pathname.split('/').some(segment => segment === '.' || segment === '..')) return false;
+    if (u.protocol !== 'https:' || u.username || u.password || (u.port && u.port !== '443')) return false;
+    if (isIP(u.hostname.replace(/^\[|\]$/g, '')) || /^[\d.]+$/.test(u.hostname)) return false;
     return true;
   } catch { return false; }
 }
 
-const blocked = new BlockList();
-for (const [network, prefix] of [
-  ['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8], ['169.254.0.0', 16], ['172.16.0.0', 12],
-  ['192.0.0.0', 24], ['192.0.2.0', 24], ['192.88.99.0', 24], ['192.168.0.0', 16], ['198.18.0.0', 15],
-  ['198.51.100.0', 24], ['203.0.113.0', 24], ['224.0.0.0', 4], ['240.0.0.0', 4],
-] as const) blocked.addSubnet(network, prefix, 'ipv4');
-for (const [network, prefix] of [
-  ['::', 128], ['::1', 128], ['64:ff9b::', 96], ['64:ff9b:1::', 48], ['100::', 64],
-  ['2001::', 23], ['2001:db8::', 32], ['2002::', 16], ['fc00::', 7], ['fe80::', 10], ['ff00::', 8],
-] as const) blocked.addSubnet(network, prefix, 'ipv6');
-
-/** True for addresses a metadata fetch must never reach. */
-export function isBlockedAddress(address: string): boolean {
+/** IPv4 or IPv6 text to its address bytes; undefined when it is not an address. */
+function addressBytes(address: string): number[] | undefined {
   const family = isIP(address);
-  if (!family) return true;
-  // An IPv4-mapped IPv6 address (::ffff:a.b.c.d) reaches its IPv4 address, so
-  // judge it as that address. (A ::ffff:0:0/96 rule cannot be used instead:
-  // Node's BlockList also matches every plain IPv4 address against it.)
-  const mapped = family === 6 ? address.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i)?.[1] : undefined;
-  if (mapped) return isBlockedAddress(mapped);
-  if (family === 6 && /^::ffff:/i.test(address)) return true;
-  return blocked.check(address, family === 4 ? 'ipv4' : 'ipv6');
+  if (family === 4) return address.split('.').map(Number);
+  if (family !== 6) return undefined;
+  let text = address.toLowerCase();
+  const tail: number[] = [];
+  const v4 = text.match(/(\d{1,3}(?:\.\d{1,3}){3})$/);
+  if (v4) {
+    tail.push(...v4[1].split('.').map(Number));
+    text = text.slice(0, -v4[1].length) + '0:0';
+  }
+  const [head, rest] = text.includes('::') ? text.split('::') : [text, undefined];
+  const left = head ? head.split(':') : [], right = rest ? rest.split(':') : [];
+  const groups = rest === undefined ? left : [...left, ...Array(8 - left.length - right.length).fill('0'), ...right];
+  const bytes = groups.flatMap(g => { const n = parseInt(g || '0', 16); return [n >> 8, n & 0xff]; });
+  if (tail.length) bytes.splice(12, 4, ...tail);
+  return bytes;
+}
+
+type Range = readonly [prefix: readonly number[], bits: number];
+const inRange = (bytes: readonly number[], [prefix, bits]: Range) => {
+  for (let i = 0; i < bits; i++) {
+    const mask = 0x80 >> (i % 8);
+    if ((bytes[i >> 3] & mask) !== (prefix[i >> 3] & mask)) return false;
+  }
+  return true;
+};
+// IPv4 ranges that are not globally reachable unicast (IANA special-purpose
+// registry): this network, private, CGNAT, loopback, link-local, IETF
+// protocol assignments, documentation, 6to4 relay, benchmarking, multicast,
+// reserved and limited broadcast.
+const blockedV4: readonly Range[] = [
+  [[0], 8], [[10], 8], [[100, 64], 10], [[127], 8], [[169, 254], 16], [[172, 16], 12], [[192, 0, 0], 24], [[192, 0, 2], 24],
+  [[192, 88, 99], 24], [[192, 168], 16], [[198, 18], 15], [[198, 51, 100], 24], [[203, 0, 113], 24], [[224], 4], [[240], 4],
+];
+// Within global unicast 2000::/3, ranges that are not public destinations:
+// IETF protocol assignments (incl. Teredo, ORCHID), documentation (2001:db8::/32
+// and 3fff::/20) and 6to4, whose embedded IPv4 address could be private.
+const blockedV6: readonly Range[] = [
+  [[0x20, 0x01, 0x00, 0x00], 23], [[0x20, 0x01, 0x0d, 0xb8], 32], [[0x20, 0x02], 16], [[0x3f, 0xff], 20],
+];
+
+/**
+ * True unless the address is globally reachable unicast. Decided on address
+ * bytes, so every textual form of one address gets the same answer. IPv6 is
+ * an allowlist of 2000::/3; an IPv4-mapped address (::ffff:0:0/96) is judged
+ * as its IPv4 address, and every other embedding (IPv4-compatible,
+ * translated, NAT64) is refused.
+ */
+export function isBlockedAddress(address: string): boolean {
+  const bytes = addressBytes(address);
+  if (!bytes) return true;
+  if (bytes.length === 4) return blockedV4.some(range => inRange(bytes, range));
+  const mapped = bytes.slice(0, 10).every(b => b === 0) && bytes[10] === 0xff && bytes[11] === 0xff;
+  if (mapped) return blockedV4.some(range => inRange(bytes.slice(12), range));
+  if ((bytes[0] & 0xe0) !== 0x20) return true;
+  return blockedV6.some(range => inRange(bytes, range));
 }
 
 type LookupCallback = (error: NodeJS.ErrnoException | null, address: string | LookupAddress[], family?: number) => void;
@@ -85,7 +134,8 @@ export const fetchClientMetadataDocument: ClientMetadataFetcher = url => new Pro
   }, res => {
     const type = res.headers['content-type']?.split(';')[0].trim().toLowerCase();
     if (res.statusCode !== 200 || type !== 'application/json') {
-      res.resume(); reject(new Error(`Client metadata request failed (${res.statusCode}).`)); return;
+      // Do not drain a rejected body: it is not bounded by the size limit.
+      reject(new Error(`Client metadata request failed (${res.statusCode}).`)); req.destroy(); return;
     }
     const chunks: Buffer[] = []; let size = 0;
     res.on('data', (chunk: Buffer) => {
