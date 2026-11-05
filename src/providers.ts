@@ -73,6 +73,15 @@ function movieCP(r: Obj, site: string): DataItem {
     duration_minutes: number(r.peliculas_duracion), genre: text(r.peliculas_genero), rating: text(r.peliculas_clasificacion),
     format: text(r.peliculas_tipo), image_url: text(r.imagen), url: `${site}/es-AR/programacion/${encodeURIComponent(text(r.peliculas_codigo))}` };
 }
+/**
+ * Tickets the purchase page still offers with a tariff, as its own JS counts
+ * them: cupo (tot) minus sold (vend) minus held in open checkouts (temp).
+ */
+export function cinepicTicketsLeft(tariff: Record<string, unknown>): number | undefined {
+  const [tot, vend, temp] = [tariff.tot, tariff.vend, tariff.temp].map(v => /^\d+$/.test(text(v)) ? Number(text(v)) : NaN);
+  return [tot, vend, temp].every(Number.isFinite) ? Math.max(0, tot - vend - temp) : undefined;
+}
+
 export async function cpBuy(q: Query, c: ReadContext) {
   const site = cpSite(q);
   const url = `${site.host}/es-AR/compra?${new URLSearchParams({ cid: requireArg(q, 'cinema_id'), fid: requireArg(q, 'session_id'), pid: requireArg(q, 'movie_id') })}`;
@@ -140,7 +149,7 @@ export async function cinepic(op: Operation, q: Query, c: ReadContext): Promise<
       if (rate !== undefined && rate > 0) prices.push({ currency: 'USD', amount: Number((amount / rate).toFixed(2)), basis: 'provider_conversion' });
       return { kind: 'ticket_price', id: requiredText(r, '_id'), name: requiredText(r, 'descripcion'),
         cinema_id: q.cinema_id, movie_id: q.movie_id, session_id: q.session_id, url,
-        prices, provider_currency: text(cfg.moneda), provider_conversion_rate: rate, final_total_verified: false };
+        prices, provider_currency: text(cfg.moneda), provider_conversion_rate: rate, final_total_verified: false, tickets_available: cinepicTicketsLeft(r) };
     });
   }
   const site = cpSite(q), date = isoDate(q);

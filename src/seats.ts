@@ -4,7 +4,7 @@ import { DataError, Id, Provider, Source, Status, requireArg, text } from './cor
 import type { Query } from './core.js';
 import { HttpClient, ReadContext } from './http.js';
 import type { CallOptions } from './http.js';
-import { cinepicVenueName, cpBuy } from './providers.js';
+import { cinepicTicketsLeft, cinepicVenueName, cpBuy } from './providers.js';
 import { findField, object, rows } from './parsers.js';
 
 // Unicode property escapes (\p{L}) are invalid in Python's re and RE2, and
@@ -101,11 +101,23 @@ function validateSeats(seats: SeatData[]): SeatData[] {
   return result;
 }
 
-export function parseCinepicSeats(data: unknown): SeatData[] {
+/**
+ * Seat types the function's tariffs can book. Cinepic's purchase JS (2026-11-05)
+ * matches a tariff's id against tipo_butaca_id: a free seat of another type is
+ * drawn "no disponible", and a tariff without id books any free seat.
+ */
+export function cinepicBookableTypes(tariffs: unknown): Set<string> | 'all' {
+  const list = Array.isArray(tariffs) ? tariffs.map(object) : [];
+  if (!list.length || list.some(t => !text(t.id))) return 'all';
+  return new Set(list.map(t => String(Number(text(t.id)))));
+}
+
+export function parseCinepicSeats(data: unknown, bookable: Set<string> | 'all' = 'all'): SeatData[] {
   return validateSeats(rows(object(data).butacas, 'butacas').map(s => ({
     id: text(s.butaca), label: text(s.nombre_butaca), row: text(s.nombre_butaca).split(':')[0], area: 'Sala',
     row_index: Number(s.fila) - 1, column_index: Number(s.columna) - 1,
-    status: text(s.libre) === '1' ? 'available' : text(s.libre) === '0' ? 'occupied' : 'unknown',
+    status: text(s.libre) === '1' ? (bookable === 'all' || bookable.has(String(Number(text(s.tipo_butaca_id)))) ? 'available' : 'unavailable')
+      : text(s.libre) === '0' ? 'occupied' : 'unknown',
     provider_status: text(s.libre), category: text(s.tipo_butaca_id),
   })));
 }
@@ -207,13 +219,18 @@ export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions)
     if (q.provider === 'cinepic') {
       const { records, f } = await cpBuy(q, c);
       const map = findField(records, 'butacasData');
-      result.seats = parseCinepicSeats(map);
+      const bookable = cinepicBookableTypes(f.tarifas);
+      result.seats = parseCinepicSeats(map, bookable);
+      const special = result.seats.filter(s => s.status === 'unavailable').length;
+      if (special) c.warnings.push(`${special} butacas libres de un tipo especial no se venden con las tarifas de esta función; la web de Cinepic las muestra no disponibles.`);
       result.layout = seatLayout('cinepic', map);
       const fn = rows(f.datos, 'datos')[0], at = text(fn?.fecha).match(/ - (\d{2}):(\d{2})hs$/);
       result.showing = showing({ movie: clean(fn?.pelicula, 200), cinema_name: cinepicVenueName(result.cinema_id), screen: clean(fn?.sala, 60),
         date: /^\d{4}-\d{2}-\d{2}$/.test(text(fn?.fechaDate)) ? text(fn?.fechaDate) : undefined, time: at ? `${at[1]}:${at[2]}` : undefined });
-      const count = Number(fn?.entradasDisponibles);
-      if (Number.isFinite(count) && count !== result.seats.filter(s => s.status === 'available').length) c.warnings.push('El contador de entradas del proveedor difiere del mapa; se conserva el estado de cada butaca, sin prometer cupos de venta.');
+      // The page sells a cupo per tariff, often below the free seats; report it as the page shows it.
+      const free = result.seats.filter(s => s.status === 'available').length;
+      const left = rows(f.tarifas, 'functionData.tarifas').map(t => [clean(t.descripcion, 60), cinepicTicketsLeft(t)] as const).filter(([name, n]) => name && n !== undefined);
+      if (left.some(([, n]) => n! < free)) c.warnings.push(`La web de Cinepic ofrece en línea ${left.map(([name, n]) => `${n} entradas ${name}`).join(', ')}; puede vender menos entradas que las ${free} butacas libres del mapa.`);
       c.warnings.push('La disponibilidad de Cinepic depende también del tipo de entrada elegido. El campo seleccionada del proveedor no indica una reserva del usuario.');
     } else if (q.provider === 'cinesunidos') {
       const url = `https://www.cinesunidos.com/api/seats?${new URLSearchParams({ theaterId: result.cinema_id, showTimeId: result.session_id })}`;

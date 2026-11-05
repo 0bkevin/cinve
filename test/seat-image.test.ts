@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
 import { Client } from '@modelcontextprotocol/client';
-import { parseCinepicSeats, parseCinexShowing, renderSeats, seatLayout } from '../src/seats.js';
+import { cinepicBookableTypes, parseCinepicSeats, parseCinexShowing, renderSeats, seatLayout } from '../src/seats.js';
+import { cinepicTicketsLeft } from '../src/providers.js';
 import { renderSeatMapPng, renderSeatMapSvg, seatNumber } from '../src/seat-image.js';
 import { CinemaService } from '../src/service.js';
 import { HttpClient } from '../src/http.js';
@@ -113,4 +114,31 @@ test('the image header shows the film, venue, room and time, and fits long title
   const long = renderSeatMapSvg(seats, layout, { ...header, movie: 'UNA PELÍCULA '.repeat(10) });
   assert.match(long, /…<\/text>/); assert.doesNotMatch(long, /(UNA PELÍCULA ){10}/);
   assert.match(renderSeatMapSvg(seats, layout, header), />Mapa de asientos</);
+});
+
+// Candelaria Sala 04 on 2026-11-05: both tariffs carry id "1", so its 11 free
+// seats of types 8 and 9 are drawn "no disponible", and the page offers a cupo
+// of tot - vend - temp tickets per tariff (lowered here below the free seats).
+test('Cinepic seats and ticket counters follow the purchase page', async t => {
+  const seat = (columna: string, tipo: string, libre = '1') => ({ butaca: `A-${columna}-1`, nombre_butaca: `A:${columna}`, fila: '1', columna, libre, seleccionada: '1', tipo_butaca_id: tipo, invertida: '0' });
+  const tarifas = [{ _id: '2', id: '1', descripcion: 'COMPLETO', precio: '4474.4', tot: '150', vend: '2', temp: '2' }, { _id: '5', id: '1', descripcion: 'NIÑOS', precio: '2237.2', tot: '150', vend: '2', temp: '2' }];
+  const butacas = { butacas: [seat('1', '1'), seat('2', '8'), seat('3', '9'), seat('4', '1', '0'), ...Array.from({ length: 300 }, (_, i) => seat(String(i + 5), '1'))].slice(0, 199) };
+  assert.deepEqual(parseCinepicSeats(butacas, cinepicBookableTypes(tarifas)).slice(0, 4).map(s => s.status), ['available', 'unavailable', 'unavailable', 'occupied']);
+  assert.equal(cinepicBookableTypes([{ ...tarifas[0], id: '' }]), 'all', 'a tariff without id books any free seat');
+  assert.equal(cinepicBookableTypes([]), 'all');
+  assert.equal(cinepicTicketsLeft(tarifas[0]), 146); assert.equal(cinepicTicketsLeft({ tot: '5' }), undefined);
+  const body = page({ ...cpBuy, butacasData: butacas, functionData: { datos: [{ id: 'f1', codigo: 'p1' }], tarifas } });
+  const server = createServer(new CinemaService(new HttpClient(async () => new Response(body), 15000, new EmptySessionStore())));
+  const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: 'cinepic-test', version: '1.0.0' });
+  await server.connect(serverTransport); await client.connect(clientTransport);
+  t.after(async () => { await client.close(); await server.close(); });
+  const args = { provider: 'cinepic', cinema_id: '123300', session_id: 'f1', movie_id: 'p1', image: 'none' };
+  const seats = SeatResult.parse((await client.callTool({ name: 'get_seats', arguments: args })).structuredContent);
+  assert.deepEqual([seats.available, seats.unavailable, seats.occupied], [196, 2, 1]);
+  assert.match(seats.warnings.join(' '), /2 butacas libres de un tipo especial/);
+  assert.match(seats.warnings.join(' '), /ofrece en línea 146 entradas COMPLETO, 146 entradas NIÑOS; puede vender menos entradas que las 196 butacas libres/);
+  const { image: _, ...priceArgs } = args;
+  const prices = (await client.callTool({ name: 'get_ticket_prices', arguments: priceArgs })).structuredContent as { items: { name: string; tickets_available?: number }[] };
+  assert.deepEqual(prices.items.map(i => [i.name, i.tickets_available]), [['COMPLETO', 146], ['NIÑOS', 146]]);
 });

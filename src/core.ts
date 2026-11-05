@@ -41,6 +41,7 @@ export const Item = z.object({
   final_total_verified: z.boolean().optional(),
   price_components: z.array(z.object({ name: z.string(), currency: z.enum(['USD', 'VES']), amount: z.number().nonnegative() })).optional(),
   redemption_only: z.boolean().optional(), child_only: z.boolean().optional(), sales_allowed: z.boolean().optional(), area_category_code: z.string().optional(),
+  tickets_available: z.number().int().nonnegative().optional().describe('Entradas que la web del proveedor aún ofrece en línea con esta tarifa (Cinepic: cupo menos vendidas y retenidas en compras en curso). Puede ser menor que las butacas libres.'),
   options_required: z.boolean().optional(),
   capabilities: z.record(z.string(), z.string()).optional(),
 });
@@ -87,7 +88,7 @@ const operationItemSchemas = {
     provider_conversion_rate: true, final_total_verified: true,
     price_components: true, redemption_only: true, child_only: true,
     sales_allowed: true, area_category_code: true, screen: true,
-    format: true, language: true, url: true,
+    format: true, language: true, url: true, tickets_available: true,
   }).extend({
     kind: z.literal('ticket_price'),
     id: Item.shape.id.describe('Identificador del tipo de tarifa.'),

@@ -98,6 +98,14 @@ se obtuvo un mapa, no que todas sus butacas estén libres. Si `unknown` es mayor
 que cero, el mapa es parcial; cero asientos libres confirmados no significa que
 la función esté agotada.
 
+En Cinepic, una butaca libre solo cuenta como `available` si alguna tarifa de la
+función puede venderla: su web compara el `id` de la tarifa con el tipo de
+butaca y muestra las demás como no disponibles (en Candelaria, las butacas
+especiales de la fila A y algunas de las filas I y J). Su web vende además un
+cupo por tarifa, a menudo menor que las butacas libres; `get_ticket_prices` lo
+devuelve como `tickets_available` (cupo menos vendidas y retenidas en compras en
+curso) y `get_seats` lo advierte cuando es menor.
+
 `layout` indica cómo se orientan el mapa ASCII y la imagen, igual que en la web
 de cada cine (comprobado en su código el 5 de noviembre de 2026):
 
