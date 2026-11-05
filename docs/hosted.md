@@ -112,7 +112,8 @@ URL), `client_name` y `redirect_uris`. Los metadatos del servidor lo anuncian co
   simétricas (ni `jwks` junto a `jwks_uri`) y que la redirección solicitada
   figure en `redirect_uris`;
 - guarda en caché los documentos válidos según `max-age`, entre 1 minuto y
-  24 horas (5 minutos por defecto), con un cupo de 20 lecturas por minuto e IP;
+  24 horas (5 minutos por defecto), sin reutilizar los marcados `no-store`,
+  `no-cache` o `max-age=0`, y con un cupo de 20 lecturas por minuto e IP;
 - muestra en la aprobación el dominio que publica el documento, porque el nombre
   lo declara el propio cliente.
 

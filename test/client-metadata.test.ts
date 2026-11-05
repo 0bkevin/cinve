@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ClientMetadataCache, fetchClientMetadataDocument, isBlockedAddress, isClientIdUrl, validateClientMetadata } from '../src/client-metadata.js';
+import { ClientMetadataCache, cacheDirectives, fetchClientMetadataDocument, isBlockedAddress, isClientIdUrl, validateClientMetadata } from '../src/client-metadata.js';
 
 const url = 'https://assistant.example/oauth/client.json';
 const doc = { client_id: url, client_name: 'Assistant', redirect_uris: ['https://assistant.example/callback'], token_endpoint_auth_method: 'none' };
@@ -52,4 +52,16 @@ test('validated documents are cached within the max-age bounds', async t => {
   t.mock.timers.tick(2_000); await cache.get(url); assert.equal(fetches, 2);
   const failing = new ClientMetadataCache(async () => ({ document: { ...doc, client_id: 'https://evil.example/c' } }));
   await assert.rejects(failing.get(url)); await assert.rejects(failing.get(url), 'invalid documents are not cached');
+});
+
+test('documents that forbid reuse are fetched again on every lookup', async () => {
+  let fetches = 0;
+  const cache = new ClientMetadataCache(async () => { fetches++; return { document: doc, noStore: true }; });
+  await cache.get(url); await cache.get(url);
+  assert.equal(fetches, 2);
+  assert.deepEqual(cacheDirectives('public, max-age=600'), { maxAgeSeconds: 600, noStore: false });
+  for (const control of ['no-store', 'private, no-cache', 'max-age=0', 'No-Store, max-age=600'])
+    assert.equal(cacheDirectives(control).noStore, true, control);
+  assert.deepEqual(cacheDirectives(undefined), { noStore: false });
+  assert.equal(cacheDirectives('no-cache="set-cookie"').noStore, false, 'a field-scoped no-cache does not forbid reuse of the body');
 });

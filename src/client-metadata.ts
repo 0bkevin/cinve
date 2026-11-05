@@ -123,9 +123,16 @@ function checkedLookup(hostname: string, options: { all?: boolean }, callback: L
   });
 }
 
-export type FetchedDocument = { document: unknown; maxAgeSeconds?: number };
+/** `noStore`: the response forbids reuse (no-store, no-cache or max-age=0). */
+export type FetchedDocument = { document: unknown; maxAgeSeconds?: number; noStore?: boolean };
 export type ClientMetadataFetcher = (url: string) => Promise<FetchedDocument>;
 
+/** The Cache-Control directives the metadata cache honours. */
+export function cacheDirectives(control = ''): Pick<FetchedDocument, 'maxAgeSeconds' | 'noStore'> {
+  const maxAge = control.match(/(?:^|,)\s*max-age=(\d+)\s*(?:,|$)/i)?.[1];
+  const noStore = /(?:^|,)\s*(?:no-store|no-cache)\s*(?:,|$)/i.test(control) || maxAge === '0';
+  return { ...(maxAge === undefined ? {} : { maxAgeSeconds: Number(maxAge) }), noStore };
+}
 export const fetchClientMetadataDocument: ClientMetadataFetcher = url => new Promise((resolve, reject) => {
   if (!isClientIdUrl(url)) { reject(new Error('Invalid client_id URL.')); return; }
   const req = request(url, {
@@ -145,8 +152,7 @@ export const fetchClientMetadataDocument: ClientMetadataFetcher = url => new Pro
     });
     res.on('end', () => {
       try {
-        const maxAge = res.headers['cache-control']?.match(/(?:^|,)\s*max-age=(\d+)/i)?.[1];
-        resolve({ document: JSON.parse(Buffer.concat(chunks).toString('utf8')), maxAgeSeconds: maxAge === undefined ? undefined : Number(maxAge) });
+        resolve({ document: JSON.parse(Buffer.concat(chunks).toString('utf8')), ...cacheDirectives(res.headers['cache-control']) });
       } catch { reject(new Error('Client metadata document is not JSON.')); }
     });
     res.on('error', reject);
@@ -203,7 +209,12 @@ export function validateClientMetadata(url: string, document: unknown): ClientMe
   return { client_id: url, client_name: d.client_name ?? new URL(url).hostname, redirect_uris: d.redirect_uris };
 }
 
-/** Bounded cache of validated documents, honouring max-age within 1 min to 24 h (default 5 min). */
+/**
+ * Bounded cache of validated documents, honouring max-age within 1 min to 24 h
+ * (default 5 min). A document marked no-store, no-cache or max-age=0 is not
+ * reused, so a client that rotates its redirect URIs is followed at once;
+ * fetches stay bounded by the per-address metadata budget.
+ */
 export class ClientMetadataCache {
   private entries = new Map<string, { metadata: ClientMetadata; expires: number }>();
   constructor(private readonly fetcher: ClientMetadataFetcher = fetchClientMetadataDocument, private readonly capacity = 256) {}
@@ -211,8 +222,9 @@ export class ClientMetadataCache {
     const hit = this.entries.get(url);
     if (hit && hit.expires > Date.now()) return hit.metadata;
     this.entries.delete(url);
-    const { document, maxAgeSeconds } = await this.fetcher(url);
+    const { document, maxAgeSeconds, noStore } = await this.fetcher(url);
     const metadata = validateClientMetadata(url, document);
+    if (noStore) return metadata;
     const ttl = Math.min(Math.max(maxAgeSeconds ?? 300, 60), 86400) * 1000;
     if (this.entries.size >= this.capacity) this.entries.delete(this.entries.keys().next().value!);
     this.entries.set(url, { metadata, expires: Date.now() + ttl });
