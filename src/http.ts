@@ -10,8 +10,10 @@ type CacheEntry = { page: Page; expires: number; bytes: number; startedAt: numbe
 type Waiting = { start: () => boolean; cancel: () => void };
 type RefreshState = { keys: Set<string> };
 // Entry count bounds bookkeeping; the byte budget bounds memory. One Cines
-// Unidos city read through its search API alone needs ~50 small responses.
-const cacheEntries = 512, cacheBytesLimit = 16 * 1024 * 1024;
+// Unidos city read through its search API alone needs ~50 small responses,
+// and one Cinex city needs about ten venue pages of ~2 MB each (1 MB once
+// whitespace is collapsed; see compactBody).
+const cacheEntries = 512, cacheBytesLimit = 64 * 1024 * 1024;
 // An anti-bot challenge is a refusal of automated clients that does not clear
 // within seconds. Remember it per origin so later public reads fail fast (or
 // take an adapter's documented fallback) instead of being refused again.
@@ -78,6 +80,18 @@ function cinexCinemaRedirect(url: string, response: Response): string | undefine
   } catch { /* Unrecognized redirects remain unavailable, without leaking their URL. */ }
 }
 
+/**
+ * Cinex venue pages are about 55% whitespace (1.9 MB, of which 1 MB is
+ * indentation between calendar blocks). Its HTML parsers read only element
+ * structure, attributes and \s-tolerant text, so collapsing whitespace runs
+ * before caching gives identical results at half the memory. Other
+ * providers embed JSON in their pages and are left byte-for-byte intact.
+ */
+function compactBody(url: string, body: string): string {
+  const u = new URL(url);
+  return u.hostname === 'www.cinex.com.ve' && u.pathname.endsWith('.html') ? body.replace(/\s+/g, ' ') : body;
+}
+
 /** Public reads are cached. Authenticated reads reload local sessions and bypass all caches. */
 export class HttpClient {
   // A single cache entry can be addressed by both the requested cinema URL
@@ -130,7 +144,10 @@ export class HttpClient {
       }
     }
     const hit = this.cache.get(url);
-    if (hit && hit.expires > Date.now()) return { ...hit.page, source: { ...hit.page.source, cached: true } };
+    if (hit && hit.expires > Date.now()) {
+      this.touch(hit);
+      return { ...hit.page, source: { ...hit.page.source, cached: true } };
+    }
     if (hit) this.evictEntry(hit);
     const challenge = this.challenged.get(parsed.origin);
     if (challenge && challenge.until > Date.now()) throw new DataError(challenge.error.status, challenge.error.message);
@@ -220,6 +237,10 @@ export class HttpClient {
     const entry: CacheEntry = { page, expires: Date.now() + ttl, bytes, startedAt, keys };
     for (const key of keys) this.cache.set(key, entry);
     this.cacheBytes += bytes;
+  }
+  /** Eviction takes the first entry in Map order; a hit moves its keys to the end (LRU). */
+  private touch(entry: CacheEntry) {
+    for (const key of entry.keys) if (this.cache.get(key) === entry) { this.cache.delete(key); this.cache.set(key, entry); }
   }
   private evict(url: string) { const entry = this.cache.get(url); if (entry) this.evictEntry(entry); }
   private evictEntry(entry: CacheEntry) {
@@ -331,7 +352,8 @@ export class HttpClient {
         throw error;
       }
       if (!authorize) this.challenged.delete(origin);
-      return { body: Buffer.concat(chunks).toString('utf8'), source: { url, fetched_at: new Date().toISOString(), cached: false } };
+      const text = Buffer.concat(chunks).toString('utf8');
+      return { body: authorize ? text : compactBody(url, text), source: { url, fetched_at: new Date().toISOString(), cached: false } };
     } catch (error) {
       if (error instanceof DataError) throw error;
       if (signal.aborted) throw new DataError('error', `Se agotó el plazo total de la consulta a ${url}.`);

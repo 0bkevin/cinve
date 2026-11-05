@@ -102,7 +102,9 @@ la función esté agotada.
 
 - Las lecturas HTTP tienen un plazo de 15 segundos y un cuerpo máximo de 4 MiB.
 - Hay como máximo dos consultas activas y 32 en cola por origen.
-- La caché pública mantiene hasta 512 entradas y 16 MiB. Las sesiones y los mapas
+- La caché pública mantiene hasta 512 entradas y 64 MiB, y descarta primero la
+  entrada usada hace más tiempo. Las páginas HTML de Cinex se guardan con los
+  espacios en blanco compactados. Las sesiones y los mapas
   de asientos no usan caché.
 - Si un origen público responde con un desafío anti-bots, Cinve lo recuerda
   durante 10 minutos: las consultas siguientes usan directamente la alternativa
