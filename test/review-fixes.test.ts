@@ -198,3 +198,27 @@ test('Cinepic calls without a venue name the two valid IDs, avoiding a discovery
   assert.equal(r.success, false);
   assert.match(r.error!.issues[0].message, /123300 \(Candelaria\) o 123301 \(VVIP Lido\)/);
 });
+
+test('the Cines Unidos search fallback searches only matching titles and keeps titles that succeed', async () => {
+  const searched: string[] = [];
+  const http = new HttpClient(async input => {
+    const url = new URL(String(input));
+    if (url.hostname === 'www.cinesunidos.com') return new Response('Just a moment...', { status: 403, headers: { 'cf-mitigated': 'challenge' } });
+    if (url.pathname === '/search/cities') return Response.json(['Caracas']);
+    if (url.pathname.endsWith('/films')) return Response.json(['Good Film', 'Bad Film', 'El Silbón', 'Otra']);
+    if (url.pathname.endsWith('/sessions')) {
+      const title = url.searchParams.get('Title')!; searched.push(title);
+      if (title === 'Bad Film') return new Response('down', { status: 500 });
+      return Response.json([{ showtime: '2026-11-04T18:15:00', sessionId: `s-${searched.length}`, screenNumber: 1, format: '2D', ho: `HO${searched.length}`, title, cinemaId: '1005' }]);
+    }
+    return new Response('missing', { status: 404 });
+  });
+  const s = new CinemaService(http);
+  const one = await s.query('movies', { provider: 'cinesunidos', city: 'Caracas', query: 'silbon', date: '2026-11-04' });
+  assert.deepEqual(one.items.map(i => i.name), ['El Silbón']);
+  assert.deepEqual(searched, ['El Silbón'], 'a one-title question searches one title');
+  const all = await s.query('showtimes', { provider: 'cinesunidos', city: 'Caracas', date: '2026-11-04' });
+  assert.equal(all.status, 'available'); assert.equal(all.partial, true);
+  assert.deepEqual(all.items.map(i => i.name).sort(), ['El Silbón', 'Good Film', 'Otra']);
+  assert.ok(all.warnings.some(w => /1 de 4 títulos/.test(w)), all.warnings.join(' | '));
+});

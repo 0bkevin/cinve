@@ -279,18 +279,31 @@ async function cinesUnidosGateway(op: Operation, q: Query, c: ReadContext, reque
   if (op === 'cinemas') return parseCinemaDirectory([rows(await c.json(`${base}/theaters`), 'gateway theaters')], city, pageUrl('cines'), c);
   const films = await c.json(`${base}/films`);
   if (!Array.isArray(films) || films.some(t => typeof t !== 'string')) throw new DataError('error', 'Lista de películas de Cines Unidos no reconocida.');
-  const titles = [...new Set((films as string[]).map(t => t.trim()).filter(t => t && t.length <= 200))];
+  // The service filters results by name; the session title is the searched
+  // film title, so a name filter can skip the searches it would discard.
+  const titles = [...new Set((films as string[]).map(t => t.trim()).filter(t => t && t.length <= 200))]
+    .filter(t => !q.query || folded(t).includes(folded(q.query)));
   if (titles.length > cuGatewayTitles) {
     c.partial = true;
     c.warnings.push(`Se consultaron ${cuGatewayTitles} de ${titles.length} títulos de Cines Unidos; el resultado es parcial.`);
   }
   const sessions: Obj[] = [];
+  const failures: unknown[] = [];
   // Small batches stay within the per-origin queue and keep the fan-out explicit.
   const work = titles.slice(0, cuGatewayTitles);
   for (let i = 0; i < work.length; i += 4) {
-    const batch = await Promise.all(work.slice(i, i + 4).map(async title =>
+    const batch = await Promise.allSettled(work.slice(i, i + 4).map(async title =>
       rows(await c.json(`${base}/sessions?${new URLSearchParams({ Title: title })}`), 'gateway sessions')));
-    sessions.push(...batch.flat());
+    for (const outcome of batch) {
+      if (outcome.status === 'fulfilled') sessions.push(...outcome.value);
+      else failures.push(outcome.reason);
+    }
+  }
+  // One failed title must not discard every other title's schedule.
+  if (failures.length) {
+    if (failures.length === work.length) throw failures[0];
+    c.partial = true;
+    c.warnings.push(`No se pudieron consultar las funciones de ${failures.length} de ${work.length} títulos de Cines Unidos; el resultado es parcial.`);
   }
   const date = isoDate(q), showtimes: DataItem[] = [], movies = new Map<string, DataItem>();
   for (const s of sessions) {
