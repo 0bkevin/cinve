@@ -65,9 +65,35 @@ modo local `stdio`.
 
 - `/.well-known/oauth-protected-resource/mcp`: metadatos del recurso MCP.
 - `/.well-known/oauth-authorization-server`: metadatos del servidor OAuth.
-- `POST /oauth/register`: registra clientes públicos con sus redirecciones
-  exactas. Se aceptan HTTPS y HTTP de loopback.
+- `POST /oauth/register`: registro dinámico de clientes públicos (Dynamic Client
+  Registration) con sus redirecciones exactas. Se aceptan HTTPS y HTTP de
+  loopback. El protocolo 2026-07-28 lo declara obsoleto; se mantiene para los
+  clientes que todavía no usan documentos de metadatos.
 - `GET|POST /oauth/authorize`: muestra y procesa la aprobación explícita.
+
+### Documentos de metadatos de cliente
+
+El método de registro preferido es el *Client ID Metadata Document*: el
+`client_id` es una URL HTTPS cuyo documento JSON declara `client_id` (la misma
+URL), `client_name` y `redirect_uris`. Los metadatos del servidor lo anuncian con
+`client_id_metadata_document_supported: true`. Al autorizar, Cinve:
+
+- acepta solo URL HTTPS con ruta, sin puerto, credenciales, fragmento,
+  segmentos `.`/`..` ni IP literal;
+- resuelve el dominio y se conecta únicamente a la dirección comprobada,
+  rechazando loopback, redes privadas, link-local, CGNAT, documentación y
+  multidifusión, para evitar SSRF y DNS rebinding;
+- no sigue redirecciones, exige `application/json`, lee como máximo 16 KiB y
+  abandona a los 5 s;
+- exige que el documento coincida con su URL, que sea un cliente público
+  (`token_endpoint_auth_method: none`, sin secreto) y que la redirección
+  solicitada figure en `redirect_uris`;
+- guarda en caché los documentos válidos según `max-age`, entre 1 minuto y
+  24 horas (5 minutos por defecto), con un cupo de 20 lecturas por minuto e IP;
+- muestra en la aprobación el dominio que publica el documento, porque el nombre
+  lo declara el propio cliente.
+
+Un documento inválido o inaccesible nunca redirige al cliente.
 - `POST /oauth/token`: intercambia códigos y renueva tokens.
 - `POST /oauth/revoke`: revoca toda la conexión y elimina sus sesiones de cine.
 

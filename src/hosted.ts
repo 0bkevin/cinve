@@ -1,6 +1,8 @@
 import { landingPage, servePublicAsset } from './public-web.js';
 import { hostedAuthInstructions } from './hosted-auth-guidance.js';
 import { HostedOAuth } from './oauth.js';
+import { ClientMetadataCache } from './client-metadata.js';
+import type { ClientMetadataFetcher } from './client-metadata.js';
 import { serveInstall } from './install.js';
 import { createServer as nodeServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -69,14 +71,14 @@ function refreshCalls(message: unknown): number {
 }
 export async function createHostedApp(options: {
   publicUrl: string; pool: Pool; key: Buffer; allowLocal?: boolean; trustedVercelProxy?: boolean; cleanupSecret?: string;
-  authenticate?: typeof login; request?: typeof fetch; bodyTimeoutMs?: number;
+  authenticate?: typeof login; request?: typeof fetch; bodyTimeoutMs?: number; clientMetadata?: ClientMetadataFetcher;
 }) {
   const publicUrl = new URL(options.publicUrl);
   if (publicUrl.pathname !== '/' || publicUrl.search || publicUrl.hash || publicUrl.username || publicUrl.password ||
       (publicUrl.protocol !== 'https:' && !(options.allowLocal && publicUrl.protocol === 'http:' && publicUrl.hostname === '127.0.0.1'))) throw new Error('CINEV_PUBLIC_URL debe ser un origen HTTPS.');
   if (options.key.length !== 32) throw new Error('Clave de cifrado no válida.');
   let origin = publicUrl.origin;
-  const oauth = new HostedOAuth(options.pool, () => origin);
+  const oauth = new HostedOAuth(options.pool, () => origin, new ClientMetadataCache(options.clientMetadata));
   const users = new HostedUsers(options.pool);
   const links = new ConnectionLinks(options.pool);
   // Public cache and in-flight deduplication live for this hosted app. The

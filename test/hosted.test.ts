@@ -14,9 +14,10 @@ import { Result } from '../src/core.js';
 import { ConnectionLinks } from '../src/hosted-links.js';
 import { createRemoteServer } from '../src/remote.js';
 import type { login } from '../src/auth.js';
+import type { ClientMetadataFetcher } from '../src/client-metadata.js';
 
 async function fixture(t: { after(fn: () => Promise<void>): void }, authenticate?: typeof login,
-  request: typeof fetch = async () => new Response('["Caracas"]'), extra: { bodyTimeoutMs?: number } = {}) {
+  request: typeof fetch = async () => new Response('["Caracas"]'), extra: { bodyTimeoutMs?: number; clientMetadata?: ClientMetadataFetcher } = {}) {
   const schema = 'test_' + randomBytes(12).toString('hex');
   const admin = new Pool({ connectionString: process.env.TEST_DATABASE_URL });
   await admin.query(`CREATE SCHEMA ${schema}`);
@@ -43,6 +44,16 @@ async function fixture(t: { after(fn: () => Promise<void>): void }, authenticate
   t.after(async () => { await pool.end(); await admin.query(`DROP SCHEMA ${schema} CASCADE`); await admin.end(); });
   return { ...app, pool, key, origin, alice, bob, client, post };
 }
+const metadataUrl = 'https://assistant.example/oauth/client.json';
+const metadataDocuments: Record<string, unknown> = {
+  [metadataUrl]: { client_id: metadataUrl, client_name: 'Metadata assistant', redirect_uris: ['https://assistant.example/callback'], token_endpoint_auth_method: 'none' },
+  'https://assistant.example/oauth/wrong-id.json': { client_id: 'https://other.example/client.json', redirect_uris: ['https://assistant.example/callback'] },
+  'https://assistant.example/oauth/secret.json': { client_id: 'https://assistant.example/oauth/secret.json', client_secret: 'x', redirect_uris: ['https://assistant.example/callback'] },
+};
+const clientMetadata: ClientMetadataFetcher = async url => {
+  if (!(url in metadataDocuments)) throw new Error('404');
+  return { document: metadataDocuments[url] };
+};
 const successfulLogin: typeof login = async (provider, username, password, store) => {
   assert.equal(username, 'person@example.test'); assert.equal(password, 'SYNTHETIC_PASSWORD');
   await store!.save({ version: 1, provider, expires_at: Date.now() + 60000, access_token: 'SYNTHETIC_UPSTREAM_TOKEN' });
@@ -597,4 +608,31 @@ test('daily cleanup still completes on a deployment that precedes migration 003'
   await f.links.cleanup();
   assert.equal((await f.pool.query("SELECT count(*) FROM cinev_budgets WHERE key_hash='stale'")).rows[0].count, '0');
   await f.pool.query(await migrationSql());
+});
+
+test('clients can identify with a Client ID Metadata Document instead of registering', async t => {
+  const f = await fixture(t, undefined, undefined, { clientMetadata });
+  const metadata = await (await fetch(f.origin + '/.well-known/oauth-authorization-server')).json() as Record<string, unknown>;
+  assert.equal(metadata.client_id_metadata_document_supported, true);
+  const request = await authorizationRequest(f.origin, metadataUrl);
+  const page = await (await fetch(request.url)).text();
+  assert.match(page, /Metadata assistant/); assert.match(page, /documento publicado en <strong>assistant\.example<\/strong>/);
+  const callback = await approve(f.origin, request.url);
+  const exchange = { grant_type: 'authorization_code', client_id: metadataUrl, code: callback.searchParams.get('code')!,
+    code_verifier: request.verifier, resource: f.origin + '/mcp', redirect_uri: request.params.redirect_uri };
+  const tokens = await (await form(f.origin, '/oauth/token', exchange)).json() as { access_token: string; refresh_token: string };
+  assert.match(tokens.access_token, /^cva_/);
+  const status = await (await f.client(tokens.access_token)).callTool({ name: 'get_auth_status', arguments: {} });
+  assert.equal((status.structuredContent as { connection: { client_authorized: boolean } }).connection.client_authorized, true);
+  const refreshed = await form(f.origin, '/oauth/token', { grant_type: 'refresh_token', client_id: metadataUrl, refresh_token: tokens.refresh_token, resource: f.origin + '/mcp' });
+  assert.equal(refreshed.status, 200);
+  // Documents that do not match their URL, carry a secret, or cannot be fetched are refused
+  // without redirecting, and so is a redirect URI the document does not list.
+  for (const client_id of ['https://assistant.example/oauth/wrong-id.json', 'https://assistant.example/oauth/secret.json', 'https://assistant.example/oauth/missing.json']) {
+    const response = await fetch((await authorizationRequest(f.origin, client_id)).url, { redirect: 'manual' });
+    assert.equal(response.status, 400, client_id); assert.equal(response.headers.get('location'), null);
+  }
+  const unlisted = new URL(request.url); unlisted.searchParams.set('redirect_uri', 'https://evil.example/callback');
+  const response = await fetch(unlisted, { redirect: 'manual' });
+  assert.equal(response.status, 400); assert.equal(response.headers.get('location'), null);
 });

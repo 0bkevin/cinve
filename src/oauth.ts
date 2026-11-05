@@ -5,16 +5,10 @@ import type { Pool, PoolClient } from 'pg';
 import * as z from 'zod';
 import { digest, lockUser, transaction } from './hosted-store.js';
 import { ConnectionLinks } from './hosted-links.js';
+import { ClientMetadataCache, isClientIdUrl, redirectUri } from './client-metadata.js';
 
 const scope = 'cinve:accounts';
 const secret = () => randomBytes(32).toString('base64url');
-const redirectUri = z.string().max(2048).refine(value => {
-  try {
-    const u = new URL(value);
-    return !u.username && !u.password && !u.hash &&
-      (u.protocol === 'https:' || (u.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname)));
-  } catch { return false; }
-});
 const registration = z.object({
   client_name: z.string().trim().min(1).max(100).default('Asistente'),
   redirect_uris: z.array(redirectUri).min(1).max(10),
@@ -54,7 +48,21 @@ async function revoke(client: PoolClient, user: string) {
  * it never grants access to an existing cinema session or browser identity. */
 export class HostedOAuth {
   private budgets: ConnectionLinks;
-  constructor(readonly pool: Pool, readonly getOrigin: () => string) { this.budgets = new ConnectionLinks(pool); }
+  constructor(readonly pool: Pool, readonly getOrigin: () => string, private readonly clientMetadata = new ClientMetadataCache()) { this.budgets = new ConnectionLinks(pool); }
+  /**
+   * A client_id that is an HTTPS URL is a Client ID Metadata Document: fetch
+   * and validate it, then keep an app row so grants and tokens reference it
+   * like any other client. Failures never redirect to the unverified client.
+   */
+  private async metadataApp(clientId: string, ip: string) {
+    if (!await this.budgets.budget(`oauth:metadata:${ip}`, 20)) throw new OAuthError('temporarily_unavailable', 429);
+    let metadata;
+    try { metadata = await this.clientMetadata.get(clientId); } catch { throw new OAuthError('invalid_client'); }
+    const { rows } = await this.pool.query(`INSERT INTO cinev_oauth_apps(id,name,redirect_uris) VALUES($1,$2,$3)
+      ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, redirect_uris=EXCLUDED.redirect_uris RETURNING *`,
+      [clientId, metadata.client_name, JSON.stringify(metadata.redirect_uris)]);
+    return rows[0];
+  }
   get resource() { return this.getOrigin() + '/mcp'; }
   challenge(invalid = false) {
     return `Bearer resource_metadata="${this.getOrigin()}/.well-known/oauth-protected-resource/mcp", scope="${scope}"${invalid ? ', error="invalid_token"' : ''}`;
@@ -144,6 +152,10 @@ export class HostedOAuth {
           resource: this.resource, authorization_servers: [origin], scopes_supported: [scope], bearer_methods_supported: ['header'],
         } : {
           issuer: origin, authorization_endpoint: origin + '/oauth/authorize', token_endpoint: origin + '/oauth/token',
+          // Client ID Metadata Documents are the preferred registration. The
+          // registration endpoint (Dynamic Client Registration, deprecated in
+          // 2026-07-28) stays for clients that do not support them yet.
+          client_id_metadata_document_supported: true,
           registration_endpoint: origin + '/oauth/register', revocation_endpoint: origin + '/oauth/revoke',
           response_types_supported: ['code'], grant_types_supported: ['authorization_code', 'refresh_token'],
           token_endpoint_auth_methods_supported: ['none'], revocation_endpoint_auth_methods_supported: ['none'],
@@ -165,8 +177,10 @@ export class HostedOAuth {
       if (path === '/oauth/authorize' && req.method === 'GET') {
         const p = url.searchParams;
         for (const key of p.keys()) if (p.getAll(key).length !== 1) throw new OAuthError('invalid_request');
-        const { rows } = await this.pool.query('SELECT * FROM cinev_oauth_apps WHERE id=$1', [required(p.get('client_id'))]);
-        const app = rows[0], redirect = required(p.get('redirect_uri'));
+        const clientId = required(p.get('client_id'));
+        const app = isClientIdUrl(clientId) ? await this.metadataApp(clientId, ip)
+          : (await this.pool.query('SELECT * FROM cinev_oauth_apps WHERE id=$1', [clientId])).rows[0];
+        const redirect = required(p.get('redirect_uri'));
         // Never redirect errors to an unvalidated client URI.
         if (!app || !app.redirect_uris.includes(redirect)) throw new OAuthError('invalid_request');
         if (p.get('response_type') !== 'code') throw new OAuthError('unsupported_response_type');
@@ -186,7 +200,7 @@ export class HostedOAuth {
         // Only allow the already-validated callback origin, never arbitrary sites.
         res.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; img-src 'self'; form-action 'self' ${new URL(redirect).origin}; frame-ancestors 'none'; base-uri 'none'`);
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(authorizationPage(app.name, new URL(redirect).origin, id, csrf));
+        res.end(authorizationPage(app.name, new URL(redirect).origin, id, csrf, isClientIdUrl(clientId) ? new URL(clientId).hostname : undefined));
         return true;
       }
       if (path === '/oauth/authorize' && req.method === 'POST') {
