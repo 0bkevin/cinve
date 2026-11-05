@@ -205,10 +205,11 @@ test('the Cines Unidos search fallback searches only matching titles and keeps t
     const url = new URL(String(input));
     if (url.hostname === 'www.cinesunidos.com') return new Response('Just a moment...', { status: 403, headers: { 'cf-mitigated': 'challenge' } });
     if (url.pathname === '/search/cities') return Response.json(['Caracas']);
-    if (url.pathname.endsWith('/films')) return Response.json(['Good Film', 'Bad Film', 'El Silbón', 'Otra']);
+    if (url.pathname.endsWith('/films')) return Response.json(['Good Film', 'Bad Film', 'El Silbón', 'Otra', 'Broken']);
     if (url.pathname.endsWith('/sessions')) {
       const title = url.searchParams.get('Title')!; searched.push(title);
       if (title === 'Bad Film') return new Response('down', { status: 500 });
+      if (title === 'Broken') return Response.json([{ showtime: 'not-a-date', sessionId: 'x', ho: 'HOX', title, cinemaId: '1005' }]);
       return Response.json([{ showtime: '2026-11-04T18:15:00', sessionId: `s-${searched.length}`, screenNumber: 1, format: '2D', ho: `HO${searched.length}`, title, cinemaId: '1005' }]);
     }
     return new Response('missing', { status: 404 });
@@ -220,7 +221,7 @@ test('the Cines Unidos search fallback searches only matching titles and keeps t
   const all = await s.query('showtimes', { provider: 'cinesunidos', city: 'Caracas', date: '2026-11-04' });
   assert.equal(all.status, 'available'); assert.equal(all.partial, true);
   assert.deepEqual(all.items.map(i => i.name).sort(), ['El Silbón', 'Good Film', 'Otra']);
-  assert.ok(all.warnings.some(w => /1 de 4 títulos/.test(w)), all.warnings.join(' | '));
+  assert.ok(all.warnings.some(w => /2 de 5 títulos/.test(w)), all.warnings.join(' | '), 'a malformed title fails alone, like a failed request');
 });
 
 test('Cinex ticket prices require a function, since no public listing can supply them', () => {

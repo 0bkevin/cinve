@@ -287,15 +287,28 @@ async function cinesUnidosGateway(op: Operation, q: Query, c: ReadContext, reque
     c.partial = true;
     c.warnings.push(`Se consultaron ${cuGatewayTitles} de ${titles.length} títulos de Cines Unidos; el resultado es parcial.`);
   }
-  const sessions: Obj[] = [];
+  const date = isoDate(q);
+  // Normalize each title's sessions inside its own settled task: a title
+  // whose records are malformed fails alone instead of taking the others along.
+  const normalize = (s: Obj): DataItem | undefined => {
+    const raw = requiredText(s, 'showtime');
+    if (!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/.test(raw) || !DateInput.safeParse(raw.slice(0, 10)).success) throw new DataError('error', 'Fecha Cines Unidos con formato no reconocido.');
+    const mid = requiredText(s, 'ho'), cid = requiredText(s, 'cinemaId'), name = requiredText(s, 'title');
+    if (raw.slice(0, 10) !== date || (q.cinema_id && cid !== q.cinema_id) || (q.movie_id && mid !== q.movie_id)) return undefined;
+    return { kind: 'showtime', id: requiredText(s, 'sessionId'), name, cinema_id: cid, movie_id: mid,
+      date, time: raw.slice(11, 16), starts_at: `${raw}-04:00`, screen: text(s.screenNumber), format: text(s.format),
+      language: text(s.language), url: `${CU}/pelicula/${encodeURIComponent(mid)}?${new URLSearchParams({ city })}` };
+  };
+  const showtimes: DataItem[] = [];
   const failures: unknown[] = [];
   // Small batches stay within the per-origin queue and keep the fan-out explicit.
   const work = titles.slice(0, cuGatewayTitles);
   for (let i = 0; i < work.length; i += 4) {
     const batch = await Promise.allSettled(work.slice(i, i + 4).map(async title =>
-      rows(await c.json(`${base}/sessions?${new URLSearchParams({ Title: title })}`), 'gateway sessions')));
+      rows(await c.json(`${base}/sessions?${new URLSearchParams({ Title: title })}`), 'gateway sessions')
+        .map(normalize).filter((item): item is DataItem => item !== undefined)));
     for (const outcome of batch) {
-      if (outcome.status === 'fulfilled') sessions.push(...outcome.value);
+      if (outcome.status === 'fulfilled') showtimes.push(...outcome.value);
       else failures.push(outcome.reason);
     }
   }
@@ -305,18 +318,8 @@ async function cinesUnidosGateway(op: Operation, q: Query, c: ReadContext, reque
     c.partial = true;
     c.warnings.push(`No se pudieron consultar las funciones de ${failures.length} de ${work.length} títulos de Cines Unidos; el resultado es parcial.`);
   }
-  const date = isoDate(q), showtimes: DataItem[] = [], movies = new Map<string, DataItem>();
-  for (const s of sessions) {
-    const raw = requiredText(s, 'showtime');
-    if (!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/.test(raw) || !DateInput.safeParse(raw.slice(0, 10)).success) throw new DataError('error', 'Fecha Cines Unidos con formato no reconocido.');
-    const mid = requiredText(s, 'ho'), cid = requiredText(s, 'cinemaId'), name = requiredText(s, 'title');
-    if (raw.slice(0, 10) !== date || (q.cinema_id && cid !== q.cinema_id) || (q.movie_id && mid !== q.movie_id)) continue;
-    const url = `${CU}/pelicula/${encodeURIComponent(mid)}?${new URLSearchParams({ city })}`;
-    showtimes.push({ kind: 'showtime', id: requiredText(s, 'sessionId'), name, cinema_id: cid, movie_id: mid,
-      date, time: raw.slice(11, 16), starts_at: `${raw}-04:00`, screen: text(s.screenNumber), format: text(s.format),
-      language: text(s.language), url });
-    if (!movies.has(mid)) movies.set(mid, { kind: 'movie', id: mid, name, city, url });
-  }
+  const movies = new Map<string, DataItem>();
+  for (const s of showtimes) if (!movies.has(s.movie_id!)) movies.set(s.movie_id!, { kind: 'movie', id: s.movie_id!, name: s.name, city, url: s.url });
   return op === 'showtimes' ? showtimes : [...movies.values()];
 }
 
