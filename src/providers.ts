@@ -3,7 +3,7 @@ import { CinexCinemaCatalog } from './cinex-cinemas.js';
 import { load } from 'cheerio';
 import { DataError, DateInput, folded, Id, number, operationItemSchema, requireArg, text, today } from './core.js';
 import type { DataItem, Operation, Query } from './core.js';
-import { ReadContext } from './http.js';
+import { CallStopped, ReadContext } from './http.js';
 import { decodeLabel, findField, pageFields, flight, object, objects, requiredText, rows } from './parsers.js';
 import type { Obj } from './parsers.js';
 import { parseCinesUnidosPrices, parseCinexPrices, parseCinexConcessions } from './authenticated-parsers.js';
@@ -126,13 +126,43 @@ export async function cinepic(op: Operation, q: Query, c: ReadContext): Promise<
     }));
   }
   if (op === 'concessions') {
-      cpSite(q);
-      const url = `https://api.cinexo.com.ar/api/complejo/${encodeURIComponent(q.cinema_id!)}/candy`;
-      const candy = object(await c.json(url));
-      const units = rows(candy.unidades_negocios, 'candy.unidades_negocios');
-      if (units.length) throw new DataError('unavailable', 'El catálogo Cinepic dejó de estar vacío; su esquema de productos y moneda necesita validación antes de mostrar precios.');
-      c.warnings.push('La API pública devolvió caramelería vacía para esta sede; no implica que no venda productos en taquilla.');
-      return [];
+      const site = cpSite(q), api = `https://api.cinexo.com.ar/api/complejo/${encodeURIComponent(q.cinema_id!)}`;
+      // The purchase page embeds this same catalog as candyData, so an empty one
+      // means Cinepic's own checkout offers no products either (seen 2026-11-05).
+      const units = rows(object(await c.json(`${api}/candy`)).unidades_negocios, 'candy.unidades_negocios');
+      if (!units.length) {
+        c.warnings.push('El catálogo de caramelería que Cinepic publica para esta sede está vacío; su web de compra usa ese mismo catálogo y tampoco ofrece productos. No implica que no venda en taquilla.');
+        return [];
+      }
+      let rate: number | undefined;
+      try { rate = number(object(object(await c.json(`${api}/configuration`)).datos).tasaConversion); } catch (e) { if (e instanceof CallStopped) throw e; }
+      if (rate === undefined || rate <= 0) { rate = undefined; c.warnings.push('Sin tasa de conversión de Cinepic; se omite la equivalencia USD.'); }
+      c.warnings.push('Precios en VES del catálogo en línea de Cinepic (su web los muestra en Bs.); USD con su tasa de conversión, no una tasa BCV verificada. Cinepic no publica stock; cargos finales no verificados.');
+      const items: DataItem[] = [], seen = new Set<string>();
+      for (const unit of units) {
+        // The purchase JS reads unidades_negocios[].categorias[].items[] and adds a
+        // client-side "TODOS" category holding every item; a server copy is skipped.
+        for (const category of rows(unit.categorias, 'candy.categorias')) {
+          if (folded(text(category.nombre)) === 'todos') continue;
+          for (const r of rows(category.items, 'candy.items')) {
+            const id = requiredText(r, 'id');
+            if (seen.has(id)) continue;
+            seen.add(id);
+            const amount = number(r.precio);
+            const prices: NonNullable<DataItem['prices']> = amount !== undefined && amount >= 0 ? [{ currency: 'VES', amount, basis: 'provider' }] : [];
+            if (amount !== undefined && amount >= 0 && rate) prices.push({ currency: 'USD', amount: Number((amount / rate).toFixed(2)), basis: 'provider_conversion' });
+            if (!prices.length) c.warnings.push(`Producto ${warningLabel(r.id)} sin precio verificable.`);
+            const contents = text(r.descripcion), image = text(r.imagen);
+            items.push({ kind: 'concession', id, name: contents && contents !== requiredText(r, 'nombre') ? `${requiredText(r, 'nombre')} (${contents})` : requiredText(r, 'nombre'),
+              cinema_id: q.cinema_id, category: [units.length > 1 ? text(unit.nombre_empresa) : '', text(category.nombre)].filter(Boolean).join(' · ') || undefined,
+              prices, final_total_verified: false, url: `${site.host}/es-AR`,
+              // "dinamico" items and items with productos ask the buyer to pick options.
+              options_required: text(r.formato) === 'dinamico' || (Array.isArray(r.productos) && r.productos.length > 0),
+              ...(/^https:\/\/[^\s]+$/.test(image) ? { image_url: image } : {}) });
+          }
+        }
+      }
+      return items;
   }
   if (op === 'prices') {
     const { records, f, url } = await cpBuy(q, c);

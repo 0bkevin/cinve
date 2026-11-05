@@ -68,7 +68,7 @@ test('public reads are limited to the routes adapters parse, even on allowed hos
     'https://gateway.cinesunidos.com/search/cities', 'https://gateway.cinesunidos.com/concessions/www/cinemas/1005/concessions',
     'https://cinepiccandelaria.com/es-AR', 'https://cinepicvip.com/es-AR/compra?cid=123301&fid=3636&pid=206',
     'https://apifront.cinexo.com.ar/mobile/consultas/peliculas/PeliculasConFuncionesYHorarios?idComplejo=123300&fecha=04%2F11%2F2026',
-    'https://api.cinexo.com.ar/api/complejo/123300/candy',
+    'https://api.cinexo.com.ar/api/complejo/123300/candy', 'https://api.cinexo.com.ar/api/complejo/123301/configuration',
   ]) assert.doesNotThrow(() => assertPublicRead(ok), ok);
   for (const bad of [
     'https://www.cinex.com.ve/assets/php/prepareconcessionprocess.php?action=buy',
@@ -79,6 +79,7 @@ test('public reads are limited to the routes adapters parse, even on allowed hos
     'https://www.cinex.com.ve/boletos.php?cinemaid=TLN&sessionid=1',
     'https://www.cinesunidos.com/cines?city=Caracas&city=Valencia', 'https://www.cinesunidos.com/api/seats?theaterId=1&showTimeId=2',
     'https://gateway.cinesunidos.com/tickets/www/theaters/1/sessions/2/', 'https://cinepicvip.com/es-AR/compra?cid=1&fid=2',
+    'https://api.cinexo.com.ar/api/complejo/123300/candy/7/productos', 'https://api.cinexo.com.ar/api/complejo/123300/configuration?x=1',
     'https://evil.test/',
   ]) assert.throws(() => assertPublicRead(bad), DataError, bad);
 });

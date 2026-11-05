@@ -64,6 +64,34 @@ test('empty candy is distinct from auth-required providers', async () => {
   assert.equal(empty.sources.length, 1);
   assert.equal(empty.sources[0].url, 'https://api.cinexo.com.ar/api/complejo/123300/candy');
 });
+// Shaped as the Cinepic purchase JS reads candyData (2026-11-05): units hold
+// categorias[].items[] with nombre, descripcion ("contenido"), imagen and precio
+// in Bs.; "dinamico" items and items with productos ask for options.
+test('a Cinepic snack catalog is read the way its checkout shows it', async () => {
+  const item = (id: string, nombre: string, precio: unknown, extra = {}) => ({ id, nombre, descripcion: ' ', imagen: `https://api.cinexo.com.ar/img/${id}.png`, precio, ...extra });
+  const candy = { tiene_unidades_negocios: true, unidades_negocios: [{ id: 'u1', nombre_empresa: 'Cinepic', categorias: [
+    { id: 'c0', nombre: 'TODOS', items: [item('1', 'Cotufa grande', '3579.52')] },
+    { id: 'c1', nombre: 'COMBOS', items: [item('1', 'Cotufa grande', '3579.52'), item('2', 'Combo pareja', '8948.8', { descripcion: '2 cotufas + 2 refrescos', formato: 'dinamico' }), item('3', 'Nachos', '', { imagen: 'http://x/n.png', productos: [{ id: 'p1' }] })] },
+  ] }] };
+  let rate = '894.88', urls: string[] = [];
+  const s = new CinemaService(new HttpClient(async url => {
+    urls.push(String(url));
+    return Response.json(String(url).endsWith('/configuration') ? { datos: { tasaConversion: rate, ip_privada: 'not read' } } : candy);
+  }));
+  const r = await s.query('concessions', { provider: 'cinepic', cinema_id: '123300' });
+  assert.equal(r.status, 'available');
+  assert.deepEqual(r.items.map(i => [i.id, i.name, i.category, i.prices, i.options_required, i.image_url]), [
+    ['2', 'Combo pareja (2 cotufas + 2 refrescos)', 'COMBOS', [{ currency: 'VES', amount: 8948.8, basis: 'provider' }, { currency: 'USD', amount: 10, basis: 'provider_conversion' }], true, 'https://api.cinexo.com.ar/img/2.png'],
+    ['1', 'Cotufa grande', 'COMBOS', [{ currency: 'VES', amount: 3579.52, basis: 'provider' }, { currency: 'USD', amount: 4, basis: 'provider_conversion' }], false, 'https://api.cinexo.com.ar/img/1.png'],
+    ['3', 'Nachos', 'COMBOS', [], true, undefined],
+  ]);
+  assert.match(r.warnings.join(' '), /Producto 3 sin precio verificable/);
+  assert.deepEqual(urls, ['https://api.cinexo.com.ar/api/complejo/123300/candy', 'https://api.cinexo.com.ar/api/complejo/123300/configuration']);
+  rate = '0';
+  const noRate = await new CinemaService(new HttpClient(async url => Response.json(String(url).endsWith('/configuration') ? { datos: { tasaConversion: rate } } : candy))).query('concessions', { provider: 'cinepic', cinema_id: '123301' });
+  assert.deepEqual(noRate.items.find(i => i.id === '1')?.prices, [{ currency: 'VES', amount: 3579.52, basis: 'provider' }]);
+  assert.match(noRate.warnings.join(' '), /se omite la equivalencia USD/);
+});
 test('Cinepic does not invent a USD price if the provider rate is zero', async () => {
   const props = structuredClone(cpBuy); props.configData.tasaConversion = '0';
   const s = new CinemaService(new HttpClient(async () => new Response(page(props))));

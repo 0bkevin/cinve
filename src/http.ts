@@ -415,7 +415,7 @@ export function assertPublicRead(value: string) {
         return path === '/mobile/consultas/peliculas/PeliculasConFuncionesYHorarios' &&
           exactQuery(u, { idComplejo: ids, fecha: v => !!v && /^\d{2}\/\d{2}\/\d{4}$/.test(v) });
       case 'api.cinexo.com.ar':
-        { const m = path.match(/^\/api\/complejo\/([^/]+)\/candy$/); return !!m && none && Id.safeParse(m[1]).success; }
+        { const m = path.match(/^\/api\/complejo\/([^/]+)\/(?:candy|configuration)$/); return !!m && none && Id.safeParse(m[1]).success; }
       default:
         return false;
     }
