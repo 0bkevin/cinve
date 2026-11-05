@@ -4,7 +4,8 @@ import { CinemaService } from '../src/service.js';
 import { CinexCinemaCatalog } from '../src/cinex-cinemas.js';
 import { HttpClient, ReadContext, assertPublicRead } from '../src/http.js';
 import { DataError, Id } from '../src/core.js';
-import { parseCinexMovies, parseCinexCinemaShowtimes } from '../src/providers.js';
+import { cuLanguage, cuSiteTitle, parseCinexMovies, parseCinexCinemaShowtimes } from '../src/providers.js';
+import type { DataItem } from '../src/core.js';
 import { page } from './fixtures.js';
 import { inputSchema } from '../src/server.js';
 
@@ -387,4 +388,33 @@ test('a Cinex movie_id without a synopsis page is reported as a wrong ID, not as
   const empty = await s.query('showtimes', { provider: 'cinex', movie_id: 'clayface', date: '2026-09-18' });
   assert.equal(empty.status, 'unavailable');
   assert.ok(empty.warnings.some(w => /no lista funciones/.test(w)), empty.warnings.join(' | '));
+});
+
+test('Cines Unidos shows the website title, version and rating on both of its read paths', async () => {
+  // Shapes observed on 2026-11-05: the page puts the version in the title and
+  // features.Language; the search API drops it from the title (leaving a double
+  // space inside "Clayface  Atmos") and sends it as language.
+  const movie = (vistaId: string, title: string, language: string, sessions: [string, string][]) => ({ vistaId, title, features: { Language: language },
+    theaters: [{ id: '1027', name: 'Líder', rating: 'B+12', showTimes: sessions.map(([id, time]) => ({ id, date: `2026-11-05T${time}:00`, screen: 8, format: 'Digital' })) }] });
+  const movies = [movie('HO6136', 'Clayface (Esp)', 'Español', [['1', '15:00']]), movie('HO6338', 'Clayface (Sub) Atmos', 'Subtitulada', [['2', '17:40']])];
+  const api = [{ showtime: '2026-11-05T15:00:00', sessionId: '1', screenNumber: 8, format: 'Digital', ho: 'HO6136', title: 'Clayface', cinemaId: '1027', rating: 'B+12', language: 'Español' },
+    { showtime: '2026-11-05T17:40:00', sessionId: '2', screenNumber: 8, format: 'Digital', ho: 'HO6338', title: 'Clayface  Atmos', cinemaId: '1027', rating: 'B+12', language: 'Subtitulada' }];
+  const reader = (blocked: boolean) => new CinemaService(new HttpClient(async input => {
+    const url = new URL(String(input));
+    if (url.hostname === 'www.cinesunidos.com') return blocked ? new Response('Just a moment...', { status: 403, headers: { 'cf-mitigated': 'challenge' } }) : new Response(page({ movies }));
+    if (url.pathname === '/search/cities') return Response.json(['Caracas']);
+    if (url.pathname.endsWith('/films')) return Response.json(['Clayface']);
+    if (url.pathname.endsWith('/sessions')) return Response.json(api);
+    return new Response('missing', { status: 404 });
+  }));
+  const view = (r: { items: DataItem[] }) => r.items.map(i => [i.id, i.name, i.language, i.rating]);
+  const expected = [['1', 'Clayface (Esp)', 'es', 'B+12'], ['2', 'Clayface (Sub) Atmos', 'subtitulada', 'B+12']];
+  for (const blocked of [false, true]) {
+    const r = await reader(blocked).query('showtimes', { provider: 'cinesunidos', city: 'Caracas', date: '2026-11-05' });
+    assert.deepEqual(view(r), expected, blocked ? 'search API path' : 'page path');
+  }
+  assert.equal(cuSiteTitle('Godzilla Minus Zero', 'Subtitulada'), 'Godzilla Minus Zero (Sub)');
+  assert.equal(cuSiteTitle('Clayface (Sub)', 'Subtitulada'), 'Clayface (Sub)', 'a title that keeps its marker is not marked twice');
+  assert.equal(cuSiteTitle('Un  Evento', 'Original'), 'Un Evento', 'an unknown version adds nothing');
+  assert.equal(cuLanguage('Inglés'), 'Inglés');
 });

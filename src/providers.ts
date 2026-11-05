@@ -180,6 +180,7 @@ export async function cinepic(op: Operation, q: Query, c: ReadContext): Promise<
     return { kind: 'showtime', id, name: text(movie?.peliculas_nombre) || `Película ${mid}`, cinema_id: q.cinema_id, cinema_name: site.name, movie_id: mid,
       date, time, starts_at: overnight === true ? undefined : overnight === false ? `${date}T${time}:00-04:00` : undefined,
       format: text(r.formato), language: subtitled === undefined ? undefined : subtitled ? 'subtitulada' : 'no_subtitulada',
+      rating: text(movie?.peliculas_clasificacion) || undefined,
       url: `${site.host}/es-AR/compra?${new URLSearchParams({ cid: q.cinema_id!, fid: id, pid: mid })}` };
   });
 }
@@ -252,6 +253,7 @@ export async function cinesunidos(op: Operation, q: Query, c: ReadContext): Prom
         if (raw.slice(0, 10) !== isoDate(q)) continue;
         sessions.push({ kind: 'showtime', id: requiredText(s, 'id'), name: requiredText(m, 'title'), cinema_id: cid, cinema_name: warningLabel(text(cinema.name), 200) || undefined, movie_id: mid,
           date: raw.slice(0, 10), time: raw.slice(11, 16), starts_at: `${raw}-04:00`, screen: text(s.screen), format: text(s.format),
+          language: cuLanguage(object(m.features).Language), rating: text(cinema.rating) || undefined,
           url: `${CU}/pelicula/${encodeURIComponent(mid)}?${new URLSearchParams({ city })}` });
       }
     }
@@ -260,6 +262,25 @@ export async function cinesunidos(op: Operation, q: Query, c: ReadContext): Prom
       url: `${CU}/pelicula/${encodeURIComponent(mid)}?${new URLSearchParams({ city })}` });
   }
   return items;
+}
+
+/** Cines Unidos version ("Español", "Subtitulada") in the vocabulary of the other providers. */
+export function cuLanguage(raw: unknown): string | undefined {
+  const value = text(raw);
+  if (!value) return undefined;
+  const key = folded(value);
+  return key === 'espanol' ? 'es' : key === 'subtitulada' ? 'subtitulada' : value;
+}
+/**
+ * The website's title for a search-API session. The API drops the version
+ * marker the website shows ("Clayface (Sub)") and leaves a double space where
+ * it stood inside a title ("Clayface  Atmos" for "Clayface (Sub) Atmos").
+ */
+export function cuSiteTitle(title: string, language: unknown): string {
+  const marker = ({ espanol: 'Esp', subtitulada: 'Sub' } as Record<string, string>)[folded(text(language))];
+  const trimmed = title.trim();
+  if (!marker || /\((?:esp|sub)\)/i.test(trimmed)) return trimmed.replace(/\s+/g, ' ');
+  return /\s{2,}/.test(trimmed) ? trimmed.replace(/\s{2,}/, ` (${marker}) `).replace(/\s+/g, ' ') : `${trimmed} (${marker})`;
 }
 
 async function cinesUnidosCity(city: string, q: Query, c: ReadContext): Promise<string> {
@@ -308,11 +329,11 @@ async function cinesUnidosGateway(op: Operation, q: Query, c: ReadContext, reque
   const normalize = (s: Obj): DataItem | undefined => {
     const raw = requiredText(s, 'showtime');
     if (!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/.test(raw) || !DateInput.safeParse(raw.slice(0, 10)).success) throw new DataError('error', 'Fecha Cines Unidos con formato no reconocido.');
-    const mid = requiredText(s, 'ho'), cid = requiredText(s, 'cinemaId'), name = requiredText(s, 'title');
+    const mid = requiredText(s, 'ho'), cid = requiredText(s, 'cinemaId'), name = cuSiteTitle(requiredText(s, 'title'), s.language);
     if (raw.slice(0, 10) !== date || (q.cinema_id && cid !== q.cinema_id) || (q.movie_id && mid !== q.movie_id)) return undefined;
     const item: DataItem = { kind: 'showtime', id: requiredText(s, 'sessionId'), name, cinema_id: cid, movie_id: mid,
       date, time: raw.slice(11, 16), starts_at: `${raw}-04:00`, screen: text(s.screenNumber), format: text(s.format),
-      language: text(s.language), url: `${CU}/pelicula/${encodeURIComponent(mid)}?${new URLSearchParams({ city })}` };
+      language: cuLanguage(s.language), rating: text(s.rating) || undefined, url: `${CU}/pelicula/${encodeURIComponent(mid)}?${new URLSearchParams({ city })}` };
     return checkedShowtime(item);
   };
   const showtimes: DataItem[] = [];

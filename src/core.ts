@@ -31,7 +31,7 @@ export const Item = z.object({
   city: z.string().optional(), address: z.string().optional(),
   date: z.string().optional(), time: z.string().optional(), starts_at: z.string().optional(),
   format: z.string().optional(),
-  language: z.string().optional().describe('Versión según el proveedor: es o en (doblada) y subtitulada en Cinex; subtitulada o no_subtitulada en Cinepic. Cines Unidos la indica en el título, (Esp) o (Sub). Ausente si no se confirmó.'),
+  language: z.string().optional().describe('Versión: es o en (doblada) y subtitulada en Cinex y Cines Unidos (que además la marca en el título, (Esp) o (Sub)); subtitulada o no_subtitulada en Cinepic. Ausente si no se confirmó.'),
   screen: z.string().optional().describe('Sala tal como la nombra el proveedor (3, VIP, VIP (Piso 5), 4DX).'),
   duration_minutes: z.number().optional(), genre: z.string().optional(), rating: z.string().optional(),
   url: PublicUrl.optional(), image_url: PublicUrl.optional(),
@@ -69,9 +69,10 @@ const operationItemSchemas = {
   showtimes: Item.pick({
     kind: true, id: true, name: true, cinema_id: true, cinema_name: true, movie_id: true,
     date: true, time: true, starts_at: true, format: true, language: true,
-    screen: true, url: true,
+    screen: true, rating: true, url: true,
   }).extend({
     kind: z.literal('showtime'),
+    rating: Item.shape.rating.describe('Clasificación por edad que publica el proveedor (A, B, C; Cines Unidos puede variarla por sede, como B+12).'),
     id: Id.describe('Identificador de la función; úsalo como session_id al consultar tarifas.'),
     cinema_id: Item.shape.cinema_id.unwrap().describe('ID de sede que devuelve list_cinemas.'),
     cinema_name: Item.shape.cinema_name.describe('Nombre de la sede cuando la fuente lo publica junto a la función.'),
