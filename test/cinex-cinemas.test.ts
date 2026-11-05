@@ -492,3 +492,33 @@ test('Cinex city showtimes fail, rather than report an empty city, when no venue
   const elsewhere = await s.query('showtimes', { provider: 'cinex', city: 'Maracay', date: '2026-11-04' });
   assert.equal(elsewhere.status, 'empty', 'a city without Cinex venues is a real empty answer');
 });
+
+test('long fan-outs report increasing progress to clients that send a progress token', async () => {
+  const { Client } = await import('@modelcontextprotocol/client');
+  const { InMemoryTransport } = await import('@modelcontextprotocol/server');
+  const { createServer } = await import('../src/server.js');
+  const epoch = String(Date.parse('2026-09-18T20:30:00-04:00') / 1000);
+  const codes = ['AAA', 'BBB', 'CCC'];
+  const http = new HttpClient(async input => {
+    const url = new URL(String(input));
+    if (url.pathname === '/cines.html') return new Response(codes.map(code => card(code.toLowerCase(), code, `x${code}.jpg`)).join(''));
+    if (url.pathname === '/assets/php/datasource.php') return Response.json({ data: [{ siglas: url.searchParams.get('cinemaid'), name: url.searchParams.get('cinemaid') }] });
+    if (url.pathname === '/cartelera.html') return new Response(`<div class="poster" onclick="x('sinopsis-film.html')" title="FILM"></div>`);
+    const m = url.pathname.match(/^\/cinex-([a-z]+)\.html$/);
+    if (m) { const code = m[1].toUpperCase(); return new Response(`<h3 class="title">${code}</h3><div class="sessionslist"><h5 class="title">FILM</h5><button onclick="checkLogin('${code}1','${code}')" alt="${epoch}"></button></div>`); }
+    return new Response('missing', { status: 404 });
+  });
+  const server = createServer(new CinemaService(http, new CinexCinemaCatalog()));
+  const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  const client = new Client({ name: 'progress', version: '1' });
+  await client.connect(clientTransport);
+  try {
+    const updates: { progress: number; message?: string }[] = [];
+    const r = await client.callTool({ name: 'get_showtimes', arguments: { provider: 'cinex', city: 'Caracas', date: '2026-09-18' } }, { onprogress: p => updates.push(p) });
+    assert.equal((r.structuredContent as { total: number }).total, 3);
+    assert.ok(updates.length >= 4, JSON.stringify(updates)); // discovery batch + three venues
+    assert.ok(updates.every((u, i) => i === 0 || u.progress > updates[i - 1].progress), 'progress only increases');
+    assert.ok(updates.some(u => u.message === 'Cinex: 3 de 3 sedes leídas.'), JSON.stringify(updates));
+  } finally { await client.close(); }
+});

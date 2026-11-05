@@ -2,6 +2,8 @@ import { SeatResult } from './seats.js';
 import { seatInstructions } from './seat-guidance.js';
 import { hostedAuthInstructions } from './hosted-auth-guidance.js';
 import { McpServer } from '@modelcontextprotocol/server';
+import type { ServerContext } from '@modelcontextprotocol/server';
+import type { CallOptions } from './http.js';
 import * as z from 'zod';
 import { DateInput, Id, Provider, idString, outputSchema } from './core.js';
 import type { Operation, Query } from './core.js';
@@ -81,6 +83,23 @@ export function inputSchema(op: Operation): z.ZodType<Query> {
       if (op === 'showtimes' && q.city && (q.cinema_id || q.movie_id)) ctx.addIssue({ code: 'custom', path: ['city'], message: 'Cinex: usa city sola para todas las sedes de la ciudad, o cinema_id/movie_id sin city.' });
     }
   })) as unknown as z.ZodType<Query>;
+}
+
+/**
+ * Cancellation and, when the client sent a progressToken, progress
+ * notifications for one tool call. Progress counts completed provider reads
+ * in fan-outs; the value only increases, as the protocol requires.
+ */
+function callOptions(ctx: ServerContext): CallOptions {
+  const token = ctx.mcpReq._meta?.progressToken;
+  if (token === undefined) return { signal: ctx.mcpReq.signal };
+  let progress = 0;
+  return {
+    signal: ctx.mcpReq.signal,
+    progress: message => {
+      void ctx.mcpReq.notify({ method: 'notifications/progress', params: { progressToken: token, progress: ++progress, message } }).catch(() => {});
+    },
+  };
 }
 
 export type AccountTools = {
@@ -168,7 +187,7 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
     })),
     outputSchema: SeatResult, annotations,
   }, async ({ include_seats, ...args }, ctx) => {
-    const data = await service.seats(args, ctx.mcpReq.signal);
+    const data = await service.seats(args, callOptions(ctx));
     // The ASCII map carries every label and state; the per-seat list is ~10x larger.
     if (!include_seats) delete data.seats;
     if ((publicHosted || accounts) && data.status === 'auth_required') data.warnings = ['Conecta tu cuenta mediante connect_account y repite get_seats. ' + authGuidance];
@@ -189,7 +208,7 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
     } as Record<Operation, string>)[op],
     description, inputSchema: inputSchema(op), outputSchema: outputSchema(op), annotations,
   }, async (args, ctx) => {
-    const data = await service.query(op, args as Query, ctx.mcpReq.signal);
+    const data = await service.query(op, args as Query, callOptions(ctx));
     if (publicHosted && data.status === 'auth_required') data.warnings = ['El proveedor exige una cuenta para esta consulta. Llama connect_account con este proveedor para iniciar la autorización de Cinve y obtener el enlace privado del cine. Presenta el enlace al usuario; después de conectar, comprueba get_auth_status y repite esta consulta. No busques páginas de acceso en la web ni pidas contraseñas o tokens en el chat. Los datos públicos siguen disponibles. ' + authGuidance];
     // A provider-level failure is still a valid Result payload, but MCP clients
     // need isError to distinguish it from an empty/available business result.

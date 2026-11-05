@@ -3,6 +3,7 @@ import { CinexCinemaCatalog } from './cinex-cinemas.js';
 import { DataError, folded, operationItemSchema, PublicUrl, Result, today, Id } from './core.js';
 import type { DataItem, Operation, Query, QueryResult } from './core.js';
 import { HttpClient, ReadContext } from './http.js';
+import type { CallOptions } from './http.js';
 import { cinepic, cinesunidos, cinex } from './providers.js';
 
 const resultWarningLimit = 64;
@@ -61,12 +62,12 @@ export const capabilities = {
 };
 export class CinemaService {
   constructor(private http = new HttpClient(), private cinexCatalog = new CinexCinemaCatalog()) {}
-  async seats(q: Query, signal?: AbortSignal) { return getSeatMap(this.http, q, signal); }
+  async seats(q: Query, call?: CallOptions) { return getSeatMap(this.http, q, call); }
   async authStatus() { return Promise.all((['cinex', 'cinesunidos'] as const).map(p => this.http.sessions.status(p))); }
-  async query(op: Operation, q: Query, signal?: AbortSignal): Promise<QueryResult> {
+  async query(op: Operation, q: Query, call?: CallOptions): Promise<QueryResult> {
     // One commercial date for the entire operation, including midnight boundaries.
     if (!q.date && (op === 'showtimes' || (op === 'movies' && q.provider !== 'cinex'))) q = { ...q, date: today() };
-    const c = new ReadContext(this.http, q.refresh, signal);
+    const c = new ReadContext(this.http, q.refresh, call);
     const result: QueryResult = { provider: q.provider, status: 'empty', queried_at: new Date().toISOString(), timezone: 'America/Caracas', sources: [], items: [], warnings: [], total: 0, next_offset: null, partial: false };
     try {
       if (q.cinema_id?.startsWith('directory-')) throw new DataError('unavailable', 'Esta sede no tiene código de consulta verificado. Consulta el enlace oficial devuelto por list_cinemas; el ID directory- solo identifica la sede conocida.');

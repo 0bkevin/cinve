@@ -423,6 +423,9 @@ export function assertPublicRead(value: string) {
   if (!allowed) throw new DataError('error', 'Ruta de consulta pública no permitida.');
 }
 
+/** Per-call options from the MCP request: its cancellation and progress reporting. */
+export type CallOptions = { signal?: AbortSignal; progress?: (message: string) => void };
+
 export class ReadContext {
   sources: EvidenceSource[] = [];
   warnings: string[] = [];
@@ -432,9 +435,13 @@ export class ReadContext {
    * further provider reads, so fan-outs stop at their next read; reads already
    * in flight finish, since other callers may share them through the cache.
    */
-  constructor(private http: HttpClient, private refresh = false, private signal?: AbortSignal) {}
+  constructor(private http: HttpClient, private refresh = false, private call: CallOptions = {}) {}
   private checkCancelled() {
-    if (this.signal?.aborted) throw new DataError('error', 'La consulta fue cancelada por el cliente.');
+    if (this.call.signal?.aborted) throw new DataError('error', 'La consulta fue cancelada por el cliente.');
+  }
+  /** Reports one completed step of a fan-out, when the client asked for progress. */
+  progress(message: string) {
+    try { this.call.progress?.(message); } catch { /* Progress is advisory; it never fails a read. */ }
   }
   async authenticated(provider: AuthProviderId, url: string): Promise<string> {
     this.checkCancelled();

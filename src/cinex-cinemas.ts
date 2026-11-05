@@ -214,6 +214,7 @@ export class CinexCinemaCatalog {
           directory_status: present ? 'listed' as const : 'not_listed' as const };
       }));
       items.push(...batch.filter((v): v is NonNullable<typeof v> => v !== undefined));
+      c.progress(`Cinex: ${Math.min(i + 4, work.length)} de ${work.length} sedes comprobadas.`);
     }
     finishWarnings();
     return items;

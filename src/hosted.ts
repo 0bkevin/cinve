@@ -16,6 +16,7 @@ import { HostedHttpClient } from './hosted-http.js';
 import { SessionStore, login } from './auth.js';
 import type { AuthSession, AuthProviderId } from './auth.js';
 import type { Operation, Query } from './core.js';
+import type { CallOptions } from './http.js';
 import { ConnectionLinks } from './hosted-links.js';
 import { EncryptedSessionStore, HostedUsers, digest } from './hosted-store.js';
 import { loginPage, loginScript } from './auth-web.js';
@@ -32,8 +33,8 @@ class AnonymousSessions extends SessionStore {
 
 class HostedService extends CinemaService {
   constructor(http: HttpClient, catalog: CinexCinemaCatalog) { super(http, catalog); }
-  override async query(op: Operation, q: Query, signal?: AbortSignal) {
-    const result = await super.query(op, q, signal);
+  override async query(op: Operation, q: Query, call?: CallOptions) {
+    const result = await super.query(op, q, call);
     if (result.status === 'auth_required') result.warnings = ['Conecta tu cuenta con connect_account. Introduce tus credenciales solo en el enlace privado, nunca en el chat.'];
     return result;
   }

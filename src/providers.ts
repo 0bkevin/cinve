@@ -323,6 +323,7 @@ async function cinesUnidosGateway(op: Operation, q: Query, c: ReadContext, reque
           .map(normalize).filter((item): item is DataItem => item !== undefined));
         succeeded++;
       } catch (error) { failures.push(error); }
+      c.progress(`Cines Unidos: ${succeeded + failures.length} de ${work.length} títulos consultados.`);
     }
   };
   await Promise.all(Array.from({ length: Math.min(cuGatewayWorkers, work.length) }, worker));
@@ -589,6 +590,7 @@ async function cinexCityShowtimes(q: Query, c: ReadContext, catalog: CinexCinema
       } catch (error) {
         failed.push(v.name); firstError ??= error;
       }
+      c.progress(`Cinex: ${succeeded + failed.length} de ${work.length} sedes leídas.`);
     }
   };
   await Promise.all(Array.from({ length: Math.min(cinexCityWorkers, work.length) }, worker));

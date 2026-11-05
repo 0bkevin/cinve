@@ -104,6 +104,10 @@ la función esté agotada.
 - Hay como máximo dos consultas activas y 32 en cola por origen.
 - Si el cliente cancela una llamada, Cinve no inicia más lecturas para ella; las
   que ya están en curso terminan, porque otras consultas pueden compartirlas.
+- Si el cliente envía un `progressToken`, las consultas que leen muchas fuentes
+  (descubrimiento de sedes Cinex, funciones Cinex por ciudad y la API de búsqueda
+  de Cines Unidos) envían `notifications/progress` con un valor creciente y un
+  mensaje como «Cinex: 3 de 9 sedes leídas.».
 - Las instrucciones del servidor son breves (menos de 2.048 caracteres en todos
   los modos) y empiezan por las reglas esenciales, porque algunos clientes solo
   muestran el comienzo. Las reglas de asientos están en la descripción de

@@ -309,11 +309,11 @@ test('a cancelled call starts no further provider reads', async () => {
     if (url.pathname.endsWith('/sessions')) { sessionReads++; controller.abort(); return Response.json([]); }
     return new Response('missing', { status: 404 });
   });
-  const r = await new CinemaService(http).query('showtimes', { provider: 'cinesunidos', city: 'Caracas', date: '2026-11-04' }, controller.signal);
+  const r = await new CinemaService(http).query('showtimes', { provider: 'cinesunidos', city: 'Caracas', date: '2026-11-04' }, { signal: controller.signal });
   assert.ok(sessionReads <= 4, `only the batch already in flight is read (${sessionReads})`);
   assert.equal(r.partial, true, 'the titles that were never read make the result partial');
   const before = sessionReads;
-  const cancelled = await new CinemaService(http).query('showtimes', { provider: 'cinesunidos', city: 'Valencia' }, controller.signal);
+  const cancelled = await new CinemaService(http).query('showtimes', { provider: 'cinesunidos', city: 'Valencia' }, { signal: controller.signal });
   assert.equal(cancelled.status, 'error'); assert.equal(sessionReads, before);
   assert.ok(cancelled.warnings.some(w => /cancelada/.test(w)), cancelled.warnings.join(' | '));
 });
