@@ -52,13 +52,27 @@ export async function createRemoteServer(config: { url: string; token: string })
   for (const tool of tools) {
     server.registerTool(tool.name, {
       title: tool.title, description: tool.description, annotations: tool.annotations,
+      ...(tool.icons ? { icons: tool.icons } : {}), ...(tool._meta ? { _meta: tool._meta } : {}),
       inputSchema: upstreamSchema(tool.inputSchema as JsonSchemaType),
       ...(tool.outputSchema ? { outputSchema: upstreamSchema(tool.outputSchema as JsonSchemaType) } : {}),
     }, async (args, ctx) => {
       // Forward tool metadata as well as ordinary results, and the caller's
       // cancellation. This bridge does not implement elicitation, so it
       // intentionally does not advertise it.
-      const result = await client.callTool({ name: tool.name, arguments: args as Record<string, unknown> }, { signal: ctx.mcpReq.signal });
+      // Forward the caller's application _meta. Its progress token is the
+      // caller's: the upstream call gets its own, and each upstream progress
+      // update is re-sent to the caller under the caller's token.
+      const { progressToken, ...meta } = ctx.mcpReq._meta ?? {};
+      const result = await client.callTool(
+        { name: tool.name, arguments: args as Record<string, unknown>, ...(Object.keys(meta).length ? { _meta: meta } : {}) },
+        {
+          signal: ctx.mcpReq.signal,
+          ...(progressToken === undefined ? {} : {
+            onprogress: progress => {
+              void ctx.mcpReq.notify({ method: 'notifications/progress', params: { ...progress, progressToken } }).catch(() => {});
+            },
+          }),
+        });
       const { _meta, ...body } = result;
       const forwarded = stripServerIdentity(_meta);
       return { ...body, ...(forwarded ? { _meta: forwarded } : {}) } as typeof result;

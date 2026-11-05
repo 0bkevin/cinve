@@ -93,7 +93,12 @@ test('stdio bridge forwards application metadata but keeps its own server identi
   }, async () => ({ content: [{ type: 'text', text: '{"ok":true}' }], structuredContent: { ok: true }, _meta: { 'fixture-key': 'preserved' } }));
   upstream.registerTool('echo_fixture', {
     description: 'Echo', inputSchema: z.object({ city: z.string().min(1).describe('Ciudad') }).strict(), annotations: { readOnlyHint: true },
-  }, async ({ city }) => ({ content: [{ type: 'text', text: city }] }));
+    _meta: { 'fixture/tool': 'kept' },
+  }, async ({ city }, ctx) => {
+    const token = ctx.mcpReq._meta?.progressToken;
+    if (token !== undefined) for (const progress of [1, 2]) await ctx.mcpReq.notify({ method: 'notifications/progress', params: { progressToken: token, progress, message: `paso ${progress}` } });
+    return { content: [{ type: 'text', text: `${city}|${String(ctx.mcpReq._meta?.['fixture/request'] ?? '')}` }] };
+  });
   const upstreamHandler = createMcpHandler(() => upstream, { maxSubscriptions: 0, keepAliveMs: 0 });
   const http = nodeServer((req, res) => { void toNodeHandler(upstreamHandler)(req, res); });
   await new Promise<void>(resolve => http.listen(0, '127.0.0.1', resolve));
@@ -113,7 +118,13 @@ test('stdio bridge forwards application metadata but keeps its own server identi
   const echo = (await client.listTools()).tools.find(tool => tool.name === 'echo_fixture');
   assert.equal(echo?.description, 'Echo'); assert.equal(echo?.annotations?.readOnlyHint, true);
   assert.deepEqual((echo?.inputSchema as { required?: string[] }).required, ['city']);
-  assert.equal(((await client.callTool({ name: 'echo_fixture', arguments: { city: 'Caracas' } })).content[0] as { text: string }).text, 'Caracas');
+  assert.equal(echo?._meta?.['fixture/tool'], 'kept', 'tool-definition metadata is kept');
+  assert.equal(((await client.callTool({ name: 'echo_fixture', arguments: { city: 'Caracas' } })).content[0] as { text: string }).text, 'Caracas|');
+  // Request metadata reaches upstream, and upstream progress returns to the caller.
+  const updates: { progress: number; message?: string }[] = [];
+  const withMeta = await client.callTool({ name: 'echo_fixture', arguments: { city: 'Caracas' }, _meta: { 'fixture/request': 'forwarded' } }, { onprogress: p => updates.push(p) });
+  assert.equal((withMeta.content[0] as { text: string }).text, 'Caracas|forwarded');
+  assert.deepEqual(updates.map(u => [u.progress, u.message]), [[1, 'paso 1'], [2, 'paso 2']]);
   // Validation stays upstream, with its own messages.
   const invalid = await client.callTool({ name: 'echo_fixture', arguments: {} });
   assert.equal(invalid.isError, true); assert.match(JSON.stringify(invalid.content), /city/);
