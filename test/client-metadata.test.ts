@@ -26,8 +26,16 @@ test('a host that resolves to loopback is refused before any connection', async 
 test('a metadata document is valid only for its own URL and for public clients', () => {
   assert.deepEqual(validateClientMetadata(url, doc), { client_id: url, client_name: 'Assistant', redirect_uris: doc.redirect_uris });
   assert.equal(validateClientMetadata(url, { ...doc, client_name: undefined }).client_name, 'assistant.example');
+  assert.ok(validateClientMetadata(url, { ...doc, token_endpoint_auth_methods_supported: ['none', 'private_key_jwt'] }));
+  assert.ok(validateClientMetadata(url, { ...doc, jwks: { keys: [{ kty: 'EC', crv: 'P-256', x: 'x', y: 'y' }] } }), 'public keys are allowed');
   for (const bad of [{ ...doc, client_id: 'https://other.example/c.json' }, { ...doc, redirect_uris: [] }, { ...doc, redirect_uris: ['https://x.example/cb#f'] },
-    { ...doc, client_secret: 's' }, { ...doc, token_endpoint_auth_method: 'private_key_jwt' }, { ...doc, grant_types: ['client_credentials'] }, 'not json'])
+    { ...doc, client_secret: 's' }, { ...doc, token_endpoint_auth_method: 'private_key_jwt' }, { ...doc, grant_types: ['client_credentials'] }, 'not json',
+    // A confidential method declared only through the plural property is still confidential.
+    { ...doc, token_endpoint_auth_method: undefined, token_endpoint_auth_methods_supported: ['private_key_jwt'] },
+    { ...doc, token_endpoint_auth_methods_supported: ['private_key_jwt'] },
+    { ...doc, jwks: { keys: [{ kty: 'oct', k: 'private-secret' }] } },
+    { ...doc, jwks: { keys: [{ kty: 'EC', crv: 'P-256', x: 'x', y: 'y', d: 'private' }] } },
+    { ...doc, jwks: { keys: [] }, jwks_uri: 'https://assistant.example/jwks.json' }])
     assert.throws(() => validateClientMetadata(url, bad), JSON.stringify(bad));
 });
 

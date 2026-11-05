@@ -49,6 +49,7 @@ const metadataDocuments: Record<string, unknown> = {
   [metadataUrl]: { client_id: metadataUrl, client_name: 'Metadata assistant', redirect_uris: ['https://assistant.example/callback'], token_endpoint_auth_method: 'none' },
   'https://assistant.example/oauth/wrong-id.json': { client_id: 'https://other.example/client.json', redirect_uris: ['https://assistant.example/callback'] },
   'https://assistant.example/oauth/secret.json': { client_id: 'https://assistant.example/oauth/secret.json', client_secret: 'x', redirect_uris: ['https://assistant.example/callback'] },
+  'https://assistant.example/oauth/confidential.json': { client_id: 'https://assistant.example/oauth/confidential.json', token_endpoint_auth_methods_supported: ['private_key_jwt'], redirect_uris: ['https://assistant.example/callback'] },
 };
 const clientMetadata: ClientMetadataFetcher = async url => {
   if (!(url in metadataDocuments)) throw new Error('404');
@@ -628,7 +629,8 @@ test('clients can identify with a Client ID Metadata Document instead of registe
   assert.equal(refreshed.status, 200);
   // Documents that do not match their URL, carry a secret, or cannot be fetched are refused
   // without redirecting, and so is a redirect URI the document does not list.
-  for (const client_id of ['https://assistant.example/oauth/wrong-id.json', 'https://assistant.example/oauth/secret.json', 'https://assistant.example/oauth/missing.json']) {
+  for (const client_id of ['https://assistant.example/oauth/wrong-id.json', 'https://assistant.example/oauth/secret.json',
+    'https://assistant.example/oauth/confidential.json', 'https://assistant.example/oauth/missing.json']) {
     const response = await fetch((await authorizationRequest(f.origin, client_id)).url, { redirect: 'manual' });
     assert.equal(response.status, 400, client_id); assert.equal(response.headers.get('location'), null);
   }

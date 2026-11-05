@@ -116,16 +116,24 @@ export const redirectUri = z.string().max(2048).refine(value => {
   } catch { return false; }
 });
 
+// Members of a JWK that only a private or symmetric key carries.
+const privateKeyMembers = ['d', 'p', 'q', 'dp', 'dq', 'qi', 'oth', 'k'];
 const metadataDocument = z.object({
   client_id: z.string(),
   client_name: z.string().trim().min(1).max(100).optional(),
   redirect_uris: z.array(redirectUri).min(1).max(10),
-  // Cinve's authorization server serves public clients only.
-  token_endpoint_auth_method: z.literal('none').optional(),
+  // Cinve's authorization server serves public clients only. The draft lets a
+  // document declare its method with either property; both are honoured.
+  token_endpoint_auth_method: z.string().optional(),
+  token_endpoint_auth_methods_supported: z.array(z.string()).optional(),
   grant_types: z.array(z.string()).optional(),
   response_types: z.array(z.string()).optional(),
+  // A metadata document is public, so it must never carry a shared secret
+  // or private/symmetric key material, and jwks and jwks_uri are exclusive.
   client_secret: z.never().optional(),
   client_secret_expires_at: z.never().optional(),
+  jwks: z.object({ keys: z.array(z.record(z.string(), z.unknown())) }).optional(),
+  jwks_uri: z.string().optional(),
 }).passthrough();
 
 export type ClientMetadata = { client_id: string; client_name: string; redirect_uris: string[] };
@@ -135,6 +143,11 @@ export function validateClientMetadata(url: string, document: unknown): ClientMe
   const parsed = metadataDocument.safeParse(document);
   if (!parsed.success || parsed.data.client_id !== url) throw new Error('Invalid client metadata document.');
   const d = parsed.data;
+  if (d.token_endpoint_auth_method !== undefined && d.token_endpoint_auth_method !== 'none') throw new Error('Only public clients (token_endpoint_auth_method none) are supported.');
+  if (d.token_endpoint_auth_methods_supported && !d.token_endpoint_auth_methods_supported.includes('none')) throw new Error('Only public clients (token_endpoint_auth_method none) are supported.');
+  if (d.token_endpoint_auth_method && d.token_endpoint_auth_methods_supported && !d.token_endpoint_auth_methods_supported.includes(d.token_endpoint_auth_method)) throw new Error('Inconsistent client authentication methods.');
+  if (d.jwks && d.jwks_uri !== undefined) throw new Error('jwks and jwks_uri are mutually exclusive.');
+  if (d.jwks?.keys.some(key => key.kty === 'oct' || privateKeyMembers.some(member => member in key))) throw new Error('Client metadata must not contain private or symmetric keys.');
   if (d.grant_types && !d.grant_types.includes('authorization_code')) throw new Error('Client does not use the authorization code grant.');
   if (d.response_types && !d.response_types.includes('code')) throw new Error('Client does not use the code response type.');
   return { client_id: url, client_name: d.client_name ?? new URL(url).hostname, redirect_uris: d.redirect_uris };
