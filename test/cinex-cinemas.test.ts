@@ -569,3 +569,19 @@ test('a cancelled call does not make the shared Cinex catalog forget verified ve
   assert.equal((await s.query('showtimes', q)).status, 'empty');
   assert.ok(!requests.includes('/cines.html'), `the remembered venue URL must survive the cancellation; read: ${requests.join(', ')}`);
 });
+
+test('Cinex areas from list_cities include the venues the directory labels with their town', async () => {
+  const directory = () => card('sotaventolaguaira', 'SOTAVENTO LA GUAIRA', 'xSTV.jpg', 'Maiquetía') + card('sambilparaguana', 'SAMBIL PARAGUANA', 'xSBP.jpg', 'Punto Fijo')
+    + card('plazamayor', 'PLAZA MAYOR', 'x30.jpg', 'Lechería') + card('costamall', 'COSTA MALL', 'x39.jpg', 'Cabimas') + card('lagomall', 'LAGO MALL', 'xLMM.jpg', 'Maracaibo');
+  const codes = { STV: [{ siglas: 'STV', name: 'SOTAVENTO LA GUAIRA' }], SBP: [{ siglas: 'SBP', name: 'SAMBIL PARAGUANA' }], '30': [{ siglas: '30', name: 'PLAZA MAYOR' }],
+    '39': [{ siglas: '39', name: 'COSTA MALL' }], LMM: [{ siglas: 'LMM', name: 'LAGO MALL' }] };
+  const { s } = service(directory, {}, codes);
+  const names = async (city: string) => (await s.query('cinemas', { provider: 'cinex', city })).items.map(i => [i.name, i.city]);
+  assert.deepEqual(await names('LA GUAIRA'), [['SOTAVENTO LA GUAIRA', 'Maiquetía']]);
+  assert.deepEqual(await names('PARAGUANÁ'), [['SAMBIL PARAGUANA', 'Punto Fijo']]);
+  assert.deepEqual(await names('LECHERÍAS'), [['PLAZA MAYOR', 'Lechería']]);
+  assert.deepEqual((await names('MARACAIBO')).sort(), [['COSTA MALL', 'Cabimas'], ['LAGO MALL', 'Maracaibo']]);
+  assert.deepEqual(await names('Punto Fijo'), [['SAMBIL PARAGUANA', 'Punto Fijo']], 'the town itself still works');
+  const none = await s.query('cinemas', { provider: 'cinex', city: 'Atlantis' });
+  assert.equal(none.total, 0); assert.ok(none.warnings.some(w => /Ninguna sede del directorio Cinex corresponde/.test(w)), none.warnings.join(' | '));
+});

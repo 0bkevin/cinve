@@ -20,6 +20,25 @@ function imageCode(image = ''): string | undefined {
 const seedVenues: readonly Venue[] = [
   { href: 'cinex-metropolisbarquisimeto.html', name: 'METROPOLIS BARQUISIMETO', city: 'Barquisimeto' },
 ];
+/**
+ * The directory labels each venue with its town ("Cinex Sotavento, Maiquetía"),
+ * but list_cities returns Cinex's own area names (LA GUAIRA, PARAGUANÁ,
+ * LECHERÍAS), and the site's own city filter has no mapping (cinemasdata is
+ * empty). Without this table those areas listed no venue at all. Keys and
+ * values are folded; a venue keeps its town as its city.
+ */
+const cityAreas: Readonly<Record<string, string>> = {
+  maiquetia: 'la guaira',
+  'punto fijo': 'paraguana',
+  lecheria: 'lecherias',
+  // Cinex lists no Cabimas area; Costa Mall is the Zulia venue nearest Maracaibo.
+  cabimas: 'maracaibo',
+};
+/** Whether a venue labelled with `town` belongs to the requested city or area. */
+export function inCinexCity(town: string, city: string): boolean {
+  const venue = folded(town), wanted = folded(city);
+  return venue === wanted || cityAreas[venue] === wanted;
+}
 type Verified = { url: string; name: string; aliases: string[]; metadataConfirmed: boolean };
 type Located = { venue: Venue; metadataConfirmed: boolean };
 
@@ -122,8 +141,11 @@ export class CinexCinemaCatalog {
     for (const [href, venue] of listed) candidates.set(href, venue);
     const items: DataItem[] = [];
     const venues = [...candidates.values()].filter(v =>
-      (!q.city || folded(v.city) === folded(q.city)) &&
+      (!q.city || inCinexCity(v.city, q.city)) &&
       (!q.query || folded(v.name).includes(folded(q.query))));
+    // A city from list_cities that no directory label maps to would otherwise
+    // look like a city without cinemas.
+    if (q.city && !venues.length) warn('Ninguna sede del directorio Cinex corresponde a esta ciudad; list_cinemas sin city devuelve todas las sedes con su localidad.');
     const work = venues.slice(0, maxDiscoveryVenues);
     if (venues.length > work.length) {
       c.partial = true;
