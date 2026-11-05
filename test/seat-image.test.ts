@@ -34,7 +34,7 @@ test('seat maps follow each provider website: Cinepic screen on top, numbered ri
   assert.deepEqual(seatLayout('cinepic', { butacas: [{ ...cp('1', 'A:1'), invertida: '0' }] }).column_order, 'ascending');
 });
 
-test('Cines Unidos maps put the screen below; Cinex maps never claim a screen side', () => {
+test('Cines Unidos and Cinex maps put the screen below; an unverified side is never drawn', () => {
   const seats = [{ id: '1:A:1', label: 'A:1', row: 'A', area: '1', row_index: 0, column_index: 0, status: 'available' as const, provider_status: '0' },
     { id: '1:B:1', label: 'B:1', row: 'B', area: '1', row_index: 1, column_index: 0, status: 'unknown' as const, provider_status: '9' }];
   const cu = renderSeatMapSvg(seats, seatLayout('cinesunidos'), { ...header, provider: 'cinesunidos', cinema: 'Sede 1005' });
@@ -42,9 +42,12 @@ test('Cines Unidos maps put the screen below; Cinex maps never claim a screen si
   assert.match(cu, /Cines Unidos · Sede 1005/);
   assert.match(cu, /Desconocido \(1\)/); assert.match(cu, /no significa libre ni agotado/);
   assert.equal(renderSeats(seats, seatLayout('cinesunidos')).split('\n').at(-1), '[ PANTALLA ]');
+  // cinex.com.ve draws its screen image right after the grid, below row A.
   const cinex = renderSeatMapSvg(seats, seatLayout('cinex'), { ...header, provider: 'cinex', cinema: 'Sede SBC' });
-  assert.doesNotMatch(cinex, /PANTALLA/); assert.match(cinex, /La web del cine no indica el lado de la pantalla/);
-  assert.match(renderSeats(seats, seatLayout("cinex")), /que no indica el lado de la pantalla/);
+  assert.ok(cinex.indexOf('PANTALLA') > cinex.indexOf('<title>B:1')); assert.doesNotMatch(cinex, /no indica el lado/);
+  const unverified = { screen: 'unverified' as const, column_order: 'ascending' as const };
+  assert.doesNotMatch(renderSeatMapSvg(seats, unverified, header), /PANTALLA/); assert.match(renderSeatMapSvg(seats, unverified, header), /La web del cine no indica el lado de la pantalla/);
+  assert.match(renderSeats(seats, unverified), /que no indica el lado de la pantalla/);
   // Seat numbers come from the label, and provider text is escaped.
   assert.equal(seatNumber({ label: 'B12', row: 'B' }), '12'); assert.equal(seatNumber({ label: 'A:5', row: 'A' }), '5');
   assert.doesNotMatch(renderSeatMapSvg(seats, seatLayout('cinex'), { ...header, cinema: '<script>' }), /<script>/);
@@ -223,4 +226,17 @@ test('second review: raster budget, real glyph widths, and long tariff names', a
   const r = await new CinemaService(new HttpClient(async () => new Response(body), 15000, new EmptySessionStore())).seats({ provider: 'cinepic', cinema_id: '123300', session_id: 'f1', movie_id: 'p1' });
   assert.match(r.warnings.join(' '), /ofrece en línea 0 entradas GENERAL GENERAL.*…; puede vender menos entradas que las 1 butacas libres/);
   t.diagnostic(`40-area PNG ${png.readUInt32BE(16)}x${png.readUInt32BE(20)}`);
+});
+
+test('an empty Cinex grid reports Cinex\'s own count instead of "no seats"', async () => {
+  // As cinex.com.ve sent it on 2026-11-05 for functions whose grid it builds only after tickets are chosen.
+  const empty = `${cinexInfo(145)}<a id="btnasientosatras" href="boletosdev.php?cinemaid=SBC&sessionid=s1">Atras</a><div style="display: none;">17;~10;</div><div id="mapcontent"><div class="row centermap"></div></div>`;
+  const sessions = new class extends EmptySessionStore { override async headers() { return { Cookie: 'synthetic' }; } };
+  const r = await new CinemaService(new HttpClient(async url => new Response(String(url).endsWith('checklogin.php') ? 'on' : String(url).endsWith('asientosdev.php') ? empty : ''), 15000, sessions)).seats({ provider: 'cinex', cinema_id: 'SBC', session_id: 's1' });
+  assert.equal(r.status, 'unavailable'); assert.equal(r.total, 0);
+  assert.match(r.warnings.join(' '), /Cinex informa 145 asientos disponibles en esta función, pero no envió el mapa/);
+  // Another function's empty page is still rejected by the identity guard first.
+  const other = empty.replace('sessionid=s1', 'sessionid=s2');
+  const wrong = await new CinemaService(new HttpClient(async url => new Response(String(url).endsWith('checklogin.php') ? 'on' : String(url).endsWith('asientosdev.php') ? other : ''), 15000, sessions)).seats({ provider: 'cinex', cinema_id: 'SBC', session_id: 's1' });
+  assert.match(wrong.warnings.join(' '), /no corresponde a la sede y función/);
 });

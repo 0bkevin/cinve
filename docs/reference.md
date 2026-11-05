@@ -113,7 +113,12 @@ de cada cine (comprobado en su código el 5 de noviembre de 2026):
 | --- | --- | --- |
 | Cinepic | Arriba, junto a la fila 1 | De derecha a izquierda en las salas marcadas `invertida` |
 | Cines Unidos | Abajo | De izquierda a derecha |
-| Cinex | `unverified`: su página de asientos no dibuja la pantalla | En el orden de su página, de izquierda a derecha |
+| Cinex | Abajo: su página dibuja la imagen de la pantalla después de la fila A | En el orden de su página, de izquierda a derecha |
+
+Para muchas funciones, Cinex solo envía el mapa después de elegir boletos, lo que
+abre una orden temporizada. Cinve no elige boletos porque eso los retendría; en
+ese caso `get_seats` responde `unavailable` con el contador "Asientos
+disponibles" que Cinex sí publica en la misma página.
 
 Además de los datos, `get_seats` devuelve el mapa como imagen PNG (hasta 1200 px
 de ancho) para mostrarla o compartirla, con la leyenda, los contadores y la hora

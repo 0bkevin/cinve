@@ -126,7 +126,7 @@ test('the ASCII map is oriented as each provider website draws it', () => {
   assert.equal(lines[1], 'Orientado como la web del proveedor: pantalla arriba.'); assert.equal(lines[2], '[ PANTALLA ]');
   assert.ok(lines[4].indexOf('A:1O') < lines[4].indexOf('A:5O'), lines[4]);
   assert.deepEqual(seatLayout('cinesunidos'), { screen: 'bottom', column_order: 'ascending' });
-  assert.deepEqual(seatLayout('cinex'), { screen: 'unverified', column_order: 'ascending' });
+  assert.deepEqual(seatLayout('cinex'), { screen: 'bottom', column_order: 'ascending' });
   assert.match(renderSeats(parseCinepicSeats(map)), /que no indica el lado de la pantalla/, 'no layout claims nothing');
 });
 

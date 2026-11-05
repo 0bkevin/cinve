@@ -46,15 +46,15 @@ type Showing = NonNullable<SeatMapResult['showing']>;
  * code on 2026-11-05): Cinepic puts the screen above row 1 and draws "invertida"
  * rooms right to left; Cines Unidos draws rows by index downwards with the
  * screen underneath. Cinex's seat page (read with a session on 2026-11-05)
- * draws its rows and seats in document order and no screen at all, so its
- * screen side is not claimed.
+ * draws its rows and seats in document order (row A last) and its screen
+ * image, pantallawidew.png, right after the grid, with no CSS that flips it.
  */
 export function seatLayout(provider: string, cinepicData?: unknown): Layout {
   if (provider === 'cinepic') {
     const first = Array.isArray(object(cinepicData).butacas) ? object((object(cinepicData).butacas as unknown[])[0]) : {};
     return { screen: 'top', column_order: text(first.invertida) === '1' ? 'descending' : 'ascending' };
   }
-  if (provider === 'cinesunidos') return { screen: 'bottom', column_order: 'ascending' };
+  if (provider === 'cinesunidos' || provider === 'cinex') return { screen: 'bottom', column_order: 'ascending' };
   return { screen: 'unverified', column_order: 'ascending' };
 }
 
@@ -144,6 +144,9 @@ export function parseCinesUnidosSeats(data: unknown): SeatData[] {
     }))));
 }
 
+/** The right function's page arrived with an empty grid. */
+export class EmptyCinexMap extends DataError {}
+
 export function parseCinexSeats(html: string, q: Query): SeatData[] {
   const $ = load(html);
   // Cinex stores the chosen function in its PHP session. Check the back link
@@ -181,7 +184,7 @@ export function parseCinexSeats(html: string, q: Query): SeatData[] {
     });
   });
   if (result.length !== $('#mapcontent [id], #mapcontent [class$="-occupied"]').length) throw new DataError('error', 'El mapa Cinex contiene asientos fuera de filas reconocidas.');
-  if (!result.length) throw new DataError('unavailable', 'Cinex no devolvió asientos para esta función.');
+  if (!result.length) throw new EmptyCinexMap('unavailable', 'Cinex no devolvió asientos para esta función.');
   return validateSeats(result);
 }
 
@@ -258,8 +261,17 @@ export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions)
         await c.authenticated('cinex', `https://www.cinex.com.ve/boletosdev.php?${new URLSearchParams({ cinemaid: result.cinema_id, sessionid: result.session_id })}`);
         return c.authenticated('cinex', 'https://www.cinex.com.ve/asientosdev.php');
       });
-      result.seats = parseCinexSeats(html, q);
       const page = parseCinexShowing(html);
+      try { result.seats = parseCinexSeats(html, q); }
+      catch (e) {
+        // Seen 2026-11-05: for many functions Cinex sends the grid only after tickets are
+        // chosen (boletos_datadev.php, which starts a timed order). Cinve never does that,
+        // since it would hold tickets; Cinex's own counter is still on the page.
+        if (e instanceof EmptyCinexMap && page.available !== undefined) {
+          throw new DataError('unavailable', `Cinex informa ${page.available} asientos disponibles en esta función, pero no envió el mapa: su web solo lo muestra después de elegir boletos, y Cinve no los elige porque eso los retiene. Consulta el mapa en cinex.com.ve.`);
+        }
+        throw e;
+      }
       result.showing = page.showing;
       if (page.available !== undefined && page.available !== result.seats.filter(s => s.status === 'available').length) c.warnings.push('El contador de asientos disponibles de Cinex difiere del mapa; se conserva el estado de cada asiento.');
       c.warnings.push('Cinex: mapa leído sin seleccionar boletos ni asientos. Las categorías especiales pueden requerir una tarifa específica.');
