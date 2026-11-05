@@ -449,6 +449,11 @@ test('browser MCP clients discover OAuth without cookies; approval names are esc
   assert.equal(preflight.status, 204);
   assert.equal(preflight.headers.get('access-control-allow-origin'), '*');
   assert.equal(preflight.headers.get('access-control-allow-credentials'), null);
+  // Required request headers of protocol 2026-07-28 must pass a browser preflight.
+  for (const header of ['mcp-method', 'mcp-name', 'mcp-protocol-version', 'authorization'])
+    assert.ok(preflight.headers.get('access-control-allow-headers')!.toLowerCase().split(/,\s*/).includes(header), header);
+  for (const origin of ['javascript:alert(1)', 'https://assistant.example/path', 'not an origin'])
+    assert.equal((await fetch(f.origin + '/mcp', { method: 'OPTIONS', headers: { Origin: origin } })).status, 403, origin);
   const challenge = await fetch(f.origin + '/mcp', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json', Cookie: 'cinve=untrusted' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'connect_account', arguments: { provider: 'cinex' } } }) });
   assert.equal(challenge.status, 401);

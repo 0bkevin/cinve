@@ -38,6 +38,11 @@ class HostedService extends CinemaService {
     return result;
   }
 }
+/** A serialized web origin (scheme://host[:port]), or "null" from sandboxed documents. */
+function wellFormedOrigin(value: string): boolean {
+  if (value === 'null') return true;
+  try { const u = new URL(value); return ['http:', 'https:'].includes(u.protocol) && u.origin === value; } catch { return false; }
+}
 class HttpError extends Error { constructor(readonly status: number, message: string) { super(message); } }
 async function body(req: IncomingMessage, max: number, deadlineMs = 10000): Promise<unknown> {
   if (req.headers['content-type']?.split(';')[0].trim() !== 'application/json') throw new HttpError(415, 'Se requiere JSON.');
@@ -97,10 +102,16 @@ export async function createHostedApp(options: {
       const ip = typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : req.socket.remoteAddress ?? 'unknown';
       if (await oauth.handle(req, res, ip)) return;
       if (req.url === '/mcp') {
-        // MCP authorization is exclusively bearer-based; cookies are never used.
+        // MCP authorization is exclusively bearer-based; cookies are never used,
+        // so any web origin may call it. The Host check above blocks DNS
+        // rebinding; a present but malformed Origin is still refused, as the
+        // Streamable HTTP transport requires for invalid origins.
+        if (req.headers.origin !== undefined && !wellFormedOrigin(req.headers.origin)) throw new HttpError(403, 'Origen no permitido.');
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, MCP-Protocol-Version, MCP-Session-Id, Last-Event-ID');
+        // Mcp-Method and Mcp-Name are required request headers since protocol
+        // 2026-07-28; the session headers serve older stateful clients.
+        res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, MCP-Protocol-Version, Mcp-Method, Mcp-Name, MCP-Session-Id, Last-Event-ID');
         res.setHeader('Access-Control-Expose-Headers', 'WWW-Authenticate, MCP-Session-Id');
         if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
       } else if (req.headers.origin && req.headers.origin !== origin) throw new HttpError(403, 'Origen no permitido.');
