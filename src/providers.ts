@@ -79,7 +79,7 @@ function movieCP(r: Obj, site: string): DataItem {
  */
 export function cinepicTicketsLeft(tariff: Record<string, unknown>): number | undefined {
   const [tot, vend, temp] = [tariff.tot, tariff.vend, tariff.temp].map(v => /^\d+$/.test(text(v)) ? Number(text(v)) : NaN);
-  return [tot, vend, temp].every(Number.isFinite) ? Math.max(0, tot - vend - temp) : undefined;
+  return [tot, vend, temp].every(Number.isSafeInteger) ? Math.max(0, tot - vend - temp) : undefined;
 }
 
 export async function cpBuy(q: Query, c: ReadContext) {
@@ -96,7 +96,12 @@ export async function cpBuy(q: Query, c: ReadContext) {
   }
   const f = object(functionData);
   const functions = rows(f.datos, 'functionData.datos');
-  if (text(functions[0]?.id) !== q.session_id || text(functions[0]?.codigo) !== q.movie_id) throw new DataError('unavailable', 'La página no corresponde a la función y película solicitadas.');
+  if (text(functions[0]?.id) !== q.session_id) throw new DataError('unavailable', 'La página no corresponde a la función y película solicitadas.');
+  // Cinepic serves a function under another film's movie_id; name the right pair instead of guessing.
+  if (text(functions[0]?.codigo) !== q.movie_id) {
+    const actual = Id.safeParse(text(functions[0]?.codigo));
+    throw new DataError('unavailable', `Esa función es de otra película${actual.success ? ` (movie_id ${actual.data})` : ''}; usa session_id y movie_id de una misma función de get_showtimes.`);
+  }
   return { records, f, url };
 }
 export async function cinepic(op: Operation, q: Query, c: ReadContext): Promise<DataItem[]> {

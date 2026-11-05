@@ -74,8 +74,11 @@ export function parseCinexShowing(html: string): { showing?: Showing; available?
   const line = $('div').filter((_, el) => $(el).children('b').filter((_, b) => /^Asientos disponibles:/.test($(b).text().trim())).length === 1).first().text();
   const parts = line.split('|').map(p => p.replace(/\s+/g, ' ').trim());
   const field = (name: string) => parts.find(p => p.startsWith(`${name}:`))?.slice(name.length + 1).trim();
-  const date = field('Fecha')?.match(/^(\d{2})-(\d{2})-(\d{4})$/);
-  const hour = field('Hora')?.match(/^(\d{1,2}):(\d{2})\s*([ap])\.?\s*m\.?$/i);
+  // Only real calendar dates and clock times: "31-02-2026" and "02:99pm" are dropped.
+  const day = field('Fecha')?.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  const date = day && new Date(Date.UTC(Number(day[3]), Number(day[2]) - 1, Number(day[1]))).toISOString().startsWith(`${day[3]}-${day[2]}-${day[1]}`) ? day : undefined;
+  const clock = field('Hora')?.match(/^(\d{1,2}):(\d{2})\s*([ap])\.?\s*m\.?$/i);
+  const hour = clock && Number(clock[2]) <= 59 ? clock : undefined;
   const h = hour ? Number(hour[1]) % 12 + (hour[3].toLowerCase() === 'p' ? 12 : 0) : NaN;
   const count = field('Asientos disponibles')?.match(/^(\d+) asiento/);
   return {
@@ -106,17 +109,20 @@ function validateSeats(seats: SeatData[]): SeatData[] {
  * matches a tariff's id against tipo_butaca_id: a free seat of another type is
  * drawn "no disponible", and a tariff without id books any free seat.
  */
-export function cinepicBookableTypes(tariffs: unknown): Set<string> | 'all' {
-  const list = Array.isArray(tariffs) ? tariffs.map(object) : [];
+export function cinepicBookableTypes(tariffs: unknown[]): Set<string> | 'all' {
+  const list = tariffs.map(object);
+  // An empty list is not evidence that no seat sells (the page may simply omit it); keep the map's states.
   if (!list.length || list.some(t => !text(t.id))) return 'all';
-  return new Set(list.map(t => String(Number(text(t.id)))));
+  return new Set(list.map(t => seatType(t.id)));
 }
+/** "08" and "8" name one type; non-numeric types compare as text, never as NaN. */
+const seatType = (value: unknown) => { const t = text(value); return /^\d+$/.test(t) ? String(Number(t)) : t; };
 
 export function parseCinepicSeats(data: unknown, bookable: Set<string> | 'all' = 'all'): SeatData[] {
   return validateSeats(rows(object(data).butacas, 'butacas').map(s => ({
     id: text(s.butaca), label: text(s.nombre_butaca), row: text(s.nombre_butaca).split(':')[0], area: 'Sala',
     row_index: Number(s.fila) - 1, column_index: Number(s.columna) - 1,
-    status: text(s.libre) === '1' ? (bookable === 'all' || bookable.has(String(Number(text(s.tipo_butaca_id)))) ? 'available' : 'unavailable')
+    status: text(s.libre) === '1' ? (bookable === 'all' || bookable.has(seatType(s.tipo_butaca_id)) ? 'available' : 'unavailable')
       : text(s.libre) === '0' ? 'occupied' : 'unknown',
     provider_status: text(s.libre), category: text(s.tipo_butaca_id),
   })));
@@ -219,17 +225,20 @@ export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions)
     if (q.provider === 'cinepic') {
       const { records, f } = await cpBuy(q, c);
       const map = findField(records, 'butacasData');
-      const bookable = cinepicBookableTypes(f.tarifas);
-      result.seats = parseCinepicSeats(map, bookable);
+      // Tariffs only refine the map: without a list the seat states still stand.
+      const tariffs = Array.isArray(f.tarifas) ? f.tarifas.map(object) : undefined;
+      result.seats = parseCinepicSeats(map, tariffs ? cinepicBookableTypes(tariffs) : 'all');
       const special = result.seats.filter(s => s.status === 'unavailable').length;
-      if (special) c.warnings.push(`${special} butacas libres de un tipo especial no se venden con las tarifas de esta función; la web de Cinepic las muestra no disponibles.`);
+      if (!tariffs) c.warnings.push('Cinepic no envió las tarifas de esta función; las butacas libres no se pudieron cruzar con los tipos de entrada a la venta.');
+      else if (!tariffs.length) c.warnings.push('Cinepic no listó tarifas en línea para esta función; las butacas libres no se pudieron cruzar con los tipos de entrada y puede que su web no las venda.');
+      else if (special) c.warnings.push(`${special} butacas libres de un tipo especial no se venden con las tarifas de esta función; la web de Cinepic las muestra no disponibles.`);
       result.layout = seatLayout('cinepic', map);
       const fn = rows(f.datos, 'datos')[0], at = text(fn?.fecha).match(/ - (\d{2}):(\d{2})hs$/);
       result.showing = showing({ movie: clean(fn?.pelicula, 200), cinema_name: cinepicVenueName(result.cinema_id), screen: clean(fn?.sala, 60),
         date: /^\d{4}-\d{2}-\d{2}$/.test(text(fn?.fechaDate)) ? text(fn?.fechaDate) : undefined, time: at ? `${at[1]}:${at[2]}` : undefined });
       // The page sells a cupo per tariff, often below the free seats; report it as the page shows it.
       const free = result.seats.filter(s => s.status === 'available').length;
-      const left = rows(f.tarifas, 'functionData.tarifas').map(t => [clean(t.descripcion, 60), cinepicTicketsLeft(t)] as const).filter(([name, n]) => name && n !== undefined);
+      const left = (tariffs ?? []).map(t => [clean(t.descripcion, 60), cinepicTicketsLeft(t)] as const).filter(([name, n]) => name && n !== undefined);
       if (left.some(([, n]) => n! < free)) c.warnings.push(`La web de Cinepic ofrece en línea ${left.map(([name, n]) => `${n} entradas ${name}`).join(', ')}; puede vender menos entradas que las ${free} butacas libres del mapa.`);
       c.warnings.push('La disponibilidad de Cinepic depende también del tipo de entrada elegido. El campo seleccionada del proveedor no indica una reserva del usuario.');
     } else if (q.provider === 'cinesunidos') {

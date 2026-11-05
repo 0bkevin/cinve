@@ -125,7 +125,9 @@ test('Cinepic seats and ticket counters follow the purchase page', async t => {
   const butacas = { butacas: [seat('1', '1'), seat('2', '8'), seat('3', '9'), seat('4', '1', '0'), ...Array.from({ length: 300 }, (_, i) => seat(String(i + 5), '1'))].slice(0, 199) };
   assert.deepEqual(parseCinepicSeats(butacas, cinepicBookableTypes(tarifas)).slice(0, 4).map(s => s.status), ['available', 'unavailable', 'unavailable', 'occupied']);
   assert.equal(cinepicBookableTypes([{ ...tarifas[0], id: '' }]), 'all', 'a tariff without id books any free seat');
-  assert.equal(cinepicBookableTypes([]), 'all');
+  assert.equal(cinepicBookableTypes([]), 'all', 'an empty list keeps the map states');
+  assert.deepEqual([...cinepicBookableTypes([{ id: '08' }, { id: 'vip' }]) as Set<string>], ['8', 'vip']);
+  assert.equal(cinepicTicketsLeft({ tot: '9'.repeat(30), vend: '0', temp: '0' }), undefined, 'an unsafe integer is not a count');
   assert.equal(cinepicTicketsLeft(tarifas[0]), 146); assert.equal(cinepicTicketsLeft({ tot: '5' }), undefined);
   const body = page({ ...cpBuy, butacasData: butacas, functionData: { datos: [{ id: 'f1', codigo: 'p1' }], tarifas } });
   const server = createServer(new CinemaService(new HttpClient(async () => new Response(body), 15000, new EmptySessionStore())));
@@ -177,4 +179,29 @@ test('get_seats warns instead of failing when a map is too large to draw', async
   assert.equal(data.status, 'available'); assert.equal(data.total, 120);
   assert.deepEqual((r.content as { type: string }[]).map(c => c.type), ['text']);
   assert.match(data.warnings.join(' '), /demasiado grande para dibujarlo como imagen/);
+});
+
+test('Cinepic seats tolerate odd tariff lists, and Cinex drops impossible dates and times', async () => {
+  const seat = (columna: string, tipo: string) => ({ butaca: `A-${columna}-1`, nombre_butaca: `A:${columna}`, fila: '1', columna, libre: '1', seleccionada: '1', tipo_butaca_id: tipo, invertida: '0' });
+  // Non-numeric seat types never match each other through NaN.
+  assert.deepEqual(parseCinepicSeats({ butacas: [seat('1', 'general'), seat('2', 'vip')] }, cinepicBookableTypes([{ id: 'vip' }])).map(s => s.status), ['unavailable', 'available']);
+  const run = async (tarifas: unknown) => {
+    const body = page({ ...cpBuy, butacasData: { butacas: [seat('1', '1'), seat('2', '8')] }, functionData: { datos: [{ id: 'f1', codigo: 'p1' }], ...(tarifas === undefined ? {} : { tarifas }) } });
+    return new CinemaService(new HttpClient(async () => new Response(body), 15000, new EmptySessionStore())).seats({ provider: 'cinepic', cinema_id: '123300', session_id: 'f1', movie_id: 'p1' });
+  };
+  for (const missing of [undefined, null]) {
+    const r = await run(missing);
+    assert.equal(r.status, 'available', 'a missing tariff list no longer fails the map');
+    assert.equal(r.available, 2); assert.match(r.warnings.join(' '), /no envió las tarifas/);
+  }
+  const none = await run([]);
+  assert.deepEqual([none.available, none.unavailable], [2, 0]); assert.match(none.warnings.join(' '), /no listó tarifas en línea/);
+  // A function served under another film's movie_id names the right one.
+  const other = page({ ...cpBuy, functionData: { datos: [{ id: 'f1', codigo: 'p9' }], tarifas: [] } });
+  const wrong = await new CinemaService(new HttpClient(async () => new Response(other), 15000, new EmptySessionStore())).seats({ provider: 'cinepic', cinema_id: '123300', session_id: 'f1', movie_id: 'p1' });
+  assert.equal(wrong.status, 'unavailable'); assert.match(wrong.warnings.join(' '), /otra película \(movie_id p9\); usa session_id y movie_id de una misma función/);
+  // Cinex: impossible values are left out rather than passed on.
+  const info = (fecha: string, hora: string) => `<div>CINEX X | Sala 1 | <b>Fecha:</b> ${fecha} | <b>Hora:</b> ${hora} | <b>Asientos disponibles:</b> 3 asiento(s)</div>`;
+  assert.deepEqual([parseCinexShowing(info('31-02-2026', '02:99pm')).showing?.date, parseCinexShowing(info('31-02-2026', '02:99pm')).showing?.time], [undefined, undefined]);
+  assert.deepEqual([parseCinexShowing(info('29-02-2028', '11:59pm')).showing?.date, parseCinexShowing(info('29-02-2028', '11:59pm')).showing?.time], ['2028-02-29', '23:59']);
 });
