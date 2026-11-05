@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CinemaService } from '../src/service.js';
 import { HttpClient, ReadContext } from '../src/http.js';
-import { parseCinexCinemaShowtimes, parseCinexShowtimes } from '../src/providers.js';
+import { cinexSessionDetails, parseCinexCinemaShowtimes, parseCinexShowtimes } from '../src/providers.js';
 
 const epoch = (date: string, time = '20:00') => Math.floor((Date.parse(`${date}T${time}:00Z`) + 4 * 3600000) / 1000);
 const movie = { kind: 'movie' as const, id: 'm', name: 'KNOWN' };
@@ -156,4 +156,14 @@ test('Cinex movie pages compare named rooms and full start times when suppressin
   const c = context();
   const [vip] = parseCinexShowtimes(`<h1>Film</h1><button onclick="checkLogin('v','SBC')" alt="${epoch('2026-11-04')}">Sala VIP</button>`, 'm', '2026-11-04', c);
   assert.equal(vip.screen, 'VIP');
+});
+
+test('Cinex session buttons give the room, the subtitled or dubbed version and special formats as the site shows them', () => {
+  // Button markup as served by cinex-tolon.html on 2026-11-05.
+  const button = (id: string, icon: string, room: string, time: string) => `<div onclick="javascript:checkLogin('${id}','TLN');" alt="${epoch('2026-11-04')}" class="cinemasessionpos"><button type="button" class="btnprog"><img src="https://www.cinex.com.ve/assets/images/${icon}.png.pagespeed.ic.2lrEiVxHrh.webp" class="icoIdioma"><br>${room}<br>${time}<br><div id="loader${id}" style="display:none"></div></button></div>`;
+  const items = parseCinexShowtimes(`<h1>Film</h1>${button('1', 'xsub', 'VIP (Piso 5)', '08:00 pm')}${button('2', 'xes', 'Sala 3', '08:00 pm')}${button('3', 'x4DX', 'Sala 4DX', '08:00 pm')}`, 'm', '2026-11-04', context());
+  const byId = Object.fromEntries(items.map(i => [i.id, [i.screen, i.language, i.format]]));
+  assert.deepEqual(byId, { '1': ['VIP (Piso 5)', 'subtitulada', undefined], '2': ['3', 'es', undefined], '3': ['4DX', undefined, '4DX'] });
+  assert.deepEqual(cinexSessionDetails('Sala 7\n06:40 pm', 'https://www.cinex.com.ve/assets/images/xsub.png'), { screen: '7', language: 'subtitulada' });
+  assert.deepEqual(cinexSessionDetails('06:40 pm', undefined), { screen: undefined }, 'no room line means no room');
 });

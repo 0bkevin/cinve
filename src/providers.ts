@@ -379,13 +379,12 @@ export function parseCinexShowtimes(html: string, movieId: string, date: string,
     if (!match || epoch === undefined || !Number.isInteger(epoch) || epoch < 1e9 || epoch > 1e11) { malformed++; return; }
     const local = new Date(epoch * 1000 - 4 * 3600000).toISOString().slice(0, 19);
     const readable = $(e).clone(); readable.find('br').replaceWith('\n');
-    // Same room syntax as the venue page (Sala 3, Sala VIP).
-    const body = readable.text(), screen = body.match(/Sala\s+([A-Za-z0-9_-]+)/i)?.[1];
+    // Same button layout as the venue page.
+    const details = cinexSessionDetails(readable.text(), $(e).find('img.icoIdioma').attr('src'));
     const key = `${match[2]}:${match[1]}`;
     const list = occurrences.get(key) ?? []; occurrences.set(key, list);
     list.push({ kind: 'showtime', id: match[1], name: title,
-      movie_id: movieId, cinema_id: match[2], date: local.slice(0, 10), time: local.slice(11, 16), starts_at: `${local}-04:00`, screen,
-      language: cinexLanguage($(e).find('img.icoIdioma').attr('src')),
+      movie_id: movieId, cinema_id: match[2], date: local.slice(0, 10), time: local.slice(11, 16), starts_at: `${local}-04:00`, ...details,
       url: `${CX}/sinopsis-${movieId}.html` });
   });
   const items: DataItem[] = [];
@@ -411,9 +410,24 @@ function cinexSessionConflict(a: DataItem, b: DataItem) {
   return a.movie_id !== b.movie_id || a.date !== b.date || a.time !== b.time || a.starts_at !== b.starts_at || (a.screen ?? null) !== (b.screen ?? null);
 }
 
-function cinexLanguage(src?: string): string | undefined {
-  const file = src?.split(/[/?#]/).pop()?.toLowerCase() ?? '';
-  return file.match(/^x?(es|en)(?:[._-]|$)/)?.[1];
+/**
+ * Room, version and format of one Cinex session button. Its text is the room
+ * line ("Sala 3", "Sala VIP", "VIP (Piso 5)") then the time; its icon gives
+ * the version: xes (Spanish, dubbed), xen, xsub (subtitled) or a format such
+ * as x4DX, which then says nothing about the language.
+ */
+export function cinexSessionDetails(text: string, icon?: string): Pick<DataItem, 'screen' | 'language' | 'format'> {
+  const lines = text.split('\n').map(line => line.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const at = lines.findIndex(line => /^\d{1,2}:\d{2}\s*(?:am|pm)?$/i.test(line));
+  // The line before the time; without a time line, only an explicit "Sala ...".
+  const line = at > 0 ? lines[at - 1] : lines.find(l => /^Sala\s+\S/i.test(l));
+  const room = line?.replace(/^Sala\s+/i, '');
+  const screen = room && room.length <= 40 ? room : undefined;
+  const code = icon?.split(/[/?#]/).pop()?.toLowerCase().match(/^x?([a-z0-9]+)(?:[._-]|$)/)?.[1];
+  if (code === 'es' || code === 'en') return { screen, language: code };
+  if (code === 'sub') return { screen, language: 'subtitulada' };
+  if (code && /^(?:2d|3d|4dx|imax|screenx)$/.test(code)) return { screen, format: code.toUpperCase() };
+  return { screen };
 }
 
 const cinexMovieTitle = (name: string) => folded(name).replace(/[^a-z0-9]/g, '');
@@ -489,10 +503,9 @@ export function parseCinexCinemaShowtimes(html: string, movies: DataItem[], cine
       const local = new Date(epoch * 1000 - 4 * 3600000).toISOString().slice(0, 19);
       if (local.slice(0, 10) !== date) return;
       const readable = $(e).clone(); readable.find('br').replaceWith('\n');
-      const body = readable.text(), screen = body.match(/Sala\s+([A-Za-z0-9_-]+)/i)?.[1];
       const item: DataItem = { kind: 'showtime', id: sessionId, name: movie.name, cinema_id: cinemaId, cinema_name: cinemaName, movie_id: movie.id,
-        date, time: local.slice(11, 16), starts_at: `${local}-04:00`, screen,
-        language: cinexLanguage($(e).find('img.icoIdioma').attr('src')), url };
+        date, time: local.slice(11, 16), starts_at: `${local}-04:00`,
+        ...cinexSessionDetails(readable.text(), $(e).find('img.icoIdioma').attr('src')), url };
       const key = `${cinemaId}:${sessionId}`;
       if (suppressed.has(key)) return;
       const previous = items.get(key);
