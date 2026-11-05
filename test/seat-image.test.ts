@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
 import { Client } from '@modelcontextprotocol/client';
-import { parseCinepicSeats, renderSeats, seatLayout } from '../src/seats.js';
+import { parseCinepicSeats, parseCinexShowing, renderSeats, seatLayout } from '../src/seats.js';
 import { renderSeatMapPng, renderSeatMapSvg, seatNumber } from '../src/seat-image.js';
 import { CinemaService } from '../src/service.js';
 import { HttpClient } from '../src/http.js';
@@ -23,7 +23,7 @@ test('seat maps follow each provider website: Cinepic screen on top, numbered ri
   const svg = renderSeatMapSvg(seats, layout, header);
   assert.ok(xOf(svg, 'A:1') < xOf(svg, 'A:4') && xOf(svg, 'A:4') < xOf(svg, 'A:5'), 'A:1 (column 23) is drawn leftmost, as cinepiccandelaria.com shows');
   assert.ok(svg.indexOf('PANTALLA') < svg.indexOf('<title>A:'), 'the screen is drawn above the seats');
-  assert.match(svg, /Cinepic Candelaria · Función 24939/); assert.doesNotMatch(svg, /Cinepic · Cinepic/);
+  assert.match(svg, />Cinepic Candelaria<.*>Función 24939</); assert.doesNotMatch(svg, /Cinepic · Cinepic/);
   assert.match(svg, /Libre \(2\)/); assert.match(svg, /Ocupado \(1\)/); assert.match(svg, /2 libres de 3/);
   assert.match(svg, /Consultado 05\/11\/2026, 12:52/);
   // The ASCII map uses the same orientation.
@@ -42,8 +42,8 @@ test('Cines Unidos maps put the screen below; Cinex maps never claim a screen si
   assert.match(cu, /Desconocido \(1\)/); assert.match(cu, /no significa libre ni agotado/);
   assert.equal(renderSeats(seats, seatLayout('cinesunidos')).split('\n').at(-1), '[ PANTALLA ]');
   const cinex = renderSeatMapSvg(seats, seatLayout('cinex'), { ...header, provider: 'cinex', cinema: 'Sede SBC' });
-  assert.doesNotMatch(cinex, /PANTALLA/); assert.match(cinex, /Posición de la pantalla no verificada/);
-  assert.match(renderSeats(seats, seatLayout('cinex')), /orientacion de pantalla no verificada/);
+  assert.doesNotMatch(cinex, /PANTALLA/); assert.match(cinex, /La web del cine no indica el lado de la pantalla/);
+  assert.match(renderSeats(seats, seatLayout("cinex")), /que no indica el lado de la pantalla/);
   // Seat numbers come from the label, and provider text is escaped.
   assert.equal(seatNumber({ label: 'B12', row: 'B' }), '12'); assert.equal(seatNumber({ label: 'A:5', row: 'A' }), '5');
   assert.doesNotMatch(renderSeatMapSvg(seats, seatLayout('cinex'), { ...header, cinema: '<script>' }), /<script>/);
@@ -76,4 +76,41 @@ test('get_seats returns the map as a PNG by default, as SVG on request, and only
   assert.deepEqual((none.content as { type: string }[]).map(c => c.type), ['text']);
   const failed = await client.callTool({ name: 'get_seats', arguments: { ...args, provider: 'cinex', cinema_id: 'SBC' } });
   assert.deepEqual((failed.content as { type: string }[]).map(c => c.type), ['text'], 'no image without a verified map');
+});
+
+// The function line as cinex.com.ve's seat page printed it on 2026-11-05.
+const cinexInfo = (available: number, hora = '02:45pm') => `<section id="cinexasientodatalistzy"><div class="movie-details"><h3 class="title">LAS ALTAGRACIAS EN NAVIDAD</h3></div><div class="col-md-8"><h3 class="title">Seleccione sus asientos</h3></div>`
+  + `<div style="text-align:center">CINEX SAMBIL CHACAO | Sala 3 | <b>Fecha:</b> 05-11-2026 | <b>Hora:</b> ${hora} | <b>Formato:</b> DIG ESP | <b>Asientos disponibles:</b> ${available} asiento(s)</div></section>`;
+const cinexMap = `<a id="btnasientosatras" href="boletosdev.php?cinemaid=SBC&sessionid=s1">Atras</a><div id="mapcontent"><div class="row centermap"><div class="rowletter">B</div><div id="B1" class="seatestandar" alt="0" onclick="javascript:decideAsientoNew('B1','0','0','1','0001','0','N','N');"></div><div title="B2" class="seatestandar-occupied" alt="B2"></div></div></div>`;
+
+test('the seat result names the function from the same provider response, and checks Cinex\'s own count', async () => {
+  assert.deepEqual(parseCinexShowing(cinexInfo(154)), { showing: { movie: 'LAS ALTAGRACIAS EN NAVIDAD', cinema_name: 'CINEX SAMBIL CHACAO', screen: 'Sala 3', date: '2026-11-05', time: '14:45' }, available: 154 });
+  assert.equal(parseCinexShowing(cinexInfo(1, '12:10am')).showing?.time, '00:10');
+  assert.equal(parseCinexShowing(cinexInfo(1, '12:10pm')).showing?.time, '12:10');
+  assert.equal(parseCinexShowing(cinexInfo(1, '13:10pm')).showing?.time, undefined);
+  assert.deepEqual(parseCinexShowing('<div>otra página</div>'), { showing: undefined, available: undefined });
+  const sessions = new class extends EmptySessionStore { override async headers() { return { Cookie: 'synthetic', Authorization: 'Bearer synthetic' }; } };
+  let info = cinexInfo(1);
+  const cinex = new CinemaService(new HttpClient(async url => new Response(String(url).endsWith('checklogin.php') ? 'on' : String(url).endsWith('asientosdev.php') ? info + cinexMap : ''), 15000, sessions));
+  const q = { provider: 'cinex' as const, cinema_id: 'SBC', session_id: 's1' };
+  const matched = await cinex.seats(q);
+  assert.equal(matched.showing?.movie, 'LAS ALTAGRACIAS EN NAVIDAD'); assert.doesNotMatch(matched.warnings.join(' '), /difiere/);
+  info = cinexInfo(5);
+  assert.match((await cinex.seats(q)).warnings.join(' '), /contador de asientos disponibles de Cinex difiere del mapa/);
+  // Cines Unidos only names the room, and only when every area shares it.
+  let areas = ['SALA 8 - FULL'];
+  const cu = new CinemaService(new HttpClient(async () => Response.json({ seats: { areas: areas.map((description, a) => ({ number: a + 1, description, rows: [{ rowIndexZeroBased: 0, physicalName: 'A', seats: [{ id: '1', status: 0, position: { areaNumber: a + 1, rowIndex: 0, columnIndex: 0 } }] }] })) } }), 15000, sessions));
+  const cuq = { provider: 'cinesunidos' as const, cinema_id: '1008', session_id: 's1' };
+  assert.deepEqual((await cu.seats(cuq)).showing, { screen: 'Sala 8' });
+  areas = ['SALA 8 - FULL', 'SALA 9 - VIP'];
+  assert.equal((await cu.seats(cuq)).showing, undefined);
+});
+
+test('the image header shows the film, venue, room and time, and fits long titles', () => {
+  const seats = parseCinepicSeats(map), layout = seatLayout('cinepic', map);
+  const svg = renderSeatMapSvg(seats, layout, { ...header, movie: 'EL GATO CON SOMBRERO (ESP)', screen: 'Sala 04', date: '2026-11-05', time: '14:15' });
+  assert.match(svg, />EL GATO CON SOMBRERO \(ESP\)</); assert.match(svg, />Cinepic Candelaria · Sala 04</); assert.match(svg, />05\/11\/2026 14:15 · Función 24939</);
+  const long = renderSeatMapSvg(seats, layout, { ...header, movie: 'UNA PELÍCULA '.repeat(10) });
+  assert.match(long, /…<\/text>/); assert.doesNotMatch(long, /(UNA PELÍCULA ){10}/);
+  assert.match(renderSeatMapSvg(seats, layout, header), />Mapa de asientos</);
 });

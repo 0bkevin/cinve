@@ -105,11 +105,15 @@ de cada cine (comprobado en su código el 5 de noviembre de 2026):
 | --- | --- | --- |
 | Cinepic | Arriba, junto a la fila 1 | De derecha a izquierda en las salas marcadas `invertida` |
 | Cines Unidos | Abajo | De izquierda a derecha |
-| Cinex | No verificada: su página de asientos requiere sesión | De izquierda a derecha |
+| Cinex | `unverified`: su página de asientos no dibuja la pantalla | En el orden de su página, de izquierda a derecha |
 
 Además de los datos, `get_seats` devuelve el mapa como imagen PNG (hasta 1200 px
 de ancho) para mostrarla o compartirla, con la leyenda, los contadores y la hora
-de consulta. `image=svg` devuelve el mismo mapa como SVG embebido e
+de consulta. La cabecera nombra la función con `showing` (película, sede, sala,
+fecha y hora), que se lee de la misma respuesta del mapa: completo en Cinex y
+Cinepic; en Cines Unidos solo la sala, porque su mapa no trae la película ni la
+sede. En Cinex se compara además con su contador "Asientos disponibles" y se
+advierte si difiere. `image=svg` devuelve el mismo mapa como SVG embebido e
 `image=none`, solo los datos. Si la imagen no se puede generar, la respuesta
 conserva los datos y lo advierte. La imagen se dibuja con resvg (WebAssembly) y
 la fuente Inter incluida en `src/assets`, sin depender de fuentes del sistema.

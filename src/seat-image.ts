@@ -6,8 +6,8 @@ export type SeatStatus = 'available' | 'occupied' | 'unavailable' | 'unknown';
 export type MapSeat = { label: string; row: string; area: string; row_index: number; column_index: number; status: SeatStatus };
 /** The provider-verified orientation from SeatResult.layout. */
 export type MapLayout = { screen: 'top' | 'bottom' | 'unverified'; column_order: 'ascending' | 'descending' };
-/** cinema: the venue's name when known, else its ID. */
-export type MapHeader = { provider: string; cinema: string; session: string; queriedAt: string };
+/** cinema: the venue's name when known, else its ID. The rest, when the provider named them, label the function. */
+export type MapHeader = { provider: string; cinema: string; session: string; queriedAt: string; movie?: string; screen?: string; date?: string; time?: string };
 
 const providerNames: Record<string, string> = { cinex: 'Cinex', cinesunidos: 'Cines Unidos', cinepic: 'Cinepic' };
 const palette: Record<SeatStatus, { fill: string; stroke: string; text: string; name: string }> = {
@@ -41,13 +41,18 @@ export function renderSeatMapSvg(seats: MapSeat[], layout: MapLayout, header: Ma
   const left = (width - gridWidth) / 2;
   const out: string[] = [];
   let y = PAD;
-  out.push(`<text x="${PAD}" y="${y + 18}" font-size="20" font-weight="700" fill="#202124">Mapa de asientos</text>`);
+  // Inter at these sizes averages about 0.6 em per character.
+  const fit = (value: string, size: number, room: number) => {
+    const max = Math.max(8, Math.floor(room / (size * 0.6)));
+    return value.length > max ? `${value.slice(0, max - 1).trimEnd()}…` : value;
+  };
+  out.push(`<text x="${PAD}" y="${y + 18}" font-size="20" font-weight="700" fill="#202124">${escape(fit(header.movie ?? 'Mapa de asientos', 20, width - PAD * 2))}</text>`);
   const provider = providerNames[header.provider] ?? header.provider;
   const venue = header.cinema.toLowerCase().startsWith(provider.toLowerCase()) ? header.cinema : `${provider} · ${header.cinema}`;
-  out.push(`<text x="${PAD}" y="${y + 40}" font-size="13" fill="#5f6368">${escape(`${venue} · Función ${header.session}`)}</text>`);
-  out.push(`<text x="${width - PAD}" y="${y + 18}" font-size="12" fill="#5f6368" text-anchor="end">${escape(`Consultado ${caracasTime(header.queriedAt)}`)}</text>`);
-  out.push(`<text x="${width - PAD}" y="${y + 36}" font-size="12" fill="#5f6368" text-anchor="end">hora de Caracas</text>`);
-  y += 64;
+  const when = [header.date?.split('-').reverse().join('/'), header.time].filter(Boolean).join(' ');
+  const lines = [[venue, header.screen], [when, `Función ${header.session}`]].map(l => l.filter(Boolean).join(' · '));
+  lines.forEach((line, i) => out.push(`<text x="${PAD}" y="${y + 40 + i * 18}" font-size="13" fill="#5f6368">${escape(fit(line, 13, width - PAD * 2))}</text>`));
+  y += 82;
   // The screen arc bows toward the seats, with its label on the seat side.
   const screen = (top: number, side: 'top' | 'bottom') => {
     const x0 = left, x1 = left + gridWidth, mid = (x0 + x1) / 2;
@@ -90,7 +95,8 @@ export function renderSeatMapSvg(seats: MapSeat[], layout: MapLayout, header: Ma
   out.push(`<text x="${width - PAD}" y="${y + 12.5}" font-size="12" font-weight="700" fill="#202124" text-anchor="end">${counts.available} libres de ${seats.length}</text>`);
   y += 32;
   const notes = [
-    ...(layout.screen === 'unverified' ? ['Posición de la pantalla no verificada para este proveedor.'] : []),
+    `Consultado ${caracasTime(header.queriedAt)}, hora de Caracas.`,
+    ...(layout.screen === 'unverified' ? ['La web del cine no indica el lado de la pantalla; filas y asientos como en su mapa.'] : []),
     ...(counts.unknown ? ['Desconocido: Cinve no pudo interpretar el estado; no significa libre ni agotado.'] : []),
     'Solo consulta: no reserva asientos. La disponibilidad puede cambiar antes de comprar.',
   ];

@@ -4,7 +4,7 @@ import { DataError, Id, Provider, Source, Status, requireArg, text } from './cor
 import type { Query } from './core.js';
 import { HttpClient, ReadContext } from './http.js';
 import type { CallOptions } from './http.js';
-import { cpBuy } from './providers.js';
+import { cinepicVenueName, cpBuy } from './providers.js';
 import { findField, object, rows } from './parsers.js';
 
 // Unicode property escapes (\p{L}) are invalid in Python's re and RE2, and
@@ -32,15 +32,21 @@ export const SeatResult = z.object({
     screen: z.enum(['top', 'bottom', 'unverified']).describe('Lado de la pantalla en el mapa ascii y en la imagen, como lo dibuja la web del proveedor; unverified si no se pudo confirmar.'),
     column_order: z.enum(['ascending', 'descending']).describe('descending: la web del proveedor dibuja column_index de derecha a izquierda; el mapa ascii y la imagen lo respetan.'),
   }),
+  showing: z.object({
+    movie: z.string().max(200).optional(), cinema_name: z.string().max(120).optional(), screen: z.string().max(60).optional(),
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), time: z.string().regex(/^\d{2}:\d{2}$/).optional(),
+  }).optional().describe('La función según la misma respuesta del mapa (texto del proveedor), para rotular la imagen; los campos ausentes no se pudieron leer.'),
   ascii: z.string(),
 });
 export type SeatMapResult = z.infer<typeof SeatResult>;
 type Layout = SeatMapResult['layout'];
+type Showing = NonNullable<SeatMapResult['showing']>;
 /**
  * Orientation as each provider's own seat page draws it (checked in their web
  * code on 2026-11-05): Cinepic puts the screen above row 1 and draws "invertida"
  * rooms right to left; Cines Unidos draws rows by index downwards with the
- * screen underneath. The Cinex seat page needs a session to inspect, so its
+ * screen underneath. Cinex's seat page (read with a session on 2026-11-05)
+ * draws its rows and seats in document order and no screen at all, so its
  * screen side is not claimed.
  */
 export function seatLayout(provider: string, cinepicData?: unknown): Layout {
@@ -50,6 +56,38 @@ export function seatLayout(provider: string, cinepicData?: unknown): Layout {
   }
   if (provider === 'cinesunidos') return { screen: 'bottom', column_order: 'ascending' };
   return { screen: 'unverified', column_order: 'ascending' };
+}
+
+const clean = (value: unknown, max: number) => {
+  const v = typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
+  return v && v.length <= max ? v : undefined;
+};
+/** Drops absent fields; undefined when nothing could be read. */
+function showing(fields: Showing): Showing | undefined {
+  const kept = Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined)) as Showing;
+  return Object.keys(kept).length ? kept : undefined;
+}
+
+/** Cinex's seat page names its function in one line: "CINEX SAMBIL CHACAO | Sala 3 | Fecha: 05-11-2026 | Hora: 02:45pm | ... | Asientos disponibles: 154 asiento(s)". */
+export function parseCinexShowing(html: string): { showing?: Showing; available?: number } {
+  const $ = load(html);
+  const line = $('div').filter((_, el) => $(el).children('b').filter((_, b) => /^Asientos disponibles:/.test($(b).text().trim())).length === 1).first().text();
+  const parts = line.split('|').map(p => p.replace(/\s+/g, ' ').trim());
+  const field = (name: string) => parts.find(p => p.startsWith(`${name}:`))?.slice(name.length + 1).trim();
+  const date = field('Fecha')?.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  const hour = field('Hora')?.match(/^(\d{1,2}):(\d{2})\s*([ap])\.?\s*m\.?$/i);
+  const h = hour ? Number(hour[1]) % 12 + (hour[3].toLowerCase() === 'p' ? 12 : 0) : NaN;
+  const count = field('Asientos disponibles')?.match(/^(\d+) asiento/);
+  return {
+    showing: showing({
+      movie: clean($('#cinexasientodatalistzy .movie-details h3.title').first().text(), 200),
+      cinema_name: parts.length > 2 && !parts[0].includes(':') ? clean(parts[0], 120) : undefined,
+      screen: /^Sala\b/i.test(parts[1] ?? '') ? clean(parts[1], 60) : undefined,
+      date: date ? `${date[3]}-${date[2]}-${date[1]}` : undefined,
+      time: hour && Number(hour[1]) >= 1 && Number(hour[1]) <= 12 ? `${String(h).padStart(2, '0')}:${hour[2]}` : undefined,
+    }),
+    available: count ? Number(count[1]) : undefined,
+  };
 }
 
 function validateSeats(seats: SeatData[]): SeatData[] {
@@ -132,7 +170,7 @@ export function parseCinexSeats(html: string, q: Query): SeatData[] {
 export function renderSeats(seats: SeatData[], layout: Layout = { screen: 'unverified', column_order: 'ascending' }): string {
   const symbols = { available: 'O', occupied: 'X', unavailable: '-', unknown: '?' };
   const lines = ['O libre | X ocupado | - restringido/no disponible | ? desconocido',
-    layout.screen === 'unverified' ? 'Coordenadas del proveedor; orientacion de pantalla no verificada.' : `Orientado como la web del proveedor: pantalla ${layout.screen === 'top' ? 'arriba' : 'abajo'}.`];
+    layout.screen === 'unverified' ? 'Filas y columnas como la web del proveedor, que no indica el lado de la pantalla.' : `Orientado como la web del proveedor: pantalla ${layout.screen === 'top' ? 'arriba' : 'abajo'}.`];
   const screen = '[ PANTALLA ]';
   if (layout.screen === 'top') lines.push(screen);
   let cells = 0;
@@ -171,17 +209,28 @@ export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions)
       const map = findField(records, 'butacasData');
       result.seats = parseCinepicSeats(map);
       result.layout = seatLayout('cinepic', map);
-      const count = Number(rows(f.datos, 'datos')[0]?.entradasDisponibles);
+      const fn = rows(f.datos, 'datos')[0], at = text(fn?.fecha).match(/ - (\d{2}):(\d{2})hs$/);
+      result.showing = showing({ movie: clean(fn?.pelicula, 200), cinema_name: cinepicVenueName(result.cinema_id), screen: clean(fn?.sala, 60),
+        date: /^\d{4}-\d{2}-\d{2}$/.test(text(fn?.fechaDate)) ? text(fn?.fechaDate) : undefined, time: at ? `${at[1]}:${at[2]}` : undefined });
+      const count = Number(fn?.entradasDisponibles);
       if (Number.isFinite(count) && count !== result.seats.filter(s => s.status === 'available').length) c.warnings.push('El contador de entradas del proveedor difiere del mapa; se conserva el estado de cada butaca, sin prometer cupos de venta.');
       c.warnings.push('La disponibilidad de Cinepic depende también del tipo de entrada elegido. El campo seleccionada del proveedor no indica una reserva del usuario.');
     } else if (q.provider === 'cinesunidos') {
       const url = `https://www.cinesunidos.com/api/seats?${new URLSearchParams({ theaterId: result.cinema_id, showTimeId: result.session_id })}`;
-      result.seats = parseCinesUnidosSeats(JSON.parse(await c.authenticated('cinesunidos', url)));
+      const data = JSON.parse(await c.authenticated('cinesunidos', url));
+      result.seats = parseCinesUnidosSeats(data);
+      // Area descriptions read "SALA 8 - FULL"; only a room number shared by every area names the room.
+      const rooms = new Set(rows(object(object(data).seats).areas, 'seats.areas').map(a => text(a.description).match(/^SALA\s+(\d{1,3})\b/i)?.[1]));
+      if (rooms.size === 1 && [...rooms][0]) result.showing = { screen: `Sala ${[...rooms][0]}` };
       c.warnings.push('Los estados especiales se muestran restringidos; verifica sus condiciones en la web del cine.');
     } else if (q.provider === 'cinex') {
       if ((await c.authenticated('cinex', 'https://www.cinex.com.ve/checklogin.php')).trim() !== 'on') throw new DataError('auth_required', 'La sesión Cinex expiró; conecta de nuevo tu cuenta.');
       await c.authenticated('cinex', `https://www.cinex.com.ve/boletosdev.php?${new URLSearchParams({ cinemaid: result.cinema_id, sessionid: result.session_id })}`);
-      result.seats = parseCinexSeats(await c.authenticated('cinex', 'https://www.cinex.com.ve/asientosdev.php'), q);
+      const html = await c.authenticated('cinex', 'https://www.cinex.com.ve/asientosdev.php');
+      result.seats = parseCinexSeats(html, q);
+      const page = parseCinexShowing(html);
+      result.showing = page.showing;
+      if (page.available !== undefined && page.available !== result.seats.filter(s => s.status === 'available').length) c.warnings.push('El contador de asientos disponibles de Cinex difiere del mapa; se conserva el estado de cada asiento.');
       c.warnings.push('Cinex: mapa leído sin seleccionar boletos ni asientos. Las categorías especiales pueden requerir una tarifa específica.');
     } else {
       throw new DataError('unavailable', 'Consulta de asientos no implementada para este proveedor.');
@@ -199,7 +248,7 @@ export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions)
     c.warnings.push('Lectura sin reserva, sin caché local. La disponibilidad puede cambiar; confirma en la web antes de comprar.');
   } catch (e) {
     result.status = e instanceof DataError ? e.status : 'error';
-    result.seats = []; result.available = 0; result.occupied = 0; result.unavailable = 0;
+    result.seats = []; result.showing = undefined; result.available = 0; result.occupied = 0; result.unavailable = 0;
     result.unknown = 0; result.total = 0; result.availability_complete = false; result.ascii = '';
     c.warnings.push(e instanceof DataError ? e.message : 'No se pudo interpretar un mapa de asientos verificable.');
   }

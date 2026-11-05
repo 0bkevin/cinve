@@ -195,7 +195,8 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
     let picture: { type: 'image'; data: string; mimeType: 'image/png' } | { type: 'resource'; resource: { uri: string; mimeType: 'image/svg+xml'; text: string } } | undefined;
     if (data.status === 'available' && data.seats?.length && image !== 'none') {
       try {
-        const svg = renderSeatMapSvg(data.seats, data.layout, { provider: data.provider, cinema: cinepicVenueName(data.cinema_id) ?? `Sede ${data.cinema_id}`, session: data.session_id, queriedAt: data.queried_at });
+        const svg = renderSeatMapSvg(data.seats, data.layout, { provider: data.provider, cinema: data.showing?.cinema_name ?? cinepicVenueName(data.cinema_id) ?? `Sede ${data.cinema_id}`,
+          session: data.session_id, queriedAt: data.queried_at, movie: data.showing?.movie, screen: data.showing?.screen, date: data.showing?.date, time: data.showing?.time });
         picture = image === 'svg'
           ? { type: 'resource', resource: { uri: `cinve://seats/${data.provider}/${data.cinema_id}/${data.session_id}.svg`, mimeType: 'image/svg+xml', text: svg } }
           : { type: 'image', data: Buffer.from(await renderSeatMapPng(svg)).toString('base64'), mimeType: 'image/png' };
