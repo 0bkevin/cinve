@@ -293,3 +293,23 @@ test('server instructions fit client limits in every mode and lead with the core
       assert.ok(text.indexOf(rule) >= 0 && text.indexOf(rule) < 1500, `${mode}: ${rule}`);
   }
 });
+
+test('a cancelled call starts no further provider reads', async () => {
+  const controller = new AbortController();
+  let sessionReads = 0;
+  const http = new HttpClient(async input => {
+    const url = new URL(String(input));
+    if (url.hostname === 'www.cinesunidos.com') return new Response('Just a moment...', { status: 403, headers: { 'cf-mitigated': 'challenge' } });
+    if (url.pathname === '/search/cities') return Response.json(['Caracas']);
+    if (url.pathname.endsWith('/films')) return Response.json(Array.from({ length: 20 }, (_, i) => `Film ${i}`));
+    if (url.pathname.endsWith('/sessions')) { sessionReads++; controller.abort(); return Response.json([]); }
+    return new Response('missing', { status: 404 });
+  });
+  const r = await new CinemaService(http).query('showtimes', { provider: 'cinesunidos', city: 'Caracas', date: '2026-11-04' }, controller.signal);
+  assert.ok(sessionReads <= 4, `only the batch already in flight is read (${sessionReads})`);
+  assert.equal(r.partial, true, 'the titles that were never read make the result partial');
+  const before = sessionReads;
+  const cancelled = await new CinemaService(http).query('showtimes', { provider: 'cinesunidos', city: 'Valencia' }, controller.signal);
+  assert.equal(cancelled.status, 'error'); assert.equal(sessionReads, before);
+  assert.ok(cancelled.warnings.some(w => /cancelada/.test(w)), cancelled.warnings.join(' | '));
+});

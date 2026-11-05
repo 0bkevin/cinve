@@ -32,8 +32,8 @@ class AnonymousSessions extends SessionStore {
 
 class HostedService extends CinemaService {
   constructor(http: HttpClient, catalog: CinexCinemaCatalog) { super(http, catalog); }
-  override async query(op: Operation, q: Query) {
-    const result = await super.query(op, q);
+  override async query(op: Operation, q: Query, signal?: AbortSignal) {
+    const result = await super.query(op, q, signal);
     if (result.status === 'auth_required') result.warnings = ['Conecta tu cuenta con connect_account. Introduce tus credenciales solo en el enlace privado, nunca en el chat.'];
     return result;
   }

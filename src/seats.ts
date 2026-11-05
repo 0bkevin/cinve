@@ -127,13 +127,13 @@ export function renderSeats(seats: SeatData[]): string {
   return lines.join('\n');
 }
 
-export async function getSeatMap(http: HttpClient, q: Query): Promise<z.infer<typeof SeatResult>> {
+export async function getSeatMap(http: HttpClient, q: Query, signal?: AbortSignal): Promise<z.infer<typeof SeatResult>> {
   const result: z.infer<typeof SeatResult> = {
     provider: q.provider, cinema_id: requireArg(q, 'cinema_id'), session_id: requireArg(q, 'session_id'),
     status: 'unavailable', queried_at: new Date().toISOString(), timezone: 'America/Caracas',
     sources: [], warnings: [], seats: [], available: 0, occupied: 0, unavailable: 0, unknown: 0, total: 0, availability_complete: false, ascii: '',
   };
-  const c = new ReadContext(http, true);
+  const c = new ReadContext(http, true, signal);
   try {
     if (q.provider === 'cinepic') {
       const { records, f } = await cpBuy(q, c);

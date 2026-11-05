@@ -427,8 +427,17 @@ export class ReadContext {
   sources: EvidenceSource[] = [];
   warnings: string[] = [];
   partial = false;
-  constructor(private http: HttpClient, private refresh = false) {}
+  /**
+   * @param signal The MCP request's cancellation. A cancelled call starts no
+   * further provider reads, so fan-outs stop at their next read; reads already
+   * in flight finish, since other callers may share them through the cache.
+   */
+  constructor(private http: HttpClient, private refresh = false, private signal?: AbortSignal) {}
+  private checkCancelled() {
+    if (this.signal?.aborted) throw new DataError('error', 'La consulta fue cancelada por el cliente.');
+  }
   async authenticated(provider: AuthProviderId, url: string): Promise<string> {
+    this.checkCancelled();
     const page = await this.http.getAuthenticated(provider, url);
     if (!this.sources.some(s => s.url === page.source.url)) this.sources.push(page.source);
     return page.body;
@@ -438,6 +447,7 @@ export class ReadContext {
   }
   async page(url: string, ttl?: number): Promise<Page> {
     assertPublicRead(url);
+    this.checkCancelled();
     const page = await this.http.get(url, ttl, this.refresh);
     if (!this.sources.some(s => s.url === page.source.url)) this.sources.push(page.source);
     return page;
