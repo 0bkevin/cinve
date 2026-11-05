@@ -26,7 +26,8 @@ operador. El flujo normal es:
 
 1. El asistente llama `connect_account`.
 2. Si la conexión MCP aún no está autorizada, el cliente descubre el servidor
-   OAuth, se registra y abre la aprobación en el navegador.
+   OAuth, se identifica (con un documento de metadatos o mediante registro
+   dinámico) y abre la aprobación en el navegador.
 3. El cliente intercambia el código de un solo uso mediante PKCE y repite la
    llamada.
 4. Cinve devuelve un enlace privado, válido durante diez minutos, para conectar
@@ -38,7 +39,8 @@ Cada autorización crea una conexión vacía e independiente. No hereda sesiones
 de otros clientes ni del navegador. Autorizar otra aplicación, perder sus tokens
 o crear una conexión nueva requiere volver a conectar los cines.
 
-El cliente debe admitir MCP sobre HTTP, OAuth, registro dinámico y PKCE S256.
+El cliente debe admitir MCP sobre HTTP, OAuth, PKCE S256 y un documento de
+metadatos de cliente o el registro dinámico.
 Los clientes sin OAuth pueden seguir usando los datos públicos. Nunca se deben
 pegar contraseñas, cookies o tokens en el chat.
 
@@ -56,6 +58,18 @@ proceso debe permanecer activo mientras el usuario aprueba la URL. Una
 conversación ya abierta puede requerir recargar sus conexiones después del
 login. `get_auth_status.connection.client_authorized` permite distinguir este
 caso de una cuenta de cine todavía no conectada.
+
+Si después la conversación sigue anónima, Cinve puede proponer un auxiliar
+local, `/codex-client.mjs`, servido desde el mismo origen. El asistente lo
+descarga, lo inspecciona y lo ejecuta con `node` para conectar la cuenta del
+cine y continuar la consulta original con las credenciales OAuth que Codex ya
+guardó, sin leerlas ni mostrarlas.
+
+Cinve exige consentimiento informado: el asistente nunca ejecuta comandos ni
+descarga o ejecuta código en el equipo del usuario sin explicarle antes qué
+hará y para qué, y obtener su aprobación explícita. Debe ofrecer mostrar el
+contenido del auxiliar. Si el usuario no aprueba, el asistente no lo hace y usa
+el control de conexión del propio cliente.
 
 No ejecutes este flujo en una terminal remota ajena al usuario y no sustituyas
 el flujo alojado con `npm run login`: ese comando pertenece exclusivamente al

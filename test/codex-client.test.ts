@@ -64,6 +64,16 @@ test('served instructions direct local stale connections to continuation', () =>
     assert.match(s, /codex-client.mjs/); assert.match(s, /get_seats/);
   }
 });
+test('served instructions require telling the user and getting approval before running anything locally', () => {
+  const es = hostedAuthInstructions('https://example.test'), en = installGuide('https://example.test');
+  assert.match(es, /nunca ejecutes comandos ni descargues o ejecutes código en el equipo del usuario sin antes explicarle/);
+  assert.match(es, /codex mcp login cinve[^.]*ejecútalo solo con su aprobación/);
+  assert.match(es, /descárgalo o ejecútalo solo con su aprobación explícita/);
+  assert.match(en, /never run a command, or download or run code, on the user's\s+computer without first telling the user/);
+  assert.match(en, /run it only\s+after they approve/); assert.match(en, /download or\s+run it only after they explicitly approve/);
+  // No wording that tells the agent to proceed without the user.
+  for (const s of [es, en]) assert.doesNotMatch(s, /continue automatically|NO te detengas|descarga e inspecciona/);
+});
 test('hosted guidance references the companion on the serving origin only', () => {
   const s = hostedAuthInstructions('https://self-hosted.example');
   assert.match(s, /https:\/\/self-hosted\.example\/codex-client\.mjs/);
