@@ -186,4 +186,8 @@ test('one city read through the search API fits in the cache alongside another c
   const before = reads;
   const again = await s.query('showtimes', { provider: 'cinesunidos', city: 'Caracas', date: '2026-11-04' });
   assert.equal(again.total, 60); assert.equal(reads, before, 'a second city must not evict the first city from the cache');
+  // 62 cited URLs would cost more tokens than the schedule; the result lists 10, oldest included.
+  assert.equal(again.sources.length, 10);
+  const oldest = again.sources.reduce((a, b) => (b.fetched_at < a.fetched_at ? b : a)).fetched_at;
+  assert.ok(again.warnings.some(w => w.includes('Se consultaron 62 fuentes') && w.includes(oldest)), again.warnings.join(' | '));
 });
