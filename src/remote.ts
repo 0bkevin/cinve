@@ -1,7 +1,7 @@
 import { constants } from 'node:fs';
 import { open } from 'node:fs/promises';
 import { McpServer, SERVER_INFO_META_KEY, fromJsonSchema } from '@modelcontextprotocol/server';
-import type { JsonSchemaType, StandardSchemaWithJSON } from '@modelcontextprotocol/server';
+import type { JsonSchemaType, RegisteredTool, StandardSchemaWithJSON, ToolCallback } from '@modelcontextprotocol/server';
 
 /**
  * Publishes an upstream JSON Schema unchanged but leaves validation to the
@@ -43,41 +43,68 @@ export async function createRemoteServer(config: { url: string; token: string })
     delete forwarded[SERVER_INFO_META_KEY];
     return Object.keys(forwarded).length ? forwarded : undefined;
   };
-  const tools = [];
-  let cursor: string | undefined;
-  do {
-    const page = await client.listTools(cursor ? { cursor } : undefined);
-    tools.push(...page.tools); cursor = page.nextCursor;
-  } while (cursor);
-  for (const tool of tools) {
-    server.registerTool(tool.name, {
-      title: tool.title, description: tool.description, annotations: tool.annotations,
-      ...(tool.icons ? { icons: tool.icons } : {}), ...(tool._meta ? { _meta: tool._meta } : {}),
-      inputSchema: upstreamSchema(tool.inputSchema as JsonSchemaType),
-      ...(tool.outputSchema ? { outputSchema: upstreamSchema(tool.outputSchema as JsonSchemaType) } : {}),
-    }, async (args, ctx) => {
-      // Forward tool metadata as well as ordinary results, and the caller's
-      // cancellation. This bridge does not implement elicitation, so it
-      // intentionally does not advertise it.
-      // Forward the caller's application _meta. Its progress token is the
-      // caller's: the upstream call gets its own, and each upstream progress
-      // update is re-sent to the caller under the caller's token.
-      const { progressToken, ...meta } = ctx.mcpReq._meta ?? {};
-      const result = await client.callTool(
-        { name: tool.name, arguments: args as Record<string, unknown>, ...(Object.keys(meta).length ? { _meta: meta } : {}) },
-        {
-          signal: ctx.mcpReq.signal,
-          ...(progressToken === undefined ? {} : {
-            onprogress: progress => {
-              void ctx.mcpReq.notify({ method: 'notifications/progress', params: { ...progress, progressToken } }).catch(() => {});
-            },
-          }),
-        });
-      const { _meta, ...body } = result;
-      const forwarded = stripServerIdentity(_meta);
-      return { ...body, ...(forwarded ? { _meta: forwarded } : {}) } as typeof result;
-    });
-  }
+  type UpstreamTool = Awaited<ReturnType<Client['listTools']>>['tools'][number];
+  const callUpstream = (name: string): ToolCallback<StandardSchemaWithJSON> => async (args, ctx) => {
+    // Forward tool metadata as well as ordinary results, and the caller's
+    // cancellation. This bridge does not implement elicitation, so it
+    // intentionally does not advertise it.
+    // Forward the caller's application _meta. Its progress token is the
+    // caller's: the upstream call gets its own, and each upstream progress
+    // update is re-sent to the caller under the caller's token.
+    const { progressToken, ...meta } = ctx.mcpReq._meta ?? {};
+    const result = await client.callTool(
+      { name, arguments: args as Record<string, unknown>, ...(Object.keys(meta).length ? { _meta: meta } : {}) },
+      {
+        signal: ctx.mcpReq.signal,
+        ...(progressToken === undefined ? {} : {
+          onprogress: progress => {
+            void ctx.mcpReq.notify({ method: 'notifications/progress', params: { ...progress, progressToken } }).catch(() => {});
+          },
+        }),
+      });
+    const { _meta, ...body } = result;
+    const forwarded = stripServerIdentity(_meta);
+    return { ...body, ...(forwarded ? { _meta: forwarded } : {}) } as typeof result;
+  };
+  const register = (tool: UpstreamTool) => server.registerTool(tool.name, {
+    title: tool.title, description: tool.description, annotations: tool.annotations,
+    ...(tool.icons ? { icons: tool.icons } : {}), ...(tool._meta ? { _meta: tool._meta } : {}),
+    inputSchema: upstreamSchema(tool.inputSchema as JsonSchemaType),
+    ...(tool.outputSchema ? { outputSchema: upstreamSchema(tool.outputSchema as JsonSchemaType) } : {}),
+  }, callUpstream(tool.name));
+  // Registrations mirror the upstream list. A deployment can add, change or
+  // remove tools while this bridge keeps running, so every tools/list request
+  // re-reads the upstream list (which also refreshes the client's cached
+  // output schemas) and reconciles the registrations before answering.
+  const registered = new Map<string, { tool: RegisteredTool; definition: string }>();
+  let upstreamTools: UpstreamTool[] = [];
+  const reconcile = async () => {
+    const tools: UpstreamTool[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await client.listTools(cursor ? { cursor } : undefined);
+      tools.push(...page.tools); cursor = page.nextCursor;
+    } while (cursor);
+    const listed = new Set(tools.map(tool => tool.name));
+    for (const [name, entry] of registered) if (!listed.has(name)) { entry.tool.remove(); registered.delete(name); }
+    for (const tool of tools) {
+      const definition = JSON.stringify(tool), entry = registered.get(tool.name);
+      if (entry?.definition === definition) continue;
+      // Re-register a changed tool: update() keeps fields an upstream change
+      // removed (such as a dropped outputSchema).
+      entry?.tool.remove();
+      registered.set(tool.name, { tool: register(tool), definition });
+    }
+    upstreamTools = tools;
+  };
+  // One reconciliation at a time: concurrent lists would register a name twice.
+  let reconciling: Promise<void> | undefined;
+  const sync = () => reconciling ??= reconcile().finally(() => { reconciling = undefined; });
+  await sync();
+  // McpServer installs its tools handlers on the first registration; this
+  // list handler must replace that one, not be replaced by it.
+  if (!registered.size) throw new Error('El servidor remoto no publicó herramientas.');
+  server.server.setRequestHandler('tools/list', async () => { await sync(); return { tools: upstreamTools }; });
   server.server.onclose = () => { void client.close(); };
   return server;
 }

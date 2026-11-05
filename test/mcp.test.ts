@@ -129,3 +129,46 @@ test('stdio bridge forwards application metadata but keeps its own server identi
   const invalid = await client.callTool({ name: 'echo_fixture', arguments: {} });
   assert.equal(invalid.isError, true); assert.match(JSON.stringify(invalid.content), /city/);
 });
+
+test('stdio bridge follows upstream tool changes made while it runs', async t => {
+  let deployed = 1;
+  const upstreamFor = () => {
+    const s = new McpServer({ name: 'upstream-fixture', version: String(deployed) });
+    if (deployed === 1) {
+      s.registerTool('changed', { inputSchema: z.object({}), outputSchema: z.object({ before: z.literal(true) }) },
+        async () => ({ content: [{ type: 'text', text: '{"before":true}' }], structuredContent: { before: true } }));
+      s.registerTool('retired', { inputSchema: z.object({}) }, async () => ({ content: [{ type: 'text', text: 'old' }] }));
+    } else {
+      s.registerTool('changed', { inputSchema: z.object({}), outputSchema: z.object({ after: z.literal(true) }) },
+        async () => ({ content: [{ type: 'text', text: '{"after":true}' }], structuredContent: { after: true } }));
+      s.registerTool('added', { inputSchema: z.object({}) }, async () => ({ content: [{ type: 'text', text: 'new' }] }));
+    }
+    return s;
+  };
+  const handler = createMcpHandler(upstreamFor, { maxSubscriptions: 0, keepAliveMs: 0 });
+  const http = nodeServer((req, res) => { void toNodeHandler(handler)(req, res); });
+  await new Promise<void>(resolve => http.listen(0, '127.0.0.1', resolve));
+  const address = http.address(); assert.ok(address && typeof address !== 'string');
+  const bridge = await createRemoteServer({ url: `http://127.0.0.1:${address.port}/mcp`, token: 'unused' });
+  const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: 'bridge-sync-test', version: '1.0.0' });
+  await bridge.connect(serverTransport); await client.connect(clientTransport);
+  t.after(async () => {
+    await client.close(); await bridge.close(); await handler.close();
+    http.closeAllConnections(); await new Promise<void>(resolve => http.close(() => resolve()));
+  });
+  assert.deepEqual((await client.listTools()).tools.map(tool => tool.name).sort(), ['changed', 'retired']);
+  deployed = 2;
+  const listed = (await client.listTools()).tools;
+  assert.deepEqual(listed.map(tool => tool.name).sort(), ['added', 'changed']);
+  assert.match(JSON.stringify(listed.find(tool => tool.name === 'changed')?.outputSchema), /after/);
+  const changed = await client.callTool({ name: 'changed', arguments: {} });
+  assert.notEqual(changed.isError, true, JSON.stringify(changed.content));
+  assert.deepEqual(changed.structuredContent, { after: true });
+  assert.equal(((await client.callTool({ name: 'added', arguments: {} })).content[0] as { text: string }).text, 'new');
+  const retired = await client.callTool({ name: 'retired', arguments: {} }).catch((error: Error) => ({ isError: true, content: [{ type: 'text', text: error.message }] }));
+  assert.equal(retired.isError, true);
+  // Concurrent lists reconcile once each without registering a name twice.
+  const lists = await Promise.all([client.listTools(), client.listTools(), client.listTools()]);
+  assert.ok(lists.every(l => l.tools.length === 2));
+});
