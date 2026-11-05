@@ -44,6 +44,10 @@ test('official MCP client discovers tools, validates arguments and reads structu
     const seats = await client.callTool({ name: 'get_seats', arguments: { provider: 'cinepic', cinema_id: '123300', session_id: 'f1', movie_id: 'p1' } });
     assert.equal(SeatResult.parse(seats.structuredContent).available, 1);
     assert.match(SeatResult.parse(seats.structuredContent).ascii, /A:1O/);
+    assert.equal(SeatResult.parse(seats.structuredContent).seats, undefined, 'the ASCII map is the default representation');
+    const detailed = await client.callTool({ name: 'get_seats', arguments: { provider: 'cinepic', cinema_id: '123300', session_id: 'f1', movie_id: 'p1', include_seats: true } });
+    const detail = SeatResult.parse(detailed.structuredContent);
+    assert.equal(detail.seats?.length, detail.total); assert.ok(detail.seats?.some(s => s.label === 'A:1' && s.status === 'available'));
     const privateSeats = await client.callTool({ name: 'get_seats', arguments: { provider: 'cinesunidos', cinema_id: '1005', session_id: 's1' } });
     assert.equal(SeatResult.parse(privateSeats.structuredContent).status, 'auth_required');
   } finally { await client.close(); }

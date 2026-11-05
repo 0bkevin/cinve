@@ -19,7 +19,8 @@ export const SeatResult = z.object({
   provider: Provider, cinema_id: Id, session_id: Id, status: Status,
   queried_at: z.string(), timezone: z.literal('America/Caracas'),
   sources: z.array(Source), warnings: z.array(z.string()),
-  seats: z.array(Seat).max(10000), available: z.number().int().nonnegative(),
+  seats: z.array(Seat).max(10000).optional().describe('Detalle por asiento; solo con include_seats=true. El mapa ascii ya muestra cada etiqueta con su estado.'),
+  available: z.number().int().nonnegative(),
   occupied: z.number().int().nonnegative(), unavailable: z.number().int().nonnegative(),
   unknown: z.number().int().nonnegative(), total: z.number().int().nonnegative(),
   availability_complete: z.boolean().describe('True only when a nonempty map has no unknown seat states. Does not promise purchase eligibility or a reservation.'),
@@ -152,14 +153,15 @@ export async function getSeatMap(http: HttpClient, q: Query): Promise<z.infer<ty
     } else {
       throw new DataError('unavailable', 'Consulta de asientos no implementada para este proveedor.');
     }
-    result.available = result.seats.filter(s => s.status === 'available').length;
-    result.occupied = result.seats.filter(s => s.status === 'occupied').length;
-    result.unavailable = result.seats.filter(s => s.status === 'unavailable').length;
-    result.unknown = result.seats.filter(s => s.status === 'unknown').length;
-    result.total = result.seats.length;
+    const seats = result.seats ?? [];
+    result.available = seats.filter(s => s.status === 'available').length;
+    result.occupied = seats.filter(s => s.status === 'occupied').length;
+    result.unavailable = seats.filter(s => s.status === 'unavailable').length;
+    result.unknown = seats.filter(s => s.status === 'unknown').length;
+    result.total = seats.length;
     result.availability_complete = result.unknown === 0 && result.total > 0;
     if (result.unknown) c.warnings.push(`Mapa parcialmente interpretado por Cinve: ${result.unknown} asientos con estado desconocido (?). Los ${result.available} libres son únicamente los confirmados; cero libres confirmados no significa agotado.`);
-    result.ascii = renderSeats(result.seats);
+    result.ascii = renderSeats(seats);
     result.status = 'available';
     c.warnings.push('Lectura sin reserva, sin caché local. La disponibilidad puede cambiar; confirma en la web antes de comprar.');
   } catch (e) {
