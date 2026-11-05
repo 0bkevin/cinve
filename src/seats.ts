@@ -273,7 +273,9 @@ export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions)
         throw e;
       }
       result.showing = page.showing;
-      if (page.available !== undefined && page.available !== result.seats.filter(s => s.status === 'available').length) c.warnings.push('El contador de asientos disponibles de Cinex difiere del mapa; se conserva el estado de cada asiento.');
+      // Seen 2026-11-05: the counter can lag the grid on the same page (seats just bought or held).
+      const mapped = result.seats.filter(s => s.status === 'available').length;
+      if (page.available !== undefined && page.available !== mapped) c.warnings.push(`El contador de asientos disponibles de Cinex (${page.available}) difiere del mapa (${mapped} libres); se conserva el estado de cada asiento del mapa.`);
       c.warnings.push('Cinex: mapa leído sin seleccionar boletos ni asientos. Las categorías especiales pueden requerir una tarifa específica.');
     } else {
       throw new DataError('unavailable', 'Consulta de asientos no implementada para este proveedor.');

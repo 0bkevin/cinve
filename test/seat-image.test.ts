@@ -100,7 +100,7 @@ test('the seat result names the function from the same provider response, and ch
   const matched = await cinex.seats(q);
   assert.equal(matched.showing?.movie, 'LAS ALTAGRACIAS EN NAVIDAD'); assert.doesNotMatch(matched.warnings.join(' '), /difiere/);
   info = cinexInfo(5);
-  assert.match((await cinex.seats(q)).warnings.join(' '), /contador de asientos disponibles de Cinex difiere del mapa/);
+  assert.match((await cinex.seats(q)).warnings.join(' '), /contador de asientos disponibles de Cinex \(5\) difiere del mapa \(1 libres\)/);
   // Cines Unidos only names the room, and only when every area shares it.
   let areas = ['SALA 8 - FULL'];
   const cu = new CinemaService(new HttpClient(async () => Response.json({ seats: { areas: areas.map((description, a) => ({ number: a + 1, description, rows: [{ rowIndexZeroBased: 0, physicalName: 'A', seats: [{ id: '1', status: 0, position: { areaNumber: a + 1, rowIndex: 0, columnIndex: 0 } }] }] })) } }), 15000, sessions));
