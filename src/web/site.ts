@@ -50,7 +50,7 @@ export function servePublicAsset(req: IncomingMessage, res: ServerResponse) {
   if (!['/assets/inter-latin.woff2', '/site.js', '/og.png', '/favicon.svg'].includes(path ?? '')) return false;
   if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405, { Allow: 'GET, HEAD' }); res.end(); return true; }
   const font = path === '/assets/inter-latin.woff2';
-  const body = font ? readFileSync(new URL('./assets/inter-latin.woff2', import.meta.url)) : path === '/og.png' ? readFileSync(new URL('./assets/og.png', import.meta.url)) : path === '/favicon.svg' ? readFileSync(new URL('./assets/favicon.svg', import.meta.url)) : siteScript;
+  const body = font ? readFileSync(new URL('../assets/inter-latin.woff2', import.meta.url)) : path === '/og.png' ? readFileSync(new URL('../assets/og.png', import.meta.url)) : path === '/favicon.svg' ? readFileSync(new URL('../assets/favicon.svg', import.meta.url)) : siteScript;
   res.writeHead(200, { 'Content-Type': font ? 'font/woff2' : path === '/og.png' ? 'image/png' : path === '/favicon.svg' ? 'image/svg+xml' : 'text/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=86400', 'X-Content-Type-Options': 'nosniff' });
   res.end(req.method === 'HEAD' ? undefined : body); return true;
 }

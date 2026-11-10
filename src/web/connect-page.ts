@@ -1,4 +1,4 @@
-import { publicPage } from './public-web.js';
+import { publicPage } from './site.js';
 
 export function loginPage() {
   return publicPage('Conectar cuentas', `<p class="eyebrow">Conexión privada</p><h1>Conecta tu cuenta del cine.</h1><p class="lead">Conecta tu cuenta para consultar precios de entradas y, en Cinex, caramelería.</p>

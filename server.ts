@@ -1,4 +1,4 @@
-import { serveInstall } from './src/install.js';
+import { serveInstall } from './src/web/install.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createHostedApp } from './src/hosted/app.js';
 import { databasePool } from './src/hosted/store.js';

@@ -1,9 +1,9 @@
-import { landingPage, servePublicAsset } from '../public-web.js';
+import { landingPage, servePublicAsset } from '../web/site.js';
 import { hostedAuthInstructions } from './auth-guidance.js';
 import { HostedOAuth } from './oauth.js';
 import { ClientMetadataCache } from './client-metadata.js';
 import type { ClientMetadataFetcher } from './client-metadata.js';
-import { serveInstall } from '../install.js';
+import { serveInstall } from '../web/install.js';
 import { createServer as nodeServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Pool } from 'pg';
@@ -22,7 +22,7 @@ import type { Operation, Query } from '../core.js';
 import type { CallOptions } from '../http/read-context.js';
 import { ConnectionLinks } from './connection-links.js';
 import { EncryptedSessionStore, HostedUsers, digest } from './store.js';
-import { loginPage, loginScript } from '../auth-web.js';
+import { loginPage, loginScript } from '../web/connect-page.js';
 
 class AnonymousSessions extends SessionStore {
   override async read(): Promise<AuthSession | undefined> { return undefined; }

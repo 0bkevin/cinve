@@ -1,4 +1,4 @@
-import { authorizationPage, authorizationErrorPage } from '../public-web.js';
+import { authorizationPage, authorizationErrorPage } from '../web/site.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Pool, PoolClient } from 'pg';
