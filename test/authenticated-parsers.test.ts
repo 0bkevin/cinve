@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseCinesUnidosPrices, parseCinexPrices, parseCinexConcessions } from '../src/authenticated-parsers.js';
+import { parseCinexPrices, parseCinexConcessions } from '../src/authenticated-parsers.js';
+import { parseCinesUnidosPrices } from '../src/providers/cinesunidos/prices.js';
 const q = { provider: 'cinex' as const, cinema_id: 'TLN', session_id: 's1' };
 const url = 'https://www.cinex.com.ve/boletos.php?cinemaid=TLN&sessionid=s1';
 
