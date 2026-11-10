@@ -13,6 +13,7 @@ export function cinexTicketRedirect(url: string, response: Response): string | u
     assertPrivateRead('cinex', to.href);
     if (['cinemaid', 'sessionid'].every(key => to.searchParams.get(key) === from.searchParams.get(key))) return to.href;
   } catch { /* Unrecognized redirects remain unavailable, without leaking their URL. */ }
+  return undefined;
 }
 
 export function cinexCinemaRedirect(url: string, response: Response): string | undefined {
@@ -30,4 +31,5 @@ export function cinexCinemaRedirect(url: string, response: Response): string | u
         to.username || to.password || to.search || to.hash) return;
     return to.href;
   } catch { /* Unrecognized redirects remain unavailable, without leaking their URL. */ }
+  return undefined;
 }
