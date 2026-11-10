@@ -7,6 +7,7 @@ import { CinemaService } from '../../src/service.js';
 import { HttpClient } from '../../src/http/client.js';
 import { assertPrivateRead } from '../../src/http/allow-list.js';
 import { EmptySessionStore, page } from '../helpers/fixtures.js';
+
 const cp = (overrides = {}) => ({ butaca: 'A-1-1', nombre_butaca: 'A:1', fila: '1', columna: '1', libre: '1', seleccionada: '1', tipo_butaca_id: '1', ...overrides });
 test('Cinepic availability ignores seleccionada and preserves physical labels, gaps, and unknown states', () => {
   const seats = parseCinepicSeats({ butacas: [cp(), cp({ butaca: 'A-3-1', columna: '3', nombre_butaca: 'A:2', libre: '0' }), cp({ butaca: 'A-4-1', columna: '4', nombre_butaca: 'A:3', libre: 'new' })] });
@@ -157,4 +158,10 @@ test('parallel Cinex seat and price reads for different functions do not switch 
     assert.equal(r.session_id, ids[i]);
   }
   assert.ok(maxInFlight >= 2, 'other reads still run in parallel');
+});
+
+test('a Cines Unidos seat answer that is not JSON names the provider response', async () => {
+  const sessions = new class extends EmptySessionStore { override async headers() { return { Authorization: 'Bearer synthetic' }; } };
+  const r = await new CinemaService(new HttpClient(async () => new Response('<html></html>'), 15000, sessions)).seats({ provider: 'cinesunidos', cinema_id: '1002', session_id: 's1' });
+  assert.equal(r.status, 'error'); assert.match(r.warnings.join(' '), /Cines Unidos no devolvió un mapa de asientos en JSON válido/);
 });
