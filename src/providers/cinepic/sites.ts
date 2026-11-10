@@ -12,12 +12,14 @@ export const CP = {
   '123300': { name: 'Cinepic Candelaria', host: 'https://cinepiccandelaria.com' },
   '123301': { name: 'Cinepic VVIP', host: 'https://cinepicvip.com' },
 } as const;
+/** One of the configured venue IDs. An own key only: `'constructor' in CP` is true too. */
+const isCinepicVenue = (id: string): id is keyof typeof CP => Object.hasOwn(CP, id);
 /** The configured name of a Cinepic venue, if it is one. */
-export const cinepicVenueName = (id: string): string | undefined => (CP as Record<string, { name: string }>)[id]?.name;
+export const cinepicVenueName = (id: string): string | undefined => isCinepicVenue(id) ? CP[id].name : undefined;
 export function cpSite(q: Query) {
   const id = requireArg(q, 'cinema_id');
-  if (!(id in CP)) throw new DataError('unavailable', 'Cinepic admite las sedes 123300 (Candelaria) y 123301 (VVIP Lido).');
-  return CP[id as keyof typeof CP];
+  if (!isCinepicVenue(id)) throw new DataError('unavailable', 'Cinepic admite las sedes 123300 (Candelaria) y 123301 (VVIP Lido).');
+  return CP[id];
 }
 /**
  * Tickets the purchase page still offers with a tariff, as its own JS counts

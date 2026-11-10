@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { CinemaService } from '../../src/service.js';
 import { HttpClient } from '../../src/http/client.js';
 import { cpBuy, cpSessions, mockFetch, page, EmptySessionStore } from '../helpers/fixtures.js';
+import { cinepicVenueName, cpSite } from '../../src/providers/cinepic/sites.js';
+import { DataError } from '../../src/core.js';
 import { nth } from '../helpers/assert.js';
 
 const service = () => new CinemaService(new HttpClient(mockFetch, 15000, new EmptySessionStore()));
@@ -162,4 +164,19 @@ test('explicit Cinepic provider failure is distinct from an unrecognized page sc
   const service = new CinemaService(new HttpClient(async () => new Response(html)));
   const r = await service.query('prices', { provider: 'cinepic', cinema_id: '123300', movie_id: 'p1', session_id: 'f1' });
   assert.equal(r.status, 'unavailable'); assert.match(nth(r.warnings, 0), /AC-001/); assert.equal(r.sources.length, 1);
+});
+test('inherited object keys are not Cinepic venues and never reach the provider', async () => {
+  for (const id of ['constructor', 'toString', 'hasOwnProperty']) {
+    assert.equal(cinepicVenueName(id), undefined, id);
+    assert.throws(() => cpSite({ provider: 'cinepic', cinema_id: id }), e => e instanceof DataError && e.status === 'unavailable' && /123300/.test(e.message), id);
+  }
+  const requests: string[] = [];
+  const s = new CinemaService(new HttpClient(async url => { requests.push(String(url)); return new Response('{}'); }, 15000, new EmptySessionStore()));
+  for (const op of ['showtimes', 'concessions'] as const) {
+    const r = await s.query(op, { provider: 'cinepic', cinema_id: 'constructor' });
+    assert.equal(r.status, 'unavailable', op); assert.match(nth(r.warnings, 0), /123300 \(Candelaria\)/);
+  }
+  const seats = await s.seats({ provider: 'cinepic', cinema_id: 'constructor', session_id: 'f1', movie_id: 'p1' });
+  assert.equal(seats.status, 'unavailable'); assert.match(seats.warnings.join(' '), /123300 \(Candelaria\)/);
+  assert.deepEqual(requests, []);
 });
