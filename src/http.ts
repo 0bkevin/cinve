@@ -114,7 +114,13 @@ export class HttpClient {
     assertPrivateRead(provider, url);
     return this.read(url, new URL(url).origin, target => this.sessions.headers(provider, target));
   }
-  async get(url: string, ttl = 120000, refresh = false): Promise<Page> {
+  /**
+   * @param accept Whether a successful body is worth caching. A 200 response
+   * that is empty or fails this check (an HTML error page where JSON was
+   * expected, a maintenance page without the expected markup) is still
+   * returned, so the caller reports it, but the next call asks again.
+   */
+  async get(url: string, ttl = 120000, refresh = false, accept?: (body: string) => boolean): Promise<Page> {
     const parsed = new URL(url);
     if (parsed.protocol !== 'https:' || !hosts.has(parsed.hostname) || parsed.port || parsed.username || parsed.password || parsed.hash) throw new DataError('error', 'Origen de consulta no permitido.');
     // Fresh reads never consume a cached response or an older in-flight read.
@@ -158,7 +164,7 @@ export class HttpClient {
     const startedDuringRefresh = this.refreshing.has(url);
     let task!: Promise<Page>;
     task = this.read(url, parsed.origin, undefined, false, (alias, canonical) => this.bindPendingAlias(alias, canonical, task)).then(page => {
-      this.store(url, page, ttl, startedAt, task, startedDuringRefresh);
+      if (page.body.trim() && (!accept || accept(page.body))) this.store(url, page, ttl, startedAt, task, startedDuringRefresh);
       return page;
     }).finally(() => this.clearPending(task));
     this.pendingStartedAt.set(task, startedAt);
@@ -498,18 +504,23 @@ export class ReadContext {
     if (!this.sources.some(s => s.url === page.source.url)) this.sources.push(page.source);
     return page.body;
   }
-  async get(url: string, ttl?: number): Promise<string> {
-    return (await this.page(url, ttl)).body;
+  async get(url: string, ttl?: number, accept?: (body: string) => boolean): Promise<string> {
+    return (await this.page(url, ttl, accept)).body;
   }
-  async page(url: string, ttl?: number): Promise<Page> {
+  async page(url: string, ttl?: number, accept?: (body: string) => boolean): Promise<Page> {
     assertPublicRead(url);
     this.checkCanRead();
-    const page = await this.http.get(url, ttl, this.refresh);
+    const page = await this.http.get(url, ttl, this.refresh, accept);
     if (!this.sources.some(s => s.url === page.source.url)) this.sources.push(page.source);
     return page;
   }
+  /** Only a body that parses is cached; an HTML error page in its place is reported and asked for again. */
   async json(url: string): Promise<unknown> {
-    try { return JSON.parse(await this.get(url)); }
+    try { return JSON.parse(await this.get(url, undefined, isJson)); }
     catch (e) { if (e instanceof DataError) throw e; throw new DataError('error', 'El proveedor no devolvió JSON válido.'); }
   }
+}
+
+function isJson(body: string) {
+  try { JSON.parse(body); return true; } catch { return false; }
 }

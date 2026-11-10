@@ -20,7 +20,7 @@ export class HostedHttpClient extends HttpClient {
     super(request, timeout, sessions);
   }
 
-  override get(url: string, ttl = 120000, refresh = false) {
-    return this.publicClient.get(url, ttl, refresh);
+  override get(url: string, ttl = 120000, refresh = false, accept?: (body: string) => boolean) {
+    return this.publicClient.get(url, ttl, refresh, accept);
   }
 }

@@ -51,6 +51,9 @@ function providerWarningSummary(c: ReadContext) {
   if (state.aggregateIndex !== undefined && state.suppressed > 1) c.warnings[state.aggregateIndex] = `Se omitieron ${state.suppressed} diagnósticos repetidos o excedentes del proveedor; la respuesta puede ser parcial.`;
 }
 
+/** A Next.js page that still carries its data stream; anything else is not cached. */
+const flightPage = (body: string) => body.includes('self.__next_f.push(');
+
 const CP = {
   '123300': { name: 'Cinepic Candelaria', host: 'https://cinepiccandelaria.com' },
   '123301': { name: 'Cinepic VVIP', host: 'https://cinepicvip.com' },
@@ -85,7 +88,7 @@ export function cinepicTicketsLeft(tariff: Record<string, unknown>): number | un
 export async function cpBuy(q: Query, c: ReadContext) {
   const site = cpSite(q);
   const url = `${site.host}/es-AR/compra?${new URLSearchParams({ cid: requireArg(q, 'cinema_id'), fid: requireArg(q, 'session_id'), pid: requireArg(q, 'movie_id') })}`;
-  const html = await c.get(url, 60000), records = flight(html);
+  const html = await c.get(url, 60000, flightPage), records = flight(html);
   const functionData = findField(records, 'functionData');
   if (functionData === undefined) {
     const $ = load(html); $('script,style').remove();
@@ -115,7 +118,7 @@ export async function cinepic(op: Operation, q: Query, c: ReadContext): Promise<
     return Promise.all(Object.entries(CP).map(async ([id, site]) => {
       const url = `${site.host}/es-AR`;
       try {
-        const records = flight(await c.get(url, 3600000));
+        const records = flight(await c.get(url, 3600000, flightPage));
         const configs = [...objects(records)].filter(r => text(r.idUltracine) === id && text(r.nombre));
         const config = configs[0];
         if (!config || text(config.nombre).length > 512 || configs.some(r => text(r.nombre) !== text(config.nombre))) {
@@ -281,7 +284,7 @@ export async function cinesunidos(op: Operation, q: Query, c: ReadContext): Prom
   let url = `${CU}/${op === 'cinemas' ? 'cines' : 'cartelera'}?${new URLSearchParams({ city })}`;
   let fields: unknown[];
   try {
-    fields = pageFields(flight(await c.get(url, op === 'cinemas' ? 3600000 : 120000)), key);
+    fields = pageFields(flight(await c.get(url, op === 'cinemas' ? 3600000 : 120000, flightPage)), key);
     if (!fields.length) {
       // The provider's city filter is accent-sensitive. Retry only with a name
       // actually returned by its official city registry, never guess a city.
@@ -289,7 +292,7 @@ export async function cinesunidos(op: Operation, q: Query, c: ReadContext): Prom
       if (canonical !== city) {
         city = canonical;
         url = `${CU}/${op === 'cinemas' ? 'cines' : 'cartelera'}?${new URLSearchParams({ city })}`;
-        fields = pageFields(flight(await c.get(url, op === 'cinemas' ? 3600000 : 120000)), key);
+        fields = pageFields(flight(await c.get(url, op === 'cinemas' ? 3600000 : 120000, flightPage)), key);
       }
     }
   } catch (error) {

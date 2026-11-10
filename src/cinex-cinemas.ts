@@ -8,6 +8,8 @@ const detailPath = /^cinex-[A-Za-z0-9_-]{1,80}\.html$/;
 type Venue = { href: string; name: string; city: string; image?: string };
 const normalizedName = (name: string) => folded(name).replace(/^cinex\s+/, '').replace(/[^a-z0-9]/g, '');
 const cinemaPageTtl = 120000;
+/** A directory page that lists venues; an error or maintenance page is not cached. */
+const directoryPage = (body: string) => /href=["']?cinex-/.test(body);
 const maxDiscoveryVenues = 100;
 const maxCatalogWarnings = 32;
 const metadataUrl = (id: string) => `${base}/assets/php/datasource.php?${new URLSearchParams({ method: 'getcinemadatafromcinemaid', cinemaid: id })}`;
@@ -118,7 +120,7 @@ export class CinexCinemaCatalog {
     const finishWarnings = () => {
       if (suppressedWarnings) c.warnings.push(`Se omitieron ${suppressedWarnings} advertencias adicionales de descubrimiento de sedes.`);
     };
-    const $ = load(await c.get(`${base}/cines.html`, 3600000));
+    const $ = load(await c.get(`${base}/cines.html`, 3600000, directoryPage));
     const links = $('a[href^="cinex-"]');
     if (!links.length) throw new DataError('error', 'No se reconoció el listado de cines Cinex.');
     const listed = new Map<string, Venue>();
@@ -311,7 +313,7 @@ export class CinexCinemaCatalog {
   }
 
   private async locate(cinemaId: string, c: ReadContext): Promise<Located> {
-    const $ = load(await c.get(`${base}/cines.html`, 3600000));
+    const $ = load(await c.get(`${base}/cines.html`, 3600000, directoryPage));
     const matches: Venue[] = [];
     $('a[href^="cinex-"]').each((_, e) => {
       const href = $(e).attr('href') ?? '';

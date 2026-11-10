@@ -154,6 +154,9 @@ la fuente Inter incluida en `src/assets`, sin depender de fuentes del sistema.
   entrada usada hace más tiempo. Las páginas HTML de Cinex se guardan con los
   espacios en blanco compactados. Las sesiones y los mapas
   de asientos no usan caché.
+- Solo se guardan respuestas correctas: un error HTTP, un cuerpo vacío, un JSON
+  inválido o una página sin la estructura esperada (por ejemplo, una página de
+  mantenimiento) se informan y se vuelven a pedir en la siguiente consulta.
 - Si un origen público responde con un desafío anti-bots, Cinve lo recuerda
   durante 10 minutos: las consultas siguientes usan directamente la alternativa
   documentada (o informan el bloqueo) sin volver a pedir la página. `refresh=true`
