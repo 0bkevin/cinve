@@ -44,6 +44,10 @@ test('official MCP client discovers tools, validates arguments and reads structu
     const seats = await client.callTool({ name: 'get_seats', arguments: { provider: 'cinepic', cinema_id: '123300', session_id: 'f1', movie_id: 'p1' } });
     assert.equal(SeatResult.parse(seats.structuredContent).available, 1);
     assert.match(SeatResult.parse(seats.structuredContent).ascii, /A:1O/);
+    assert.equal(SeatResult.parse(seats.structuredContent).seats, undefined, 'the ASCII map is the default representation');
+    const detailed = await client.callTool({ name: 'get_seats', arguments: { provider: 'cinepic', cinema_id: '123300', session_id: 'f1', movie_id: 'p1', include_seats: true } });
+    const detail = SeatResult.parse(detailed.structuredContent);
+    assert.equal(detail.seats?.length, detail.total); assert.ok(detail.seats?.some(s => s.label === 'A:1' && s.status === 'available'));
     const privateSeats = await client.callTool({ name: 'get_seats', arguments: { provider: 'cinesunidos', cinema_id: '1005', session_id: 's1' } });
     assert.equal(SeatResult.parse(privateSeats.structuredContent).status, 'auth_required');
   } finally { await client.close(); }
@@ -87,6 +91,14 @@ test('stdio bridge forwards application metadata but keeps its own server identi
   upstream.registerTool('metadata_fixture', {
     title: 'Metadata fixture', inputSchema: z.object({}), outputSchema: z.object({ ok: z.literal(true) }),
   }, async () => ({ content: [{ type: 'text', text: '{"ok":true}' }], structuredContent: { ok: true }, _meta: { 'fixture-key': 'preserved' } }));
+  upstream.registerTool('echo_fixture', {
+    description: 'Echo', inputSchema: z.object({ city: z.string().min(1).describe('Ciudad') }).strict(), annotations: { readOnlyHint: true },
+    _meta: { 'fixture/tool': 'kept' },
+  }, async ({ city }, ctx) => {
+    const token = ctx.mcpReq._meta?.progressToken;
+    if (token !== undefined) for (const progress of [1, 2]) await ctx.mcpReq.notify({ method: 'notifications/progress', params: { progressToken: token, progress, message: `paso ${progress}` } });
+    return { content: [{ type: 'text', text: `${city}|${String(ctx.mcpReq._meta?.['fixture/request'] ?? '')}` }] };
+  });
   const upstreamHandler = createMcpHandler(() => upstream, { maxSubscriptions: 0, keepAliveMs: 0 });
   const http = nodeServer((req, res) => { void toNodeHandler(upstreamHandler)(req, res); });
   await new Promise<void>(resolve => http.listen(0, '127.0.0.1', resolve));
@@ -102,4 +114,18 @@ test('stdio bridge forwards application metadata but keeps its own server identi
   const result = await client.callTool({ name: 'metadata_fixture', arguments: {} });
   assert.equal((result._meta as Record<string, unknown>)['fixture-key'], 'preserved');
   assert.equal(client.getServerVersion()?.name, 'cinve');
+  // Tools are re-published with their upstream schemas, annotations and descriptions.
+  const echo = (await client.listTools()).tools.find(tool => tool.name === 'echo_fixture');
+  assert.equal(echo?.description, 'Echo'); assert.equal(echo?.annotations?.readOnlyHint, true);
+  assert.deepEqual((echo?.inputSchema as { required?: string[] }).required, ['city']);
+  assert.equal(echo?._meta?.['fixture/tool'], 'kept', 'tool-definition metadata is kept');
+  assert.equal(((await client.callTool({ name: 'echo_fixture', arguments: { city: 'Caracas' } })).content[0] as { text: string }).text, 'Caracas|');
+  // Request metadata reaches upstream, and upstream progress returns to the caller.
+  const updates: { progress: number; message?: string }[] = [];
+  const withMeta = await client.callTool({ name: 'echo_fixture', arguments: { city: 'Caracas' }, _meta: { 'fixture/request': 'forwarded' } }, { onprogress: p => updates.push(p) });
+  assert.equal((withMeta.content[0] as { text: string }).text, 'Caracas|forwarded');
+  assert.deepEqual(updates.map(u => [u.progress, u.message]), [[1, 'paso 1'], [2, 'paso 2']]);
+  // Validation stays upstream, with its own messages.
+  const invalid = await client.callTool({ name: 'echo_fixture', arguments: {} });
+  assert.equal(invalid.isError, true); assert.match(JSON.stringify(invalid.content), /city/);
 });

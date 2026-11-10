@@ -90,35 +90,50 @@ link to the user. After they connect, check get_auth_status and retry the origin
 query. Never search the web for a Cinve login page or ask for passwords or tokens
 in chat. No operator-issued token or local cinema-password login is needed for this hosted flow.
 
-The client must support remote MCP OAuth with dynamic client registration and
-PKCE. If it does not open authorization automatically, initiate the client's
-native OAuth action yourself when available. For Codex running locally with
-access to the user's own installed configuration, run \`codex mcp login cinve\`
-(use the actual configured server name if different). Keep the process running,
+The client must support remote MCP OAuth with PKCE and either a Client ID
+Metadata Document or dynamic client registration. If it does not open
+authorization automatically, initiate the client's native OAuth action yourself
+when available.
+
+Consent rule: never run a command, or download or run code, on the user's
+computer without first telling the user in plain words what you will do and
+why, and getting their explicit approval. If they decline, do not do it; use
+the client's own connection control instead.
+
+For Codex running locally with access to the user's own installed
+configuration, offer to run \`codex mcp login cinve\` (use the actual configured
+server name if different) to authorize Cinve in their Codex, and run it only
+after they approve. Keep the process running,
 present its authorization URL as a clickable progress update, and observe
 completion instead of asking the user to type "done". Do not capture all output
 until completion or use a short timeout while waiting for human approval.
 If the user cancels or requests a new link, stop the previous attempt.
 For local Codex without an exposed native refresh action, or when CLI OAuth
-completed but this conversation remains anonymous, continue automatically with
-the local companion at ${new URL('/codex-client.mjs', publicUrl).href}.
-Download it into a temporary .mjs file, inspect it, and run
-\`node /path/to/cinve-codex.mjs connect cinex\` (or cinesunidos).
-It uses the installed Codex App Server and saved OAuth configuration, emits the
-browser links immediately, and waits for account connection. Show each emitted
+completed but this conversation remains anonymous, offer the local companion at
+${new URL('/codex-client.mjs', publicUrl).href} before asking the user to
+reconnect. Explain that you will download it into a temporary .mjs file,
+inspect it, and run \`node /path/to/cinve-codex.mjs connect cinex\` (or
+cinesunidos) to connect their cinema account; that it uses the installed Codex
+App Server and their saved OAuth configuration without reading or showing it;
+and that it runs no model turns. Offer to show its contents, and download or
+run it only after they explicitly approve. It emits the browser links
+immediately and waits for account connection. Show each emitted
 URL as a clickable progress update; keep the process running until event=ready.
 Do not read credentials, approve browser consent, or ask the user to type done.
 Cancel the process if the user cancels. No retry loop after denial or expiry.
-If native tools still use the old connection, continue the ORIGINAL queries via
+With that same approval, and telling the user, if native tools still use the
+old connection, continue the ORIGINAL queries via
 \`node /path/to/cinve-codex.mjs call get_ticket_prices '<JSON arguments>'\`
 (or get_concessions/get_seats/get_auth_status). Pass --server NAME before connect
 or call if the configured server has a different name. This starts a fresh tool
 connection; it does not refresh or restart the existing conversation and does
-not run model turns. Do not tell a local user to reconnect before trying this
-supported continuation. Do not use it on an unrelated remote machine.
+not run model turns. Do not tell a local user to reconnect before offering
+this supported continuation; if they decline it, explain how to reconnect.
+Do not use it on an unrelated remote machine.
 This is assistant authorization, not a cinema password prompt. Never use
 \`npm run login\` for hosted connections. Do not make the user navigate Settings
-or run commands when you can start the authorization yourself. Do not run login
+or run commands themselves when you can start the authorization yourself with
+their approval. Do not run login
 in an unrelated remote environment: its callback and credential store would
 belong to that environment instead of the user's assistant. If neither a native
 action nor the user's local CLI is accessible, explain that limitation and use

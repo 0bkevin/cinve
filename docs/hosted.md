@@ -26,7 +26,8 @@ operador. El flujo normal es:
 
 1. El asistente llama `connect_account`.
 2. Si la conexión MCP aún no está autorizada, el cliente descubre el servidor
-   OAuth, se registra y abre la aprobación en el navegador.
+   OAuth, se identifica (con un documento de metadatos o mediante registro
+   dinámico) y abre la aprobación en el navegador.
 3. El cliente intercambia el código de un solo uso mediante PKCE y repite la
    llamada.
 4. Cinve devuelve un enlace privado, válido durante diez minutos, para conectar
@@ -38,7 +39,8 @@ Cada autorización crea una conexión vacía e independiente. No hereda sesiones
 de otros clientes ni del navegador. Autorizar otra aplicación, perder sus tokens
 o crear una conexión nueva requiere volver a conectar los cines.
 
-El cliente debe admitir MCP sobre HTTP, OAuth, registro dinámico y PKCE S256.
+El cliente debe admitir MCP sobre HTTP, OAuth, PKCE S256 y un documento de
+metadatos de cliente o el registro dinámico.
 Los clientes sin OAuth pueden seguir usando los datos públicos. Nunca se deben
 pegar contraseñas, cookies o tokens en el chat.
 
@@ -57,6 +59,18 @@ conversación ya abierta puede requerir recargar sus conexiones después del
 login. `get_auth_status.connection.client_authorized` permite distinguir este
 caso de una cuenta de cine todavía no conectada.
 
+Si después la conversación sigue anónima, Cinve puede proponer un auxiliar
+local, `/codex-client.mjs`, servido desde el mismo origen. El asistente lo
+descarga, lo inspecciona y lo ejecuta con `node` para conectar la cuenta del
+cine y continuar la consulta original con las credenciales OAuth que Codex ya
+guardó, sin leerlas ni mostrarlas.
+
+Cinve exige consentimiento informado: el asistente nunca ejecuta comandos ni
+descarga o ejecuta código en el equipo del usuario sin explicarle antes qué
+hará y para qué, y obtener su aprobación explícita. Debe ofrecer mostrar el
+contenido del auxiliar. Si el usuario no aprueba, el asistente no lo hace y usa
+el control de conexión del propio cliente.
+
 No ejecutes este flujo en una terminal remota ajena al usuario y no sustituyas
 el flujo alojado con `npm run login`: ese comando pertenece exclusivamente al
 modo local `stdio`.
@@ -65,9 +79,45 @@ modo local `stdio`.
 
 - `/.well-known/oauth-protected-resource/mcp`: metadatos del recurso MCP.
 - `/.well-known/oauth-authorization-server`: metadatos del servidor OAuth.
-- `POST /oauth/register`: registra clientes públicos con sus redirecciones
-  exactas. Se aceptan HTTPS y HTTP de loopback.
+- `POST /oauth/register`: registro dinámico de clientes públicos (Dynamic Client
+  Registration) con sus redirecciones exactas. Se aceptan HTTPS y HTTP de
+  loopback. El protocolo 2026-07-28 lo declara obsoleto; se mantiene para los
+  clientes que todavía no usan documentos de metadatos. Su retirada se sigue en
+  [#21](https://github.com/0bkevin/cinve/issues/21).
 - `GET|POST /oauth/authorize`: muestra y procesa la aprobación explícita.
+
+### Documentos de metadatos de cliente
+
+El método de registro preferido es el *Client ID Metadata Document*: el
+`client_id` es una URL HTTPS cuyo documento JSON declara `client_id` (la misma
+URL), `client_name` y `redirect_uris`. Los metadatos del servidor lo anuncian con
+`client_id_metadata_document_supported: true`. Al autorizar, Cinve:
+
+- acepta solo URL HTTPS con ruta, sin credenciales, fragmento (ni vacío) ni
+  segmentos `.`/`..` (tampoco codificados), y compara el `client_id` como cadena
+  exacta. Por decisión propia, más estricta que el borrador, tampoco admite IP
+  literales ni puertos distintos de 443;
+- resuelve el dominio y se conecta únicamente a una dirección comprobada, sin
+  segunda resolución, para evitar SSRF y DNS rebinding. Solo admite unicast
+  global, decidido sobre los bytes de la dirección: en IPv4 rechaza los rangos
+  de uso especial (privadas, loopback, link-local, CGNAT, documentación,
+  multidifusión, reservadas); en IPv6 solo admite `2000::/3` sin documentación,
+  asignaciones de protocolo del IETF ni 6to4. Una IPv4 mapeada (`::ffff:a.b.c.d`)
+  se juzga como su IPv4, y cualquier otra IPv4 incrustada se rechaza;
+- no sigue redirecciones, exige `application/json`, lee como máximo 16 KiB,
+  corta de inmediato una respuesta rechazada sin leer su cuerpo y abandona a
+  los 5 s;
+- exige que el documento coincida con su URL, que sea un cliente público
+  (`token_endpoint_auth_method` y `token_endpoint_auth_methods_supported`
+  coherentes con `none`), que no incluya secretos ni claves privadas o
+  simétricas (ni `jwks` junto a `jwks_uri`) y que la redirección solicitada
+  figure en `redirect_uris`;
+- guarda en caché los documentos válidos según `max-age`, entre 1 minuto y
+  24 horas (5 minutos por defecto), con un cupo de 20 lecturas por minuto e IP;
+- muestra en la aprobación el dominio que publica el documento, porque el nombre
+  lo declara el propio cliente.
+
+Un documento inválido o inaccesible nunca redirige al cliente.
 - `POST /oauth/token`: intercambia códigos y renueva tokens.
 - `POST /oauth/revoke`: revoca toda la conexión y elimina sus sesiones de cine.
 
@@ -87,6 +137,14 @@ simultáneas; el proceso admite 32 simultáneas. La plaza se reserva antes de le
 el cuerpo, que debe llegar completo en diez segundos. Las llamadas con
 `refresh: true` evitan la caché pública compartida y pueden generar varias
 lecturas al proveedor, por lo que tienen un cupo propio de diez por minuto.
+
+`/mcp` admite solicitudes desde cualquier origen web, porque la autorización es
+solo mediante token Bearer y nunca usa cookies; la comprobación exacta de `Host`
+impide el DNS rebinding. Una cabecera `Origin` mal formada recibe 403. El
+endpoint no guarda estado: solo acepta POST (GET y DELETE reciben 405) y nunca
+crea sesiones, así que CORS permite `Authorization`, `Content-Type`,
+`MCP-Protocol-Version`, `Mcp-Method` y `Mcp-Name`, sin las cabeceras de sesión y
+reanudación que el protocolo 2026-07-28 eliminó.
 
 ## Despliegue
 

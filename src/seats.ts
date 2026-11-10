@@ -3,10 +3,14 @@ import * as z from 'zod';
 import { DataError, Id, Provider, Source, Status, requireArg, text } from './core.js';
 import type { Query } from './core.js';
 import { HttpClient, ReadContext } from './http.js';
+import type { CallOptions } from './http.js';
 import { cpBuy } from './providers.js';
 import { findField, object, rows } from './parsers.js';
 
-const label = z.string().min(1).max(40).regex(/^[\p{L}\p{N} _:.()-]+$/u);
+// Unicode property escapes (\p{L}) are invalid in Python's re and RE2, and
+// MCP clients such as the Python SDK validate structuredContent against the
+// published outputSchema, so this rule is a server-side refinement.
+const label = z.string().min(1).max(40).refine(value => /^[\p{L}\p{N} _:.()-]+$/u.test(value), 'Etiqueta de asiento no válida.');
 const coordinate = z.number().int().min(0).max(199);
 export const Seat = z.object({
   id: z.string().min(1).max(200), label, row: label, area: label,
@@ -19,7 +23,8 @@ export const SeatResult = z.object({
   provider: Provider, cinema_id: Id, session_id: Id, status: Status,
   queried_at: z.string(), timezone: z.literal('America/Caracas'),
   sources: z.array(Source), warnings: z.array(z.string()),
-  seats: z.array(Seat).max(10000), available: z.number().int().nonnegative(),
+  seats: z.array(Seat).max(10000).optional().describe('Detalle por asiento; solo con include_seats=true. El mapa ascii ya muestra cada etiqueta con su estado.'),
+  available: z.number().int().nonnegative(),
   occupied: z.number().int().nonnegative(), unavailable: z.number().int().nonnegative(),
   unknown: z.number().int().nonnegative(), total: z.number().int().nonnegative(),
   availability_complete: z.boolean().describe('True only when a nonempty map has no unknown seat states. Does not promise purchase eligibility or a reservation.'),
@@ -126,13 +131,13 @@ export function renderSeats(seats: SeatData[]): string {
   return lines.join('\n');
 }
 
-export async function getSeatMap(http: HttpClient, q: Query): Promise<z.infer<typeof SeatResult>> {
+export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions): Promise<z.infer<typeof SeatResult>> {
   const result: z.infer<typeof SeatResult> = {
     provider: q.provider, cinema_id: requireArg(q, 'cinema_id'), session_id: requireArg(q, 'session_id'),
     status: 'unavailable', queried_at: new Date().toISOString(), timezone: 'America/Caracas',
     sources: [], warnings: [], seats: [], available: 0, occupied: 0, unavailable: 0, unknown: 0, total: 0, availability_complete: false, ascii: '',
   };
-  const c = new ReadContext(http, true);
+  const c = new ReadContext(http, true, call);
   try {
     if (q.provider === 'cinepic') {
       const { records, f } = await cpBuy(q, c);
@@ -152,14 +157,15 @@ export async function getSeatMap(http: HttpClient, q: Query): Promise<z.infer<ty
     } else {
       throw new DataError('unavailable', 'Consulta de asientos no implementada para este proveedor.');
     }
-    result.available = result.seats.filter(s => s.status === 'available').length;
-    result.occupied = result.seats.filter(s => s.status === 'occupied').length;
-    result.unavailable = result.seats.filter(s => s.status === 'unavailable').length;
-    result.unknown = result.seats.filter(s => s.status === 'unknown').length;
-    result.total = result.seats.length;
+    const seats = result.seats ?? [];
+    result.available = seats.filter(s => s.status === 'available').length;
+    result.occupied = seats.filter(s => s.status === 'occupied').length;
+    result.unavailable = seats.filter(s => s.status === 'unavailable').length;
+    result.unknown = seats.filter(s => s.status === 'unknown').length;
+    result.total = seats.length;
     result.availability_complete = result.unknown === 0 && result.total > 0;
     if (result.unknown) c.warnings.push(`Mapa parcialmente interpretado por Cinve: ${result.unknown} asientos con estado desconocido (?). Los ${result.available} libres son únicamente los confirmados; cero libres confirmados no significa agotado.`);
-    result.ascii = renderSeats(result.seats);
+    result.ascii = renderSeats(seats);
     result.status = 'available';
     c.warnings.push('Lectura sin reserva, sin caché local. La disponibilidad puede cambiar; confirma en la web antes de comprar.');
   } catch (e) {
