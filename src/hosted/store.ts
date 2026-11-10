@@ -2,7 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID, 
 import { Pool, type PoolClient } from 'pg';
 import { Session, SessionStore } from '../auth/sessions.js';
 import type { AuthProviderId, AuthSession } from '../auth/sessions.js';
-import { DataError } from '../core.js';
+import { DataError, group } from '../core.js';
 
 export const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 export function databasePool(url = process.env.DATABASE_URL) {
@@ -34,7 +34,7 @@ export class HostedUsers {
   async authenticate(token: string) {
     const match = token.match(/^cv_([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\.[a-f0-9]{64}$/);
     if (!match) return undefined;
-    const id = match[1], expected = await this.hash(id);
+    const id = group(match, 1), expected = await this.hash(id);
     if (!expected || !timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(digest(token), 'hex'))) return undefined;
     return { id, tokenHash: expected };
   }

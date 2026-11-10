@@ -1,7 +1,7 @@
 // Parsers for Cinex's public HTML: the billboard (cartelera.html), a film's
 // synopsis page and a venue's calendar page, each read without an account.
 import { load } from 'cheerio';
-import { DataError, folded, Id, number } from '../../core.js';
+import { DataError, folded, group, Id, number } from '../../core.js';
 import type { DataItem } from '../../core.js';
 import { ReadContext } from '../../http/read-context.js';
 import { decodeLabel } from '../parsing.js';
@@ -11,10 +11,10 @@ export const CX = 'https://www.cinex.com.ve';
 export function parseCinexMovies(html: string): DataItem[] {
   const $ = load(html), items = new Map<string, DataItem>();
   $('.poster[onclick]').each((_, e) => {
-    const match = ($(e).attr('onclick') ?? '').match(/sinopsis-([a-zA-Z0-9._-]+)\.html/);
-    if (!match || !Id.safeParse(match[1]).success) return;
+    const id = ($(e).attr('onclick') ?? '').match(/sinopsis-([a-zA-Z0-9._-]+)\.html/)?.[1];
+    if (!id || !Id.safeParse(id).success) return;
     const name = decodeLabel($(e).attr('title') || $(e).attr('alt'));
-    if (name) items.set(match[1], { kind: 'movie', id: match[1], name, url: `${CX}/sinopsis-${match[1]}.html` });
+    if (name) items.set(id, { kind: 'movie', id, name, url: `${CX}/sinopsis-${id}.html` });
   });
   if (!items.size) throw new DataError('error', 'No se reconoció la cartelera HTML de Cinex.');
   return [...items.values()];
@@ -40,20 +40,21 @@ export function parseCinexShowtimes(html: string, movieId: string, date: string,
     const readable = $(e).clone(); readable.find('br').replaceWith('\n');
     // Same button layout as the venue page.
     const details = cinexSessionDetails(readable.text(), $(e).find('img.icoIdioma').attr('src'));
-    const key = `${match[2]}:${match[1]}`;
+    const sessionId = group(match, 1), cinemaId = group(match, 2), key = `${cinemaId}:${sessionId}`;
     const list = occurrences.get(key) ?? []; occurrences.set(key, list);
-    list.push({ kind: 'showtime', id: match[1], name: title,
-      movie_id: movieId, cinema_id: match[2], date: local.slice(0, 10), time: local.slice(11, 16), starts_at: `${local}-04:00`, rating, ...details,
+    list.push({ kind: 'showtime', id: sessionId, name: title,
+      movie_id: movieId, cinema_id: cinemaId, date: local.slice(0, 10), time: local.slice(11, 16), starts_at: `${local}-04:00`, rating, ...details,
       url: `${CX}/sinopsis-${movieId}.html` });
   });
   const items: DataItem[] = [];
   for (const list of occurrences.values()) {
-    if (!list.some(item => item.date === date)) continue;
-    if (list.some(item => cinexSessionConflict(list[0], item))) {
-      if (c) { c.partial = true; providerWarning(c, 'cinex-movie-conflict', () => `Cinex devolvió horarios contradictorios para la función ${warningLabel(list[0].id)}; se omitió.`); }
+    const [first] = list;
+    if (!first || !list.some(item => item.date === date)) continue;
+    if (list.some(item => cinexSessionConflict(first, item))) {
+      if (c) { c.partial = true; providerWarning(c, 'cinex-movie-conflict', () => `Cinex devolvió horarios contradictorios para la función ${warningLabel(first.id)}; se omitió.`); }
       continue;
     }
-    items.push(list[0]);
+    items.push(first);
   }
   if (malformed && c) {
     c.partial = true;
@@ -140,7 +141,8 @@ export function parseCinexCinemaShowtimes(html: string, movies: DataItem[], cine
       return;
     }
     const matches = title ? (byTitle.get(cinexMovieTitle(title)) ?? []) : [];
-    if (matches.length !== 1) {
+    const movie = matches.length === 1 ? matches[0] : undefined;
+    if (!movie) {
       c.partial = true;
       providerWarning(c, !title ? 'cinex-cinema-missing-title' : matches.length > 1 ? 'cinex-cinema-ambiguous-title' : 'cinex-cinema-unknown-title', () => !title
         ? 'Cinex devolvió una función sin título de película; se omitió porque no se puede confirmar su movie_id.'
@@ -149,7 +151,6 @@ export function parseCinexCinemaShowtimes(html: string, movies: DataItem[], cine
           : `Cinex no encontró el título de función en su catálogo (${warningLabel(title)}); se omitió porque no se puede confirmar su movie_id.`);
       return;
     }
-    const movie = matches[0];
     datedNodes.each((_, e) => {
       const raw = $(e).attr('onclick') ?? '';
       const match = raw.match(/checkLogin\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]\s*\)/i);
@@ -157,7 +158,7 @@ export function parseCinexCinemaShowtimes(html: string, movies: DataItem[], cine
       if (!match || epoch === undefined || !Number.isInteger(epoch) || epoch < 1e9 || epoch > 1e11) {
         c.partial = true; providerWarning(c, 'cinex-cinema-malformed-session', () => `Cinex omitió una función malformada de ${warningLabel(title || 'película sin título')}.`); return;
       }
-      const sessionId = match[1], sourceCinema = match[2];
+      const sessionId = group(match, 1), sourceCinema = group(match, 2);
       if (!Id.safeParse(sessionId).success || sourceCinema !== cinemaId) {
         c.partial = true; providerWarning(c, 'cinex-cinema-invalid-id', () => `Cinex omitió una función con identificador de sede o sesión no verificable (${warningLabel(sessionId)}).`); return;
       }

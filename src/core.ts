@@ -150,3 +150,18 @@ export function requireArg(q: Query, field: keyof Query): string {
   if (typeof value !== 'string' || !value) throw new DataError('unavailable', `Se requiere ${field}; obtén el identificador mediante las herramientas de catálogo.`);
   return value;
 }
+/**
+ * Capture group `index` of a match that succeeded, for a group the pattern
+ * does not make optional, so the match always fills it. Read an optional
+ * group with `match[index]` instead and handle its absence.
+ */
+export function group(match: RegExpMatchArray, index: number): string {
+  const value = match[index];
+  if (value === undefined) throw new Error(`Regex group ${index} is optional in this pattern; read it with match[${index}].`);
+  return value;
+}
+/** The text before the first `separator`, or all of it: `split(separator)[0]`, which always exists. */
+export function beforeFirst(value: string, separator: string): string {
+  const at = value.indexOf(separator);
+  return at < 0 ? value : value.slice(0, at);
+}

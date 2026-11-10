@@ -103,8 +103,10 @@ async function cinexCityShowtimes(q: Query, c: ReadContext, catalog: CinexCinema
   const items: DataItem[] = [], failed: string[] = [];
   let next = 0, succeeded = 0, firstError: unknown;
   const worker = async () => {
-    while (next < work.length && Date.now() < deadline) {
-      const v = work[next++];
+    while (Date.now() < deadline) {
+      const v = work[next];
+      if (v === undefined) break;
+      next++;
       try {
         const venue = await catalog.resolve(v.cinema_id, c);
         const page = venue.body === undefined ? await c.page(venue.url, 120000) : { body: venue.body };

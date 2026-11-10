@@ -52,8 +52,8 @@ const resultSourceLimit = 10;
 function boundedSources(sources: QueryResult['sources'], warnings: string[]): QueryResult['sources'] {
   if (sources.length <= resultSourceLimit) return sources;
   const oldest = sources.reduce((a, b) => (Date.parse(b.fetched_at) < Date.parse(a.fetched_at) ? b : a));
-  const kept = sources.slice(0, resultSourceLimit - 1);
-  kept.push(kept.includes(oldest) ? sources[resultSourceLimit - 1] : oldest);
+  const kept = sources.slice(0, resultSourceLimit);
+  if (!kept.includes(oldest)) kept[kept.length - 1] = oldest;
   warnings.push(`Se consultaron ${sources.length} fuentes; se listan ${kept.length}, incluida la más antigua (${oldest.fetched_at}).`);
   return kept;
 }

@@ -3,6 +3,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Pool, PoolClient } from 'pg';
 import * as z from 'zod';
+import { beforeFirst } from '../core.js';
 import { digest, lockUser, transaction } from './store.js';
 import { ConnectionLinks } from './connection-links.js';
 import { ClientMetadataCache, isClientIdUrl, redirectUri } from './client-metadata.js';
@@ -24,7 +25,7 @@ function required(value: string | null | undefined) {
   return value;
 }
 async function payload(req: IncomingMessage, json = false) {
-  const type = req.headers['content-type']?.split(';')[0].trim();
+  const header = req.headers['content-type'], type = header === undefined ? undefined : beforeFirst(header, ';').trim();
   if (type !== (json ? 'application/json' : 'application/x-www-form-urlencoded')) throw new OAuthError('invalid_request', 415);
   let bytes = 0; const chunks: Buffer[] = [];
   for await (const chunk of req) {

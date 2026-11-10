@@ -24,7 +24,8 @@ export function cpSite(q: Query) {
  * them: cupo (tot) minus sold (vend) minus held in open checkouts (temp).
  */
 export function cinepicTicketsLeft(tariff: Record<string, unknown>): number | undefined {
-  const [tot, vend, temp] = [tariff.tot, tariff.vend, tariff.temp].map(v => /^\d+$/.test(text(v)) ? Number(text(v)) : NaN);
+  const count = (v: unknown) => /^\d+$/.test(text(v)) ? Number(text(v)) : NaN;
+  const tot = count(tariff.tot), vend = count(tariff.vend), temp = count(tariff.temp);
   return [tot, vend, temp].every(Number.isSafeInteger) ? Math.max(0, tot - vend - temp) : undefined;
 }
 

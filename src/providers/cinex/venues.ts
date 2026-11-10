@@ -204,8 +204,8 @@ export class CinexCinemaCatalog {
             if (!present && !this.known.has(venue.href) && this.known.size < 100) this.known.set(venue.href, venue);
             const codes = new Set<string>();
             detail('[onclick]').each((_, e) => {
-              const match = detail(e).attr('onclick')?.match(/checkLogin\(\s*['"][^'"]+['"]\s*,\s*['"]([A-Za-z0-9_-]{1,100})['"]\s*\)/);
-              if (match) codes.add(match[1]);
+              const found = detail(e).attr('onclick')?.match(/checkLogin\(\s*['"][^'"]+['"]\s*,\s*['"]([A-Za-z0-9_-]{1,100})['"]\s*\)/)?.[1];
+              if (found) codes.add(found);
             });
             if (codes.size === 1) {
               if (!titleMatches) throw new DataError('unavailable', 'La página no confirma la identidad de la sede.');
@@ -328,10 +328,11 @@ export class CinexCinemaCatalog {
       if (name) matches.push({ href, name, city: label.split(',').slice(1).join(',').trim(), image });
     });
     if (matches.length > 1) throw new DataError('unavailable', 'El código de sede Cinex coincide con varias entradas del directorio.');
-    if (matches.length === 1) {
+    const [listed] = matches;
+    if (listed) {
       // The image filename narrows the directory candidate but is not itself
       // enough to skip the requested detail-page identity check.
-      return { venue: matches[0], metadataConfirmed: false };
+      return { venue: listed, metadataConfirmed: false };
     }
     // A code can be confirmed by a detail page even when the directory image
     // uses a different asset code. Ask metadata for this one requested ID,
@@ -345,8 +346,9 @@ export class CinexCinemaCatalog {
       const name = $(e).find('h3').text().trim() || label.split(',')[0];
       if (name && normalizedName(name) === normalizedName(metadataName)) matches.push({ href, name, city: label.split(',').slice(1).join(',').trim(), image: $(e).find('img').attr('src') });
     });
-    if (matches.length !== 1) throw new DataError('unavailable', matches.length ? 'El nombre de sede Cinex coincide con varias entradas del directorio.' : 'El código de sede Cinex no coincide con una sede identificable del directorio.');
-    return { venue: matches[0], metadataConfirmed: true };
+    const [named] = matches;
+    if (!named || matches.length !== 1) throw new DataError('unavailable', matches.length ? 'El nombre de sede Cinex coincide con varias entradas del directorio.' : 'El código de sede Cinex no coincide con una sede identificable del directorio.');
+    return { venue: named, metadataConfirmed: true };
   }
 
   private async validatePage(html: string, cinemaId: string, venueName: string, c: ReadContext, metadataConfirmed = false) {
@@ -356,8 +358,8 @@ export class CinexCinemaCatalog {
     }
     const codes = new Set<string>();
     detail('[onclick]').each((_, e) => {
-      const match = detail(e).attr('onclick')?.match(/checkLogin\(\s*['"][^'"]+['"]\s*,\s*['"]([A-Za-z0-9_-]{1,100})['"]\s*\)/);
-      if (match) codes.add(match[1]);
+      const found = detail(e).attr('onclick')?.match(/checkLogin\(\s*['"][^'"]+['"]\s*,\s*['"]([A-Za-z0-9_-]{1,100})['"]\s*\)/)?.[1];
+      if (found) codes.add(found);
     });
     if (codes.size) {
       if (!codes.has(cinemaId) || (!title && !metadataConfirmed)) throw new DataError('unavailable', 'La página oficial no confirma el código de la sede Cinex.');

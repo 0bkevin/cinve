@@ -3,6 +3,7 @@ import type { LookupAddress } from 'node:dns';
 import { request } from 'node:https';
 import { isIP } from 'node:net';
 import * as z from 'zod';
+import { beforeFirst, group } from '../core.js';
 
 /**
  * OAuth Client ID Metadata Documents (the client registration method MCP
@@ -38,7 +39,7 @@ export function isClientIdUrl(value: string): boolean {
   if (value.length > 2048 || !/^https:\/\//i.test(value) || /[#\\\s\u0000-\u001f\u007f]/.test(value)) return false;
   const raw = value.match(/^https:\/\/([^/?]+)(\/[^?]*)(?:\?.*)?$/i);
   if (!raw) return false;
-  const [, authority, path] = raw;
+  const authority = group(raw, 1), path = group(raw, 2);
   if (authority.includes('@')) return false;
   if (path.split('/').some(segment => ['.', '..'].includes(segment.toLowerCase().replace(/%2e/g, '.')))) return false;
   if (path === '/') return false;
@@ -57,10 +58,10 @@ function addressBytes(address: string): number[] | undefined {
   if (family !== 6) return undefined;
   let text = address.toLowerCase();
   const tail: number[] = [];
-  const v4 = text.match(/(\d{1,3}(?:\.\d{1,3}){3})$/);
+  const v4 = text.match(/\d{1,3}(?:\.\d{1,3}){3}$/)?.[0];
   if (v4) {
-    tail.push(...v4[1].split('.').map(Number));
-    text = text.slice(0, -v4[1].length) + '0:0';
+    tail.push(...v4.split('.').map(Number));
+    text = text.slice(0, -v4.length) + '0:0';
   }
   const [head, rest] = text.includes('::') ? text.split('::') : [text, undefined];
   const left = head ? head.split(':') : [], right = rest ? rest.split(':') : [];
@@ -73,8 +74,11 @@ function addressBytes(address: string): number[] | undefined {
 type Range = readonly [prefix: readonly number[], bits: number];
 const inRange = (bytes: readonly number[], [prefix, bits]: Range) => {
   for (let i = 0; i < bits; i++) {
-    const mask = 0x80 >> (i % 8);
-    if ((bytes[i >> 3] & mask) !== (prefix[i >> 3] & mask)) return false;
+    const mask = 0x80 >> (i % 8), byte = bytes[i >> 3];
+    // Ranges are checked only against their own family (4 or 16 bytes), so
+    // the address is long enough. A prefix lists only its leading bytes; the
+    // rest are zero, as in 3fff::/20.
+    if (byte === undefined || (byte & mask) !== ((prefix[i >> 3] ?? 0) & mask)) return false;
   }
   return true;
 };
@@ -106,7 +110,8 @@ export function isBlockedAddress(address: string): boolean {
   if (bytes.length === 4) return blockedV4.some(range => inRange(bytes, range));
   const mapped = bytes.slice(0, 10).every(b => b === 0) && bytes[10] === 0xff && bytes[11] === 0xff;
   if (mapped) return blockedV4.some(range => inRange(bytes.slice(12), range));
-  if ((bytes[0] & 0xe0) !== 0x20) return true;
+  const first = bytes[0];
+  if (first === undefined || (first & 0xe0) !== 0x20) return true;
   return blockedV6.some(range => inRange(bytes, range));
 }
 
@@ -115,11 +120,12 @@ type LookupCallback = (error: NodeJS.ErrnoException | null, address: string | Lo
 function checkedLookup(hostname: string, options: { all?: boolean }, callback: LookupCallback) {
   lookup(hostname, { all: true }, (error, addresses) => {
     if (error) return callback(error, '');
-    if (!addresses.length || addresses.some(a => isBlockedAddress(a.address))) {
+    const [first] = addresses;
+    if (!first || addresses.some(a => isBlockedAddress(a.address))) {
       return callback(Object.assign(new Error('Client metadata host resolves to a non-public address.'), { code: 'EBLOCKED' }), '');
     }
     if (options.all) return callback(null, addresses);
-    callback(null, addresses[0].address, addresses[0].family);
+    callback(null, first.address, first.family);
   });
 }
 
@@ -139,7 +145,7 @@ export const fetchClientMetadataDocument: ClientMetadataFetcher = url => new Pro
     method: 'GET', lookup: checkedLookup as never, timeout: metadataTimeoutMs,
     headers: { Accept: 'application/json', 'User-Agent': 'cinve-oauth/0.1' },
   }, res => {
-    const type = res.headers['content-type']?.split(';')[0].trim().toLowerCase();
+    const header = res.headers['content-type'], type = header === undefined ? undefined : beforeFirst(header, ';').trim().toLowerCase();
     if (res.statusCode !== 200 || type !== 'application/json') {
       // Do not drain a rejected body: it is not bounded by the size limit.
       reject(new Error(`Client metadata request failed (${res.statusCode}).`)); req.destroy(); return;

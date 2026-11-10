@@ -158,8 +158,10 @@ async function cinesUnidosGateway(op: Operation, q: Query, c: ReadContext, reque
   // Two workers match the HTTP client's two reads per origin, whose 15 s
   // deadline includes queue time; more would only time out waiting.
   const worker = async () => {
-    while (next < work.length && Date.now() < deadline) {
-      const title = work[next++];
+    while (Date.now() < deadline) {
+      const title = work[next];
+      if (title === undefined) break;
+      next++;
       try {
         showtimes.push(...rows(await c.json(`${base}/sessions?${new URLSearchParams({ Title: title })}`), 'gateway sessions')
           .map(normalize).filter((item): item is DataItem => item !== undefined));

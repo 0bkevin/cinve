@@ -3,7 +3,7 @@
 // sessions only the authenticated read routes below. Nothing here selects,
 // holds or buys seats or tickets: boletos_datadev.php, which starts a timed
 // Cinex order, is deliberately absent.
-import { DataError, Id } from '../core.js';
+import { DataError, group, Id } from '../core.js';
 import type { AuthProviderId } from '../auth/sessions.js';
 
 export const publicHosts = new Set(['www.cinex.com.ve', 'www.cinesunidos.com', 'gateway.cinesunidos.com', 'cinepiccandelaria.com', 'cinepicvip.com', 'apifront.cinexo.com.ar', 'api.cinexo.com.ar']);
@@ -45,7 +45,7 @@ export function assertPublicRead(value: string) {
           const m = path.match(/^\/search\/cities\/([^/]+)\/(theaters|films|sessions)$/);
           if (m) {
             let city = '';
-            try { city = decodeURIComponent(m[1]); } catch { return false; }
+            try { city = decodeURIComponent(group(m, 1)); } catch { return false; }
             if (!city || city.length > 80 || /[\u0000-\u001f/\\]/.test(city)) return false;
             return m[2] === 'sessions' ? exactQuery(u, { Title: v => !!v && v.length <= 200 }) : none;
           }

@@ -3,7 +3,7 @@
 // unknown, never free.
 import { load } from 'cheerio';
 import * as z from 'zod';
-import { DataError, text } from '../core.js';
+import { beforeFirst, DataError, group, text } from '../core.js';
 import type { Query } from '../core.js';
 import { object, rows } from '../providers/parsing.js';
 import { Seat } from './schema.js';
@@ -26,21 +26,28 @@ export function parseCinexShowing(html: string): { showing?: Showing; available?
   const parts = line.split('|').map(p => p.replace(/\s+/g, ' ').trim());
   const field = (name: string) => parts.find(p => p.startsWith(`${name}:`))?.slice(name.length + 1).trim();
   // Only real calendar dates and clock times: "31-02-2026" and "02:99pm" are dropped.
+  let date: string | undefined, time: string | undefined;
   const day = field('Fecha')?.match(/^(\d{2})-(\d{2})-(\d{4})$/);
-  const date = day && new Date(Date.UTC(Number(day[3]), Number(day[2]) - 1, Number(day[1]))).toISOString().startsWith(`${day[3]}-${day[2]}-${day[1]}`) ? day : undefined;
+  if (day) {
+    const [d, m, y] = [group(day, 1), group(day, 2), group(day, 3)];
+    if (new Date(Date.UTC(Number(y), Number(m) - 1, Number(d))).toISOString().startsWith(`${y}-${m}-${d}`)) date = `${y}-${m}-${d}`;
+  }
   const clock = field('Hora')?.match(/^(\d{1,2}):(\d{2})\s*([ap])\.?\s*m\.?$/i);
-  const hour = clock && Number(clock[2]) <= 59 ? clock : undefined;
-  const h = hour ? Number(hour[1]) % 12 + (hour[3].toLowerCase() === 'p' ? 12 : 0) : NaN;
-  const count = field('Asientos disponibles')?.match(/^(\d+) asiento/);
+  if (clock) {
+    const hour = Number(group(clock, 1)), minutes = group(clock, 2), pm = group(clock, 3).toLowerCase() === 'p';
+    if (Number(minutes) <= 59 && hour >= 1 && hour <= 12) time = `${String(hour % 12 + (pm ? 12 : 0)).padStart(2, '0')}:${minutes}`;
+  }
+  const count = field('Asientos disponibles')?.match(/^(\d+) asiento/)?.[1];
+  const [first, second] = parts;
   return {
     showing: showing({
       movie: clean($('#cinexasientodatalistzy .movie-details h3.title').first().text(), 200),
-      cinema_name: parts.length > 2 && !parts[0].includes(':') ? clean(parts[0], 120) : undefined,
-      screen: /^Sala\b/i.test(parts[1] ?? '') ? clean(parts[1], 60) : undefined,
-      date: date ? `${date[3]}-${date[2]}-${date[1]}` : undefined,
-      time: hour && Number(hour[1]) >= 1 && Number(hour[1]) <= 12 ? `${String(h).padStart(2, '0')}:${hour[2]}` : undefined,
+      cinema_name: parts.length > 2 && first && !first.includes(':') ? clean(first, 120) : undefined,
+      screen: /^Sala\b/i.test(second ?? '') ? clean(second, 60) : undefined,
+      date,
+      time,
     }),
-    available: count ? Number(count[1]) : undefined,
+    available: count ? Number(count) : undefined,
   };
 }
 
@@ -71,7 +78,7 @@ const seatType = (value: unknown) => { const t = text(value); return /^\d+$/.tes
 
 export function parseCinepicSeats(data: unknown, bookable: Set<string> | 'all' = 'all'): SeatData[] {
   return validateSeats(rows(object(data).butacas, 'butacas').map(s => ({
-    id: text(s.butaca), label: text(s.nombre_butaca), row: text(s.nombre_butaca).split(':')[0], area: 'Sala',
+    id: text(s.butaca), label: text(s.nombre_butaca), row: beforeFirst(text(s.nombre_butaca), ':'), area: 'Sala',
     row_index: Number(s.fila) - 1, column_index: Number(s.columna) - 1,
     status: text(s.libre) === '1' ? (bookable === 'all' || bookable.has(seatType(s.tipo_butaca_id)) ? 'available' : 'unavailable')
       : text(s.libre) === '0' ? 'occupied' : 'unknown',
@@ -128,7 +135,7 @@ export function parseCinexSeats(html: string, q: Query): SeatData[] {
       const call = (seat.attr('onclick') ?? '').match(/^javascript:decideAsientoNew\('([A-Za-z0-9]+)','(\d+)','(\d+)','(\d+)','([A-Za-z0-9]+)','(\d*)','([NS])'(?:,'([NS])')?\);?$/);
       if (call && call[1] !== id) throw new DataError('error', 'Identificador de asiento Cinex inconsistente.');
       const restricted = classes.some(c => /wheelchair|selected/.test(c)) || call?.[7] === 'S' || call?.[8] === 'S';
-      const available = call && seat.attr('alt') === '0' && classes.length === 1 && freeClasses.has(classes[0]);
+      const available = call && seat.attr('alt') === '0' && classes.length === 1 && classes.every(c => freeClasses.has(c));
       result.push({ id, label: id, row, area: 'Sala', row_index: rowIndex, column_index: columnIndex,
         status: occupied ? 'occupied' : restricted ? 'unavailable' : available ? 'available' : 'unknown',
         provider_status: seat.attr('alt') ?? 'unknown', category: call?.[5] });

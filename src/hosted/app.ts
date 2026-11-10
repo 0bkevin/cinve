@@ -18,6 +18,7 @@ import { HostedHttpClient } from './http-client.js';
 import { SessionStore } from '../auth/sessions.js';
 import { login } from '../auth/login.js';
 import type { AuthSession, AuthProviderId } from '../auth/sessions.js';
+import { beforeFirst } from '../core.js';
 import type { Operation, Query } from '../core.js';
 import type { CallOptions } from '../http/read-context.js';
 import { ConnectionLinks } from './connection-links.js';
@@ -52,7 +53,8 @@ function wellFormedOrigin(value: string): boolean {
 }
 class HttpError extends Error { constructor(readonly status: number, message: string) { super(message); } }
 async function body(req: IncomingMessage, max: number, deadlineMs = 10000): Promise<unknown> {
-  if (req.headers['content-type']?.split(';')[0].trim() !== 'application/json') throw new HttpError(415, 'Se requiere JSON.');
+  const type = req.headers['content-type'];
+  if (type === undefined || beforeFirst(type, ';').trim() !== 'application/json') throw new HttpError(415, 'Se requiere JSON.');
   if (Number(req.headers['content-length'] ?? 0) > max) throw new HttpError(413, 'Solicitud demasiado grande.');
   const chunks: Buffer[] = []; let size = 0;
   // A slow sender must not hold a request slot indefinitely. On Vercel the
@@ -106,7 +108,7 @@ export async function createHostedApp(options: {
       if (req.method === 'GET' && req.url === '/health') { send(200, { status: 'ok' }); return; }
       if (req.headers.host !== publicUrl.host) throw new HttpError(403, 'Origen no permitido.');
       const forwarded = options.trustedVercelProxy ? req.headers['x-vercel-forwarded-for'] : undefined;
-      const ip = typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : req.socket.remoteAddress ?? 'unknown';
+      const ip = typeof forwarded === 'string' ? beforeFirst(forwarded, ',').trim() : req.socket.remoteAddress ?? 'unknown';
       if (await oauth.handle(req, res, ip)) return;
       if (req.url === '/mcp') {
         // MCP authorization is exclusively bearer-based; cookies are never used,
