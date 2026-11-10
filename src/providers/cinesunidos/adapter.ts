@@ -99,8 +99,9 @@ export function cuLanguage(raw: unknown): string | undefined {
  * marker the website shows ("Clayface (Sub)") and leaves a double space where
  * it stood inside a title ("Clayface  Atmos" for "Clayface (Sub) Atmos").
  */
+const versionMarkers: Record<string, string> = { espanol: 'Esp', subtitulada: 'Sub' };
 export function cuSiteTitle(title: string, language: unknown): string {
-  const marker = ({ espanol: 'Esp', subtitulada: 'Sub' } as Record<string, string>)[folded(text(language))];
+  const marker = versionMarkers[folded(text(language))];
   const trimmed = title.trim();
   if (!marker || /\((?:esp|sub)\)/i.test(trimmed)) return trimmed.replace(/\s+/g, ' ');
   return /\s{2,}/.test(trimmed) ? trimmed.replace(/\s{2,}/, ` (${marker}) `).replace(/\s+/g, ' ') : `${trimmed} (${marker})`;
@@ -128,10 +129,10 @@ async function cinesUnidosGateway(op: Operation, q: Query, c: ReadContext, reque
   c.warnings.push('La web de Cines Unidos rechazó la consulta automatizada; los datos provienen de su API pública de búsqueda.');
   if (op === 'cinemas') return parseCinemaDirectory([rows(await c.json(`${base}/theaters`, hourTtl), 'gateway theaters')], city, pageUrl('cines'), c);
   const films = await c.json(`${base}/films`);
-  if (!Array.isArray(films) || films.some(t => typeof t !== 'string')) throw new DataError('error', 'Lista de películas de Cines Unidos no reconocida.');
+  if (!Array.isArray(films) || !films.every((t): t is string => typeof t === 'string')) throw new DataError('error', 'Lista de películas de Cines Unidos no reconocida.');
   // The service filters results by name; the session title is the searched
   // film title, so a name filter can skip the searches it would discard.
-  const titles = [...new Set((films as string[]).map(t => t.trim()).filter(t => t && t.length <= 200))]
+  const titles = [...new Set(films.map(t => t.trim()).filter(t => t && t.length <= 200))]
     .filter(t => !q.query || folded(t).includes(folded(q.query)));
   if (titles.length > cuGatewayTitles) {
     c.partial = true;
@@ -183,6 +184,6 @@ async function cinesUnidosGateway(op: Operation, q: Query, c: ReadContext, reque
   }
   if (work.length && !succeeded) throw failures[0] ?? new DataError('unavailable', 'Se agotó el tiempo de consulta de Cines Unidos; usa query con el título de la película.');
   const movies = new Map<string, DataItem>();
-  for (const s of showtimes) if (!movies.has(s.movie_id!)) movies.set(s.movie_id!, { kind: 'movie', id: s.movie_id!, name: s.name, city, url: s.url });
+  for (const { movie_id: id, name, url } of showtimes) if (id && !movies.has(id)) movies.set(id, { kind: 'movie', id, name, city, url });
   return op === 'showtimes' ? showtimes : [...movies.values()];
 }

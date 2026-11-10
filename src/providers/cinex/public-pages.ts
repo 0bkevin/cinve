@@ -126,15 +126,19 @@ export function parseCinexCinemaShowtimes(html: string, movies: DataItem[], cine
     const sessionNodes = $(block).find('[onclick*="checkLogin("]');
     nodes += sessionNodes.length;
     if (!sessionNodes.length) return;
-    const validEpochNodes = sessionNodes.filter((_, e) => {
-      const epoch = number($(e).attr('alt'));
-      return epoch !== undefined && Number.isInteger(epoch) && epoch >= 1e9 && epoch <= 1e11;
-    });
+    const validEpoch = (alt: string | undefined) => {
+      const epoch = number(alt);
+      return epoch !== undefined && Number.isInteger(epoch) && epoch >= 1e9 && epoch <= 1e11 ? epoch : undefined;
+    };
+    const validEpochNodes = sessionNodes.filter((_, e) => validEpoch($(e).attr('alt')) !== undefined);
     if (validEpochNodes.length !== sessionNodes.length) {
       c.partial = true;
       providerWarning(c, 'cinex-cinema-malformed-epoch', 'Cinex devolvió una o más funciones de sede con hora epoch ausente o malformada; se omitieron.');
     }
-    const datedNodes = validEpochNodes.filter((_, e) => new Date(number($(e).attr('alt'))! * 1000 - 4 * 3600000).toISOString().slice(0, 10) === date);
+    const datedNodes = validEpochNodes.filter((_, e) => {
+      const epoch = validEpoch($(e).attr('alt'));
+      return epoch !== undefined && new Date(epoch * 1000 - 4 * 3600000).toISOString().slice(0, 10) === date;
+    });
     // Do not report a missing catalog match for a different commercial date
     // present in the same multi-day cinema page.
     if (!datedNodes.length) {

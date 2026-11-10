@@ -27,7 +27,7 @@ export function parseCinemaDirectory(fields: unknown[], city: string, url: strin
     const set = identities.get(r.id) ?? new Set<string>(); set.add(r.identity); identities.set(r.id, set);
   }
   return records.map(r => {
-    const verified = Id.safeParse(r.id).success && !r.id.startsWith('directory-') && identities.get(r.id)!.size === 1;
+    const verified = Id.safeParse(r.id).success && !r.id.startsWith('directory-') && identities.get(r.id)?.size === 1;
     if (!verified) {
       c.partial = true;
       c.warnings.push(`Código de consulta ausente, inválido o contradictorio para ${r.name}; sede conservada con enlace oficial. Esto no indica cierre.`);

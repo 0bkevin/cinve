@@ -44,7 +44,7 @@ export async function cinepic(op: Operation, q: Query, c: ReadContext): Promise<
     }));
   }
   if (op === 'concessions') {
-      const site = cpSite(q), api = `https://api.cinexo.com.ar/api/complejo/${encodeURIComponent(q.cinema_id!)}`;
+      const site = cpSite(q), api = `https://api.cinexo.com.ar/api/complejo/${encodeURIComponent(site.id)}`;
       // The purchase page embeds this same catalog as candyData, so an empty one
       // means Cinepic's own checkout offers no products either (seen 2026-11-05).
       // Cinepic publishes no stock; the catalog and its rate change slowly, and
@@ -118,7 +118,7 @@ export async function cinepic(op: Operation, q: Query, c: ReadContext): Promise<
   }
   const site = cpSite(q), date = isoDate(q);
   const [year, month, day] = date.split('-');
-  const url = `https://apifront.cinexo.com.ar/mobile/consultas/peliculas/PeliculasConFuncionesYHorarios?${new URLSearchParams({ idComplejo: q.cinema_id!, fecha: `${day}/${month}/${year}` })}`;
+  const url = `https://apifront.cinexo.com.ar/mobile/consultas/peliculas/PeliculasConFuncionesYHorarios?${new URLSearchParams({ idComplejo: site.id, fecha: `${day}/${month}/${year}` })}`;
   const payload = object(await c.json(url));
   if (payload.success !== true) throw new DataError('error', 'Cinepic no confirmó el éxito de la consulta.');
   const data = object(payload.data);
@@ -159,6 +159,6 @@ export async function cinepic(op: Operation, q: Query, c: ReadContext): Promise<
       date, time, starts_at: overnight === true ? undefined : overnight === false ? `${date}T${time}:00-04:00` : undefined,
       format: text(r.formato), language: subtitled === undefined ? undefined : subtitled ? 'subtitulada' : 'no_subtitulada',
       rating: text(movie?.peliculas_clasificacion) || undefined,
-      url: `${site.host}/es-AR/compra?${new URLSearchParams({ cid: q.cinema_id!, fid: id, pid: mid })}` };
+      url: `${site.host}/es-AR/compra?${new URLSearchParams({ cid: site.id, fid: id, pid: mid })}` };
   });
 }

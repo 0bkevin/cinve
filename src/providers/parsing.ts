@@ -3,10 +3,12 @@ import { DataError, Id, operationItemSchema, text } from '../core.js';
 import type { DataItem } from '../core.js';
 
 export type Obj = Record<string, unknown>;
-export const object = (v: unknown): Obj => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Obj : {};
+/** A JSON object: not null, not an array. Its keys are unchecked, so each value is unknown. */
+export const isObj = (v: unknown): v is Obj => v !== null && typeof v === 'object' && !Array.isArray(v);
+export const object = (v: unknown): Obj => isObj(v) ? v : {};
 export function rows(v: unknown, name: string): Obj[] {
-  if (!Array.isArray(v) || v.some(r => !r || typeof r !== 'object' || Array.isArray(r))) throw new DataError('error', `Cambió la estructura del proveedor: ${name}.`);
-  return v as Obj[];
+  if (!Array.isArray(v) || !v.every(isObj)) throw new DataError('error', `Cambió la estructura del proveedor: ${name}.`);
+  return v;
 }
 /** Parses JSON only; never evaluates page scripts. Concatenation handles split Flight records. */
 export function flight(html: string): unknown[] {
@@ -62,7 +64,7 @@ function* nodes(root: unknown): Generator<unknown> {
   }
 }
 export function* objects(root: unknown): Generator<Obj> {
-  for (const value of nodes(root)) if (value && typeof value === 'object' && !Array.isArray(value)) yield value as Obj;
+  for (const value of nodes(root)) if (isObj(value)) yield value;
 }
 /** Only component props are catalog roots; nested movie.theaters is not a cinema directory. */
 export function pageFields(roots: unknown[], key: string): unknown[] {

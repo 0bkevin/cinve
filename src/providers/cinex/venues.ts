@@ -2,6 +2,7 @@ import { load } from 'cheerio';
 import { DataError, folded, Id } from '../../core.js';
 import type { DataItem, Query } from '../../core.js';
 import { CallStopped, type ReadContext } from '../../http/read-context.js';
+import { isObj } from '../parsing.js';
 
 const base = 'https://www.cinex.com.ve';
 const detailPath = /^cinex-[A-Za-z0-9_-]{1,80}\.html$/;
@@ -16,6 +17,16 @@ const directoryPage = (body: string) => /href=["']?cinex-/.test(body);
 const maxDiscoveryVenues = 100;
 const maxCatalogWarnings = 32;
 const metadataUrl = (id: string) => `${base}/assets/php/datasource.php?${new URLSearchParams({ method: 'getcinemadatafromcinemaid', cinemaid: id })}`;
+type MetadataRow = { siglas: string; name: string };
+/**
+ * The venue rows of a Cinex datasource answer, `{ data: [...] }` or, where
+ * `bareArray` allows it, a bare array; undefined when it is neither. Rows
+ * without a string code and name are dropped.
+ */
+function metadataRows(data: unknown, bareArray: boolean): MetadataRow[] | undefined {
+  const list = bareArray && Array.isArray(data) ? data : isObj(data) && Array.isArray(data.data) ? data.data : undefined;
+  return list?.filter((row): row is MetadataRow => isObj(row) && typeof row.siglas === 'string' && typeof row.name === 'string');
+}
 function imageCode(image = ''): string | undefined {
   return image.match(/(?:^|\/)cinemas\/(?:\d+x\d+x|x)?([a-z0-9_-]+)\.(?:jpg|png|webp)(?:\.|$)/i)?.[1]?.toUpperCase();
 }
@@ -107,11 +118,9 @@ export class CinexCinemaCatalog {
     const candidate = imageCode(image);
     if (!candidate || !Id.safeParse(candidate).success) return undefined;
     try {
-      const data = await c.json(metadataUrl(candidate), metadataTtl) as { data?: unknown };
-      if (!Array.isArray(data?.data)) return undefined;
-      const match = data.data.find(r => r && typeof r.name === 'string' && typeof r.siglas === 'string'
-        && r.siglas.toUpperCase() === candidate && normalizedName(r.name) === normalizedName(venueName));
-      return match && Id.safeParse(match.siglas).success ? match.siglas as string : undefined;
+      const rows = metadataRows(await c.json(metadataUrl(candidate), metadataTtl), false);
+      const match = rows?.find(r => r.siglas.toUpperCase() === candidate && normalizedName(r.name) === normalizedName(venueName));
+      return match && Id.safeParse(match.siglas).success ? match.siglas : undefined;
     } catch (error) { if (error instanceof CallStopped) throw error; return undefined; }
   }
   async list(q: Query, c: ReadContext): Promise<DataItem[]> {
@@ -375,24 +384,16 @@ export class CinexCinemaCatalog {
       if (error instanceof CallStopped) throw error;
       throw new DataError('unavailable', 'Cinex no confirmó el código de la sede sin funciones visibles.');
     }
-    if (!Array.isArray(data) && !(data && typeof data === 'object' && Array.isArray((data as { data?: unknown }).data))) {
-      throw new DataError('unavailable', 'Cinex no confirmó el código de la sede sin funciones visibles.');
-    }
-    const rows = Array.isArray(data) ? data : (data as { data: unknown[] }).data;
-    const verified = rows.some(row => row && typeof row === 'object' && typeof (row as { siglas?: unknown }).siglas === 'string' &&
-      typeof (row as { name?: unknown }).name === 'string' &&
-      (row as { siglas: string }).siglas.toUpperCase() === cinemaId &&
-      normalizedName((row as { name: string }).name) === normalizedName(venueName));
+    const rows = metadataRows(data, true);
+    if (!rows) throw new DataError('unavailable', 'Cinex no confirmó el código de la sede sin funciones visibles.');
+    const verified = rows.some(row => row.siglas.toUpperCase() === cinemaId && normalizedName(row.name) === normalizedName(venueName));
     if (!verified) throw new DataError('unavailable', 'Cinex no confirmó el código de la sede sin funciones visibles.');
   }
 
   private async metadataName(cinemaId: string, c: ReadContext): Promise<string | undefined> {
     try {
-      const data = await c.json(metadataUrl(cinemaId), metadataTtl);
-      const rows = Array.isArray(data) ? data : data && typeof data === 'object' && Array.isArray((data as { data?: unknown }).data) ? (data as { data: unknown[] }).data : [];
-      const match = rows.find(row => row && typeof row === 'object' && typeof (row as { siglas?: unknown }).siglas === 'string' &&
-        typeof (row as { name?: unknown }).name === 'string' && (row as { siglas: string }).siglas.toUpperCase() === cinemaId);
-      return match && typeof (match as { name: unknown }).name === 'string' ? (match as { name: string }).name : undefined;
+      const rows = metadataRows(await c.json(metadataUrl(cinemaId), metadataTtl), true);
+      return rows?.find(row => row.siglas.toUpperCase() === cinemaId)?.name;
     } catch (error) { if (error instanceof CallStopped) throw error; return undefined; }
   }
 }

@@ -17,7 +17,8 @@ export function parseCinexPrices(html: string, q: Query, url: string): DataItem[
   if (/listado tickets no disp\.|error al obtener los boletos/i.test(html)) throw new DataError('unavailable', 'Cinex no ofrece boletos para esta función; puede haber comenzado o cerrado la venta.');
   if (salesClosed(html, 'boletos')) throw new DataError('unavailable', 'Cinex indica que la compra de boletos en línea en esta sede no está disponible en este momento.');
   $('#frmboletos input[id^=amount]').each((_, el) => {
-    const field = $(el), id = field.attr('id')!.slice('amount'.length), row = field.closest('.row'), description = row.find('.col-md-8').first();
+    const field = $(el), id = field.attr('id')?.slice('amount'.length), row = field.closest('.row'), description = row.find('.col-md-8').first();
+    if (id === undefined) throw new DataError('error', 'Cambió la estructura o la suma de tarifas Cinex.');
     const name = description.find('span').first().text().trim(), amount = number(field.attr('value'));
     const parts = description.clone(); parts.find('br').replaceWith('\n');
     const lines = parts.text().split('\n');

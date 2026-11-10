@@ -19,7 +19,7 @@ export const cinepicVenueName = (id: string): string | undefined => isCinepicVen
 export function cpSite(q: Query) {
   const id = requireArg(q, 'cinema_id');
   if (!isCinepicVenue(id)) throw new DataError('unavailable', 'Cinepic admite las sedes 123300 (Candelaria) y 123301 (VVIP Lido).');
-  return CP[id];
+  return { id, ...CP[id] };
 }
 /**
  * Tickets the purchase page still offers with a tariff, as its own JS counts
