@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { HttpClient, ReadContext } from '../src/http.js';
+import { HttpClient, ReadContext, decodeBody } from '../src/http.js';
 import { CinemaService } from '../src/service.js';
 import { DataError } from '../src/core.js';
 
@@ -52,4 +52,13 @@ test('directory, city and metadata reads stay cached past the two-minute page li
   t.mock.timers.tick(31 * 60000);
   await s.query('cities', { provider: 'cinesunidos' });
   assert.equal(requests.length, cold + 1);
+});
+
+test('bodies are decoded with their declared charset, and a UTF-8 byte-order mark does not break JSON', async () => {
+  const latin1 = Buffer.from('LECHERÍAS', 'latin1');
+  assert.equal(decodeBody(latin1, 'text/html; charset=ISO-8859-1'), 'LECHERÍAS');
+  assert.equal(decodeBody(Buffer.from('MÉRIDA'), 'text/html'), 'MÉRIDA');
+  assert.equal(decodeBody(Buffer.from('MÉRIDA'), 'text/html; charset=x-unknown'), 'MÉRIDA');
+  const http = new HttpClient(async () => new Response(Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('["Mérida"]')]), { headers: { 'content-type': 'application/json; charset=utf-8' } }));
+  assert.deepEqual(await new ReadContext(http).json(cities), ['Mérida']);
 });

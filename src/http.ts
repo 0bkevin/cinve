@@ -20,6 +20,19 @@ const cacheEntries = 512, cacheBytesLimit = 64 * 1024 * 1024;
 const challengeMemoryMs = 10 * 60 * 1000;
 const hosts = new Set(['www.cinex.com.ve', 'www.cinesunidos.com', 'gateway.cinesunidos.com', 'cinepiccandelaria.com', 'cinepicvip.com', 'apifront.cinexo.com.ar', 'api.cinexo.com.ar']);
 
+/**
+ * Decodes with the charset the response declares (UTF-8 when absent or
+ * unknown). The observed providers all send UTF-8; a page declared as
+ * ISO-8859-1 or windows-1252 would otherwise lose every accented letter.
+ * TextDecoder also drops a UTF-8 byte-order mark, which JSON.parse rejects.
+ */
+export function decodeBody(bytes: Uint8Array, contentType: string | null): string {
+  const label = contentType?.match(/;\s*charset\s*=\s*"?([^";\s]+)/i)?.[1];
+  if (label) {
+    try { return new TextDecoder(label).decode(bytes); } catch { /* Unknown label: fall back to UTF-8. */ }
+  }
+  return new TextDecoder('utf-8').decode(bytes);
+}
 function cancelBody(body: ReadableStream<Uint8Array> | null | undefined) {
   if (!body) return;
   try { void body.cancel().catch(() => {}); } catch { /* Best-effort cleanup must not mask the response error. */ }
@@ -358,7 +371,7 @@ export class HttpClient {
         throw error;
       }
       if (!authorize) this.challenged.delete(origin);
-      const text = Buffer.concat(chunks).toString('utf8');
+      const text = decodeBody(Buffer.concat(chunks), response.headers.get('content-type'));
       return { body: authorize ? text : compactBody(url, text), source: { url, fetched_at: new Date().toISOString(), cached: false } };
     } catch (error) {
       if (error instanceof DataError) throw error;
