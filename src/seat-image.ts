@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { deflateSync } from 'node:zlib';
 import { initWasm, Resvg } from '@resvg/resvg-wasm';
 
 export type SeatStatus = 'available' | 'occupied' | 'unavailable' | 'unknown';
@@ -174,8 +175,114 @@ export async function renderSeatMapPng(svg: string): Promise<Uint8Array> {
   });
   // free() after a failed render throws its own error; keep the original one.
   const release = (o: { free(): void }) => { try { o.free(); } catch { /* already released by the failure */ } };
+  let pixels: Uint8Array, w: number, h: number;
   try {
     const image = resvg.render();
-    try { return image.asPng(); } finally { release(image); }
+    // Copy the pixels out and free the WebAssembly side before encoding, so the
+    // module's memory (which never shrinks) does not also hold the PNG.
+    try { pixels = image.pixels; w = image.width; h = image.height; } finally { release(image); }
   } finally { release(resvg); }
+  try { return encodeIndexedPng(pixels, w, h); } finally { discard(pixels); }
+}
+
+/**
+ * Frees a large buffer this module owns now instead of at the next GC: under
+ * repeated renders, uncollected multi-megabyte copies raised peak RSS by about 25 MB.
+ */
+function discard(bytes: Uint8Array) {
+  const buffer = bytes.buffer as ArrayBuffer & { transfer?: (length: number) => ArrayBuffer };
+  if (bytes.byteOffset === 0 && bytes.byteLength === buffer.byteLength) try { buffer.transfer?.(0); } catch { /* not detachable; GC frees it */ }
+}
+
+// Colours the SVG draws solid; the PNG palette always keeps them exact, however few pixels use them.
+const solidInks = [...new Set([...Object.values(palette).flatMap(c => [c.fill, c.stroke, c.text]), '#ffffff', '#202124', '#3c4043', '#5f6368', '#80868b', '#9aa0a6'])];
+const crcTable = Int32Array.from({ length: 256 }, (_, n) => { for (let k = 0; k < 8; k++) n = n & 1 ? 0xedb88320 ^ (n >>> 1) : n >>> 1; return n; });
+const pngChunk = (type: string, data: Uint8Array) => {
+  const out = Buffer.alloc(12 + data.length);
+  out.writeUInt32BE(data.length, 0); out.write(type, 4, 'latin1'); out.set(data, 8);
+  let crc = -1;
+  for (let i = 4; i < 8 + data.length; i++) crc = crcTable[(crc ^ out[i]) & 255] ^ (crc >>> 8);
+  out.writeUInt32BE(~crc >>> 0, 8 + data.length);
+  return out;
+};
+/**
+ * An 8-bit indexed PNG of tiny-skia's premultiplied RGBA. A map has a dozen solid
+ * colours plus their anti-aliased edges (a few hundred in all), so a 256-colour
+ * palette keeps every solid colour exact, moves only rare edge pixels slightly,
+ * and is about a third of resvg's RGBA PNG, encoded faster by Node's zlib.
+ */
+export function encodeIndexedPng(rgba: Uint8Array, width: number, height: number): Uint8Array {
+  const n = width * height;
+  if (rgba.length < n * 4) throw new Error('Imagen incompleta.');
+  const px = rgba.byteOffset % 4 ? new Uint32Array(rgba.slice(0, n * 4).buffer) : new Uint32Array(rgba.buffer, rgba.byteOffset, n);
+  // Distinct colours (little-endian 0xAABBGGRR) in an open-addressing table, counted per run of equal pixels.
+  let keys = new Uint32Array(4096), used = new Uint8Array(4096), counts = new Float64Array(4096), size = 0;
+  const find = (p: number) => {
+    const mask = keys.length - 1;
+    const hash = Math.imul(p, 0x9e3779b1);
+    let i = (hash ^ hash >>> 16) & mask;
+    while (used[i] && keys[i] !== p) i = (i + 1) & mask;
+    return i;
+  };
+  const count = (p: number, runs: number) => {
+    let i = find(p);
+    if (!used[i]) {
+      if (++size * 2 > keys.length) {
+        const [k, u, c] = [keys, used, counts];
+        keys = new Uint32Array(k.length * 2); used = new Uint8Array(k.length * 2); counts = new Float64Array(k.length * 2);
+        for (let j = 0; j < k.length; j++) if (u[j]) { const at = find(k[j]); used[at] = 1; keys[at] = k[j]; counts[at] = c[j]; }
+        i = find(p);
+      }
+      used[i] = 1; keys[i] = p;
+    }
+    counts[i] += runs;
+  };
+  for (let i = 1, prev = px[0], run = 1; i <= n; i++) {
+    if (i < n && px[i] === prev) { run++; continue; }
+    count(prev, run); prev = px[i]; run = 1;
+  }
+  const slot = new Uint8Array(keys.length), colors: number[] = [];
+  const take = (p: number) => {
+    const i = find(p);
+    if (used[i] && counts[i] < 0) return;
+    if (used[i]) { slot[i] = colors.length; counts[i] = -1; }
+    if (colors.length < 256) colors.push(p);
+  };
+  // Transparent and translucent white: the card's anti-aliased rounded corners. Then the solid inks, then the most frequent.
+  for (let a = 0; a < 255; a += 17) take((a << 24 | a << 16 | a << 8 | a) >>> 0);
+  for (const ink of solidInks) { const v = parseInt(ink.slice(1), 16); take((0xff000000 | (v & 0xff) << 16 | (v & 0xff00) | (v >>> 16)) >>> 0); }
+  const present: number[] = [];
+  for (let i = 0; i < keys.length; i++) if (used[i] && counts[i] >= 0) present.push(i);
+  present.sort((a, b) => counts[b] - counts[a]);
+  for (const i of present.splice(0, Math.max(0, 256 - colors.length))) { slot[i] = colors.length; counts[i] = -1; colors.push(keys[i]); }
+  // Any rarer colour takes the entry that looks closest over both a white and a black background.
+  for (const i of present) {
+    const p = keys[i];
+    let best = 0, bestError = Infinity;
+    for (let j = 0; j < colors.length; j++) {
+      const q = colors[j];
+      const r = (p & 255) - (q & 255), g = (p >>> 8 & 255) - (q >>> 8 & 255), b = (p >>> 16 & 255) - (q >>> 16 & 255), a = (p >>> 24) - (q >>> 24);
+      const error = r * r + g * g + b * b + (r - a) ** 2 + (g - a) ** 2 + (b - a) ** 2;
+      if (error < bestError) { bestError = error; best = j; }
+    }
+    slot[i] = best;
+  }
+  const raw = new Uint8Array((width + 1) * height);
+  for (let y = 0, i = 0, o = 0, prev = -1, index = 0; y < height; y++) {
+    raw[o++] = 0; // filter type None, the usual best for indexed images
+    for (let x = 0; x < width; x++, i++) { const p = px[i]; if (p !== prev) { prev = p; index = slot[find(p)]; } raw[o++] = index; }
+  }
+  let idat: Uint8Array;
+  try { idat = deflateSync(raw); } finally { discard(raw); }
+  const plte = new Uint8Array(colors.length * 3), trns = new Uint8Array(colors.length);
+  let translucent = 0;
+  colors.forEach((p, j) => {
+    const a = p >>> 24, straight = (c: number) => a ? Math.min(255, Math.round(c * 255 / a)) : 0;
+    plte.set([straight(p & 255), straight(p >>> 8 & 255), straight(p >>> 16 & 255)], j * 3); trns[j] = a;
+    if (a < 255) translucent = j + 1;
+  });
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0); ihdr.writeUInt32BE(height, 4); ihdr[8] = 8; ihdr[9] = 3; // 8-bit, indexed colour
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), pngChunk('IHDR', ihdr), pngChunk('PLTE', plte),
+    ...(translucent ? [pngChunk('tRNS', trns.subarray(0, translucent))] : []), pngChunk('IDAT', idat), pngChunk('IEND', new Uint8Array())]);
 }

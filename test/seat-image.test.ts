@@ -4,7 +4,8 @@ import { InMemoryTransport } from '@modelcontextprotocol/server';
 import { Client } from '@modelcontextprotocol/client';
 import { cinepicBookableTypes, parseCinepicSeats, parseCinexShowing, renderSeats, seatLayout } from '../src/seats.js';
 import { cinepicTicketsLeft } from '../src/providers.js';
-import { MapTooLarge, MAX_PNG_PIXELS, renderSeatMapPng, renderSeatMapSvg, seatNumber, textWidth } from '../src/seat-image.js';
+import { crc32, inflateSync } from 'node:zlib';
+import { encodeIndexedPng, MapTooLarge, MAX_PNG_PIXELS, renderSeatMapPng, renderSeatMapSvg, seatNumber, textWidth } from '../src/seat-image.js';
 import { CinemaService } from '../src/service.js';
 import { HttpClient } from '../src/http.js';
 import { createServer } from '../src/server.js';
@@ -239,4 +240,73 @@ test('an empty Cinex grid reports Cinex\'s own count instead of "no seats"', asy
   const other = empty.replace('sessionid=s1', 'sessionid=s2');
   const wrong = await new CinemaService(new HttpClient(async url => new Response(String(url).endsWith('checklogin.php') ? 'on' : String(url).endsWith('asientosdev.php') ? other : ''), 15000, sessions)).seats({ provider: 'cinex', cinema_id: 'SBC', session_id: 's1' });
   assert.match(wrong.warnings.join(' '), /no corresponde a la sede y función/);
+});
+
+/** A strict reader for the PNGs Cinve writes: checks every CRC and returns straight RGBA. */
+function decodePng(png: Uint8Array) {
+  const b = Buffer.from(png);
+  assert.deepEqual([...b.subarray(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const chunks: Record<string, Buffer[]> = {};
+  for (let at = 8; at < b.length;) {
+    const length = b.readUInt32BE(at), type = b.toString('latin1', at + 4, at + 8);
+    assert.equal(b.readUInt32BE(at + 8 + length), crc32(b.subarray(at + 4, at + 8 + length)), `CRC of ${type}`);
+    (chunks[type] ??= []).push(b.subarray(at + 8, at + 8 + length)); at += 12 + length;
+  }
+  assert.ok(chunks.IEND, 'IEND');
+  const ihdr = chunks.IHDR[0], width = ihdr.readUInt32BE(0), height = ihdr.readUInt32BE(4);
+  assert.deepEqual([ihdr[8], ihdr[9], ihdr[12]], [8, 3, 0], '8-bit indexed, not interlaced');
+  const plte = chunks.PLTE[0], trns = chunks.tRNS?.[0] ?? Buffer.alloc(0);
+  assert.ok(plte.length % 3 === 0 && plte.length <= 768 && trns.length <= plte.length / 3);
+  const raw = inflateSync(Buffer.concat(chunks.IDAT));
+  assert.equal(raw.length, (width + 1) * height);
+  const rgba = new Uint8Array(width * height * 4);
+  for (let y = 0; y < height; y++) {
+    assert.equal(raw[y * (width + 1)], 0, 'filter None');
+    for (let x = 0; x < width; x++) {
+      const k = raw[y * (width + 1) + 1 + x], o = (y * width + x) * 4;
+      assert.ok(k * 3 < plte.length, 'index within the palette');
+      rgba.set([plte[k * 3], plte[k * 3 + 1], plte[k * 3 + 2], k < trns.length ? trns[k] : 255], o);
+    }
+  }
+  const at = (x: number, y: number) => '#' + [...rgba.subarray((y * width + x) * 4, (y * width + x) * 4 + 3)].map(v => v.toString(16).padStart(2, '0')).join('') + (rgba[(y * width + x) * 4 + 3] === 255 ? '' : `/${rgba[(y * width + x) * 4 + 3]}`);
+  return { width, height, at };
+}
+
+test('the PNG is an indexed image that keeps every seat colour exact and the card corners transparent', async () => {
+  const s = (i: number, status: 'available' | 'occupied' | 'unavailable' | 'unknown') => ({ label: `R${Math.floor(i / 40)}:${i % 40 + 1}`, row: `R${Math.floor(i / 40)}`, area: '1', row_index: Math.floor(i / 40), column_index: i % 40, status });
+  // A big room where one seat is unknown: its colour is rare next to thousands of anti-aliased edges, and still exact.
+  const seats = Array.from({ length: 2400 }, (_, i) => s(i, i === 1234 ? 'unknown' : (['available', 'occupied', 'unavailable'] as const)[i % 3]));
+  const svg = renderSeatMapSvg(seats, seatLayout('cinesunidos'), header);
+  const png = decodePng(await renderSeatMapPng(svg));
+  const scale = png.width / Number(svg.match(/width="(\d+)"/)![1]);
+  const fillAt = (label: string) => { const [, x, y] = svg.match(new RegExp(`<title>${label}:[^<]*</title><rect x="([\\d.]+)" y="([\\d.]+)"`))!; return png.at(Math.round((+x + 3) * scale), Math.round((+y + 13) * scale)); };
+  assert.equal(fillAt('R30:35'), '#f9ab00', 'the only unknown seat');
+  assert.equal(fillAt('R0:1'), '#1e8e3e'); assert.equal(fillAt('R0:2'), '#80868b'); assert.equal(fillAt('R0:3'), '#eceff1');
+  assert.equal(png.at(0, 0), '#000000/0', 'outside the rounded card');
+  assert.equal(png.at(Math.floor(png.width / 2), 4), '#ffffff');
+});
+
+test('the PNG encoder handles more than 256 colours, unaligned input and the renderer\'s errors', async () => {
+  // A 64x64 gradient has 4096 colours; each pixel takes a palette entry close to it.
+  const width = 64, height = 64, rgba = new Uint8Array(width * height * 4 + 1).subarray(1);
+  for (let i = 0; i < width * height; i++) rgba.set([(i % 64) * 4, Math.floor(i / 64) * 4, 128, 255], i * 4);
+  const png = decodePng(encodeIndexedPng(rgba, width, height));
+  assert.deepEqual([png.width, png.height], [64, 64]);
+  for (const [x, y] of [[0, 0], [63, 0], [17, 40], [63, 63]]) {
+    const [r, g] = [parseInt(png.at(x, y).slice(1, 3), 16), parseInt(png.at(x, y).slice(3, 5), 16)];
+    assert.ok(Math.abs(r - x * 4) <= 24 && Math.abs(g - y * 4) <= 24, `${x},${y}: ${png.at(x, y)}`);
+  }
+  // 600 frequent colours crowd out a 4-pixel patch of the unknown-seat yellow, which still stays exact.
+  const crowd = new Uint8Array(100 * 62 * 4);
+  for (let i = 0; i < 6000; i++) crowd.set([i % 600 % 25 * 10, Math.floor(i % 600 / 25) * 10, 200, 255], i * 4);
+  for (let i = 6000; i < 6200; i++) crowd.set(i < 6004 ? [0xf9, 0xab, 0x00, 255] : [200, 200, 200, 255], i * 4);
+  assert.equal(decodePng(encodeIndexedPng(crowd, 100, 62)).at(0, 60), '#f9ab00');
+  assert.throws(() => encodeIndexedPng(new Uint8Array(8), 2, 2), /incompleta/);
+  // A document resvg refuses is an error, and the renderer keeps working afterwards.
+  await assert.rejects(renderSeatMapPng('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><g>'));
+  // Concurrent calls share one initialization and each gets its own image.
+  const svg = renderSeatMapSvg(parseCinepicSeats(map), seatLayout('cinepic', map), header);
+  const images = await Promise.all(Array.from({ length: 8 }, () => renderSeatMapPng(svg)));
+  assert.ok(images.every(image => Buffer.from(image).equals(Buffer.from(images[0]))));
+  assert.ok(decodePng(images[0]).width > 500);
 });
