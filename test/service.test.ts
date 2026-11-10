@@ -5,7 +5,7 @@ import { HttpClient } from '../src/http/client.js';
 import { DateInput } from '../src/core.js';
 import { findField, flight } from '../src/providers/parsing.js';
 import { inputSchema } from '../src/mcp/server.js';
-import { cpBuy, cpSessions, mockFetch, page, EmptySessionStore } from './fixtures.js';
+import { cpBuy, cpSessions, mockFetch, page, EmptySessionStore } from './helpers/fixtures.js';
 
 const service = () => new CinemaService(new HttpClient(mockFetch, 15000, new EmptySessionStore()));
 test('calendar validation rejects impossible dates and accepts leap day', () => {

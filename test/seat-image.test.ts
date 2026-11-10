@@ -12,7 +12,7 @@ import { CinemaService } from '../src/service.js';
 import { HttpClient } from '../src/http/client.js';
 import { createServer } from '../src/mcp/server.js';
 import { SeatResult } from '../src/seats/schema.js';
-import { cpBuy, EmptySessionStore, page } from './fixtures.js';
+import { cpBuy, EmptySessionStore, page } from './helpers/fixtures.js';
 
 // Cinepic Candelaria's room on 2026-11-05: invertida "1", so its website draws
 // column 15 (seat A:5) left of column 23 (seat A:1).

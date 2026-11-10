@@ -6,7 +6,7 @@ import { seatLayout } from '../src/seats/schema.js';
 import { CinemaService } from '../src/service.js';
 import { HttpClient } from '../src/http/client.js';
 import { assertPrivateRead } from '../src/http/allow-list.js';
-import { EmptySessionStore, page } from './fixtures.js';
+import { EmptySessionStore, page } from './helpers/fixtures.js';
 const cp = (overrides = {}) => ({ butaca: 'A-1-1', nombre_butaca: 'A:1', fila: '1', columna: '1', libre: '1', seleccionada: '1', tipo_butaca_id: '1', ...overrides });
 test('Cinepic availability ignores seleccionada and preserves physical labels, gaps, and unknown states', () => {
   const seats = parseCinepicSeats({ butacas: [cp(), cp({ butaca: 'A-3-1', columna: '3', nombre_butaca: 'A:2', libre: '0' }), cp({ butaca: 'A-4-1', columna: '4', nombre_butaca: 'A:3', libre: 'new' })] });

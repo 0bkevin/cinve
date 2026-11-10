@@ -13,10 +13,10 @@ import { CinemaService } from '../src/service.js';
 import { DataError } from '../src/core.js';
 import { flight, findField } from '../src/providers/parsing.js';
 import { inputSchema } from '../src/mcp/server.js';
-import { cpBuy, cuMovies, concessions, page } from './fixtures.js';
+import { cpBuy, cuMovies, concessions, page } from './helpers/fixtures.js';
 
 test('real PTY: multiline paste, separate entry and cancellation never echo credentials and restore terminal', t => {
-  const r = spawnSync('python3', ['test/terminal-probe.py', process.execPath], { encoding: 'utf8', timeout: 30000 });
+  const r = spawnSync('python3', ['test/helpers/terminal-probe.py', process.execPath], { encoding: 'utf8', timeout: 30000 });
   if ((r.error as NodeJS.ErrnoException)?.code === 'ENOENT') { t.skip('Python 3 required for the POSIX PTY probe'); return; }
   assert.equal(r.status, 0, r.stderr);
   for (const result of JSON.parse(r.stdout)) {

@@ -9,7 +9,7 @@ import { DataError, Id } from '../src/core.js';
 import { parseCinexMovies, parseCinexCinemaShowtimes } from '../src/providers/cinex/public-pages.js';
 import { cuLanguage, cuSiteTitle } from '../src/providers/cinesunidos/adapter.js';
 import type { DataItem } from '../src/core.js';
-import { page } from './fixtures.js';
+import { page } from './helpers/fixtures.js';
 import { inputSchema } from '../src/mcp/server.js';
 
 const epoch = (date: string, time = '18:00') => String(Date.parse(`${date}T${time}:00-04:00`) / 1000);

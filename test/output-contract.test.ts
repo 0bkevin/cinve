@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { operationItemSchema, outputSchema } from '../src/core.js';
 import { CinemaService } from '../src/service.js';
 import { HttpClient } from '../src/http/client.js';
-import { EmptySessionStore, page } from './fixtures.js';
+import { EmptySessionStore, page } from './helpers/fixtures.js';
 
 const envelope = (items: unknown[]) => ({
   provider: 'cinepic', status: 'available', queried_at: '2026-09-11T12:00:00.000Z',

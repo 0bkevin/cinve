@@ -14,7 +14,7 @@ import { createRemoteServer, upstreamCallTimeoutMs } from '../src/mcp/bridge.js'
 
 test('official MCP client discovers tools, validates arguments and reads structured results over stdio', async () => {
   const client = new Client({ name: 'cinev-test', version: '1.0.0' });
-  const transport = new StdioClientTransport({ command: process.execPath, args: ['--import', 'tsx', 'test/fixture-server.ts'], cwd: process.cwd(), stderr: 'pipe' });
+  const transport = new StdioClientTransport({ command: process.execPath, args: ['--import', 'tsx', 'test/helpers/fixture-server.ts'], cwd: process.cwd(), stderr: 'pipe' });
   try {
     await client.connect(transport);
     const list = await client.listTools();

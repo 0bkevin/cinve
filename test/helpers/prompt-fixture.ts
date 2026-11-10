@@ -1,4 +1,4 @@
-import { readCredentials } from '../src/auth/credentials-prompt.js';
+import { readCredentials } from '../../src/auth/credentials-prompt.js';
 try {
   const result = await readCredentials();
   if (result.username !== 'person@example.test' || result.password !== 'SYNTHETIC_PASTE_SECRET') throw new Error('Unexpected fixture input');

@@ -5,7 +5,7 @@ results = []
 for mode in ['paste', 'separate', 'cancel', 'sigterm']:
     master, slave = pty.openpty()
     original = termios.tcgetattr(slave)
-    child = subprocess.Popen([sys.argv[1], '--import', 'tsx', 'test/prompt-fixture.ts'], stdin=slave, stdout=slave, stderr=slave)
+    child = subprocess.Popen([sys.argv[1], '--import', 'tsx', 'test/helpers/prompt-fixture.ts'], stdin=slave, stdout=slave, stderr=slave)
     output = bytearray()
     def wait_for(marker):
         deadline = time.monotonic() + 5

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CinemaService } from '../src/service.js';
 import { HttpClient } from '../src/http/client.js';
-import { page, cpSessions } from './fixtures.js';
+import { page, cpSessions } from './helpers/fixtures.js';
 
 const cu = (html: string) => new CinemaService(new HttpClient(async () => new Response(html)));
 const cq = { provider: 'cinesunidos' as const, city: 'Caracas' };
