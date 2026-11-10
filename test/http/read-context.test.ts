@@ -7,7 +7,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SessionStore } from '../../src/auth/sessions.js';
 import { CinemaService } from '../../src/service.js';
-import { EmptySessionStore } from '../helpers/fixtures.js';
+import { EmptySessionStore, page } from '../helpers/fixtures.js';
+import { DataError } from '../../src/core.js';
 
 test('ReadContext deduplicates provenance by the final canonical URL, not the requested alias', async () => {
   const source = 'https://www.cinex.com.ve/cinex-sambil.html';
@@ -61,4 +62,36 @@ test('a provider refusing the saved session (HTTP 401) marks it expired with a c
   const r = await service.query('prices', { provider: 'cinesunidos', cinema_id: '1002', session_id: 's1' });
   assert.equal(r.status, 'auth_required'); assert.match(r.warnings.join(' '), /rechazó la sesión guardada/);
   assert.equal((await sessions.status('cinesunidos')).status, 'expired');
+});
+
+test('a cancelled call starts no further provider reads', async () => {
+  const controller = new AbortController();
+  let sessionReads = 0;
+  const http = new HttpClient(async input => {
+    const url = new URL(String(input));
+    if (url.hostname === 'www.cinesunidos.com') return new Response('Just a moment...', { status: 403, headers: { 'cf-mitigated': 'challenge' } });
+    if (url.pathname === '/search/cities') return Response.json(['Caracas']);
+    if (url.pathname.endsWith('/films')) return Response.json(Array.from({ length: 20 }, (_, i) => `Film ${i}`));
+    if (url.pathname.endsWith('/sessions')) { sessionReads++; controller.abort(); return Response.json([]); }
+    return new Response('missing', { status: 404 });
+  });
+  const r = await new CinemaService(http).query('showtimes', { provider: 'cinesunidos', city: 'Caracas', date: '2026-11-04' }, { signal: controller.signal });
+  assert.ok(sessionReads <= 4, `only the batch already in flight is read (${sessionReads})`);
+  assert.equal(r.partial, true, 'the titles that were never read make the result partial');
+  const before = sessionReads;
+  const cancelled = await new CinemaService(http).query('showtimes', { provider: 'cinesunidos', city: 'Valencia' }, { signal: controller.signal });
+  assert.equal(cancelled.status, 'error'); assert.equal(sessionReads, before);
+  assert.ok(cancelled.warnings.some(w => /cancelada/.test(w)), cancelled.warnings.join(' | '));
+});
+
+test('a call starts no provider read past its own deadline, whatever chain of reads it is in', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: 0 });
+  let reads = 0;
+  const c = new ReadContext(new HttpClient(async () => { reads++; return new Response('ok'); }), false, {}, 1000);
+  assert.equal(c.budget(5000), 1000, 'a fan-out budget never extends past the call deadline');
+  assert.equal(c.budget(500), 500);
+  await c.get('https://www.cinex.com.ve/cines.html');
+  t.mock.timers.tick(1000);
+  await assert.rejects(c.get('https://www.cinex.com.ve/cartelera.html'), (e: DataError) => e.status === 'error' && /Se agotó el tiempo de esta consulta/.test(e.message));
+  assert.equal(reads, 1);
 });

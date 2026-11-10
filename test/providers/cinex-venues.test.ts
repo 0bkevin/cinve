@@ -353,3 +353,53 @@ test('untrusted cinema detail href cannot change the requested route', async () 
   const r = await service.query('cinemas', { provider: 'cinex' });
   assert.equal(calls, 1); assert.equal(r.partial, true); assert.equal(r.items.length, 0);
 });
+
+const epoch = (date: string, time = '18:00') => String(Date.parse(`${date}T${time}:00-04:00`) / 1000);
+
+test('a seeded unlisted Cinex venue resolves on a fresh catalog (cold instance)', async () => {
+  const detail = `<h3 class="title">METROPOLIS BARQUISIMETO</h3><div class="sessionslist"><h5 class="title">KNOWN</h5><button onclick="checkLogin('s1','MTB')" alt="${epoch('2026-11-04')}"></button></div>`;
+  const make = () => new CinemaService(new HttpClient(async input => {
+    const url = new URL(String(input));
+    if (url.pathname === '/cines.html') return new Response(`<a href="cinex-listed.html" title="Cinex Listed, Caracas"><img src="https://www.cinex.com.ve/assets/images/cinemas/xlisted.jpg"><h3>Listed</h3></a>`);
+    if (url.pathname === '/assets/php/datasource.php') return Response.json({ data: [] });
+    if (url.pathname === '/cinex-metropolisbarquisimeto.html') return new Response(detail);
+    if (url.pathname === '/cartelera.html') return new Response(`<div class="poster" onclick="posterMovieClick('M','KNOWN','0','x','A','sinopsis-known.html','CARTELERA')" title="KNOWN"></div>`);
+    return new Response('missing', { status: 404 });
+  }), new CinexCinemaCatalog());
+  const showtimes = await make().query('showtimes', { provider: 'cinex', cinema_id: 'MTB', date: '2026-11-04' });
+  assert.equal(showtimes.status, 'available'); assert.equal(showtimes.total, 1);
+  // A different code on the same seed page is still rejected.
+  const other = await make().query('showtimes', { provider: 'cinex', cinema_id: 'XYZ', date: '2026-11-04' });
+  assert.equal(other.status, 'unavailable');
+});
+
+test('Cinex venue discovery stops at its time budget and keeps remaining venues as unverified', async () => {
+  const cards = ['a', 'b', 'c', 'd', 'e'].map(slug => `<a href="cinex-${slug}.html" title="Cinex ${slug.toUpperCase()}, Caracas"><img src="https://www.cinex.com.ve/assets/images/cinemas/x${slug}.jpg"><h3>${slug.toUpperCase()}</h3></a>`).join('');
+  let metadata = 0;
+  const http = new HttpClient(async input => {
+    const url = new URL(String(input));
+    if (url.pathname === '/cines.html') return new Response(cards);
+    if (url.pathname === '/assets/php/datasource.php') { metadata++; return Response.json({ data: [] }); }
+    return new Response('missing', { status: 404 });
+  });
+  const r = await new CinemaService(http, new CinexCinemaCatalog(0)).query('cinemas', { provider: 'cinex' });
+  assert.equal(r.total, 5); assert.equal(r.partial, true); assert.equal(metadata, 0, 'no provider reads after the budget is spent');
+  assert.ok(r.items.every(i => i.code_status === 'unverified' && i.id.startsWith('directory-')));
+  assert.ok(r.warnings.some(w => /tiempo de comprobación/.test(w)));
+});
+
+test('Cinex venue discovery checks its budget before each follow-up read of an admitted venue', async () => {
+  const card = `<a href="cinex-a.html" title="Cinex A, Caracas"><img src="https://www.cinex.com.ve/assets/images/cinemas/xA.jpg"><h3>A</h3></a>`;
+  const reads: string[] = [];
+  const http = new HttpClient(async input => {
+    const url = new URL(String(input)); reads.push(url.pathname);
+    if (url.pathname === '/cines.html') return new Response(card);
+    await new Promise(r => setTimeout(r, 30));
+    if (url.pathname === '/assets/php/datasource.php') return Response.json({ data: [] });
+    return new Response('<h3 class="title">A</h3>');
+  });
+  const r = await new CinemaService(http, new CinexCinemaCatalog(10)).query('cinemas', { provider: 'cinex', city: 'Caracas' });
+  assert.deepEqual(reads, ['/cines.html', '/assets/php/datasource.php'], 'no detail read after the budget is spent');
+  assert.equal(r.partial, true); assert.equal(r.items[0].code_status, 'unverified');
+  assert.ok(r.warnings.some(w => /tiempo de comprobación de A/.test(w)), r.warnings.join(' | '));
+});

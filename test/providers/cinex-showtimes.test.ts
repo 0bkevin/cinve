@@ -4,6 +4,9 @@ import { CinemaService } from '../../src/service.js';
 import { CinexCinemaCatalog } from '../../src/providers/cinex/venues.js';
 import { HttpClient } from '../../src/http/client.js';
 import { inputSchema } from '../../src/mcp/server.js';
+import { ReadContext } from '../../src/http/read-context.js';
+import { parseCinexMovies, parseCinexCinemaShowtimes } from '../../src/providers/cinex/public-pages.js';
+import { page } from '../helpers/fixtures.js';
 
 const base = 'https://www.cinex.com.ve';
 const card = (slug: string, name: string, image: string, city = 'Caracas') => `<a href="cinex-${slug}.html" title="Cinex ${name}, ${city}"><img src="${base}/assets/images/cinemas/${image}"><h3>${name}</h3></a>`;
@@ -227,4 +230,31 @@ test('one Cinex venue with an invalid item fails alone instead of emptying the c
   assert.deepEqual(r.items.map(i => [i.id, i.cinema_id]), [['1', 'SBC']]);
   assert.equal(r.partial, true);
   assert.ok(r.warnings.some(w => /1 sedes Cinex \(Lider\)/.test(w)), r.warnings.join(' | '));
+});
+
+const epoch = (date: string, time = '18:00') => String(Date.parse(`${date}T${time}:00-04:00`) / 1000);
+
+test('Cinex movie slugs with interior dots stay in the catalog and match cinema sessions', () => {
+  const catalog = parseCinexMovies(`<div class="poster" onclick="javascript: posterMovieClick('HO1', 'SERES. PARTE 1 LA INVASION', '10', 'Ficción', 'B', 'sinopsis-seres.parte1lainvasion.html', 'CARTELERA');" title="SERES. PARTE 1 LA INVASION"></div>`
+    + `<div class="poster" onclick="x('sinopsis-..%2Fsecret.html')" title="Bad"></div>`);
+  assert.deepEqual(catalog.map(m => m.id), ['seres.parte1lainvasion']);
+  const c = new ReadContext(new HttpClient(async () => new Response('unexpected')));
+  const sessions = parseCinexCinemaShowtimes(`<div class="sessionslist"><h5 class="title">SERES. PARTE 1 LA INVASION</h5><button onclick="checkLogin('77','TLN')" alt="${epoch('2026-11-04')}"></button></div>`,
+    catalog, 'TLN', '2026-11-04', c, 'https://www.cinex.com.ve/cinex-tolon.html');
+  assert.equal(sessions.length, 1); assert.equal(sessions[0].movie_id, 'seres.parte1lainvasion'); assert.equal(c.partial, false);
+});
+
+test('a Cinex movie_id without a synopsis page is reported as a wrong ID, not as a film without functions', async () => {
+  const http = new HttpClient(async input => {
+    const url = new URL(String(input));
+    if (url.pathname === '/sinopsis-clayface.html') return new Response('<h1>CLAYFACE</h1>');
+    return new Response('missing', { status: 404 });
+  });
+  const s = new CinemaService(http);
+  const missing = await s.query('showtimes', { provider: 'cinex', movie_id: 'noexiste', date: '2026-09-18' });
+  assert.equal(missing.status, 'unavailable');
+  assert.ok(missing.warnings.some(w => /no tiene una ficha para ese movie_id; obtén un ID vigente con list_movies/.test(w)), missing.warnings.join(' | '));
+  const empty = await s.query('showtimes', { provider: 'cinex', movie_id: 'clayface', date: '2026-09-18' });
+  assert.equal(empty.status, 'unavailable');
+  assert.ok(empty.warnings.some(w => /no lista funciones/.test(w)), empty.warnings.join(' | '));
 });

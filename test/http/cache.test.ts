@@ -86,3 +86,26 @@ test('public Cinex HTML is cached with whitespace collapsed; JSON pages are left
   assert.equal((await http.get('https://www.cinex.com.ve/cartelera.html')).body, '<div> <h5 class="title">A</h5> </div>');
   assert.equal((await http.get('https://gateway.cinesunidos.com/search/cities')).body, '{"a": "x  y"}');
 });
+
+test('one city read through the search API fits in the cache alongside another city', async () => {
+  let reads = 0;
+  const http = new HttpClient(async input => {
+    reads++;
+    const url = new URL(String(input));
+    if (url.hostname === 'www.cinesunidos.com') return new Response('Just a moment...', { status: 403, headers: { 'cf-mitigated': 'challenge' } });
+    if (url.pathname === '/search/cities') return Response.json(['Caracas', 'Valencia']);
+    if (url.pathname.endsWith('/films')) return Response.json(Array.from({ length: 60 }, (_, i) => `Film ${i}`));
+    if (url.pathname.endsWith('/sessions')) return Response.json([{ showtime: '2026-11-04T18:15:00', sessionId: `s${reads}`, screenNumber: 1, format: '2D', ho: `HO${url.searchParams.get('Title')!.slice(5)}`, title: url.searchParams.get('Title'), cinemaId: '1005' }]);
+    return new Response('missing', { status: 404 });
+  });
+  const s = new CinemaService(http);
+  await s.query('showtimes', { provider: 'cinesunidos', city: 'Caracas', date: '2026-11-04' });
+  await s.query('showtimes', { provider: 'cinesunidos', city: 'Valencia', date: '2026-11-04' });
+  const before = reads;
+  const again = await s.query('showtimes', { provider: 'cinesunidos', city: 'Caracas', date: '2026-11-04' });
+  assert.equal(again.total, 60); assert.equal(reads, before, 'a second city must not evict the first city from the cache');
+  // 62 cited URLs would cost more tokens than the schedule; the result lists 10, oldest included.
+  assert.equal(again.sources.length, 10);
+  const oldest = again.sources.reduce((a, b) => (b.fetched_at < a.fetched_at ? b : a)).fetched_at;
+  assert.ok(again.warnings.some(w => w.includes('Se consultaron 62 fuentes') && w.includes(oldest)), again.warnings.join(' | '));
+});

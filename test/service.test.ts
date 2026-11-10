@@ -75,3 +75,18 @@ test('unsafe upstream links are omitted without losing useful product data', asy
     assert.equal(JSON.stringify(r).includes(url), false); assert.ok(r.warnings.some(w => w.includes('HTTPS')));
   }
 });
+
+test('conflicting duplicate session IDs are suppressed and marked partial instead of overwritten', async () => {
+  const show = (id: string, date: string) => ({ id, date });
+  const html = page({ movies: [
+    { vistaId: 'M', title: 'Movie M', theaters: [{ id: '1002', showTimes: [show('S', '2026-11-04T18:00:00'), show('OK', '2026-11-04T19:00:00')] }] },
+    { vistaId: 'N', title: 'Movie N', theaters: [{ id: '1002', showTimes: [show('S', '2026-11-04T20:00:00')] }] },
+  ] }) + page({ movies: [
+    // Later identical copies of a conflicting ID must not resurrect it.
+    { vistaId: 'M', title: 'Movie M', theaters: [{ id: '1002', showTimes: [show('S', '2026-11-04T18:00:00'), show('OK', '2026-11-04T19:00:00')] }] },
+  ] });
+  const r = await new CinemaService(new HttpClient(async () => new Response(html))).query('showtimes', { provider: 'cinesunidos', city: 'Caracas', date: '2026-11-04' });
+  assert.equal(r.status, 'available'); assert.equal(r.partial, true);
+  assert.deepEqual(r.items.map(i => i.id), ['OK'], 'identical duplicates collapse; conflicting IDs are dropped');
+  assert.ok(r.warnings.some(w => /contradictorios para la función S/.test(w)));
+});

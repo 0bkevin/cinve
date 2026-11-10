@@ -10,6 +10,7 @@ import { decodeBody } from '../../src/http/response.js';
 import { SessionStore } from '../../src/auth/sessions.js';
 import { EmptySessionStore } from '../helpers/fixtures.js';
 import { setTimeout as delay, setImmediate as tick } from 'node:timers/promises';
+import { CinemaService } from '../../src/service.js';
 
 const origin = 'https://gateway.cinesunidos.com';
 
@@ -151,4 +152,38 @@ test('queued authenticated work rechecks logout before sending credentials', asy
   const queued = http.getAuthenticated('cinesunidos', 'https://gateway.cinesunidos.com/tickets/www/theaters/1002/sessions/s1/');
   const rejected = assert.rejects(queued, e => e instanceof DataError && e.status === 'auth_required');
   await tick(); await store.remove('cinesunidos'); release(); await Promise.all([...active, rejected]); assert.equal(count, 2);
+});
+
+test('a Cloudflare challenge is reported as an explicit block without evasion', async () => {
+  let calls = 0;
+  const s = new CinemaService(new HttpClient(async () => { calls++; return new Response('Just a moment...', { status: 403, headers: { 'cf-mitigated': 'challenge' } }); }));
+  const r = await s.query('movies', { provider: 'cinex' });
+  assert.equal(r.status, 'blocked'); assert.equal(calls, 1); assert.equal(r.sources.length, 0);
+  assert.ok(r.warnings.some(w => /desafío anti-bots/.test(w) && /no evade/.test(w)), r.warnings.join(' | '));
+});
+
+test('a challenged origin is remembered so later public reads skip straight to the fallback', async () => {
+  const www: string[] = [];
+  let challenge = true;
+  const http = new HttpClient(async input => {
+    const url = new URL(String(input));
+    if (url.hostname === 'www.cinesunidos.com') {
+      www.push(url.pathname);
+      return challenge ? new Response('Just a moment...', { status: 403, headers: { 'cf-mitigated': 'challenge' } }) : new Response('<html></html>');
+    }
+    if (url.pathname === '/search/cities') return Response.json(['Caracas']);
+    if (url.pathname === '/search/cities/Caracas/theaters') return Response.json([{ id: '1005', name: 'Sambil Caracas', address: 'Chacao' }]);
+    return new Response('missing', { status: 404 });
+  });
+  const s = new CinemaService(http);
+  for (let i = 0; i < 3; i++) {
+    const r = await s.query('cinemas', { provider: 'cinesunidos', city: 'Caracas' });
+    assert.equal(r.status, 'available'); assert.ok(r.warnings.some(w => /API pública de búsqueda/.test(w)));
+  }
+  assert.equal(www.length, 1, 'the challenged website is asked once, not on every call');
+  // refresh=true still asks the website again, and a success clears the memory.
+  challenge = false;
+  await http.get('https://www.cinesunidos.com/cines?city=Caracas', 120000, true);
+  await http.get('https://www.cinesunidos.com/cartelera?city=Caracas');
+  assert.equal(www.length, 3);
 });

@@ -5,6 +5,9 @@ import { CinemaService } from '../../src/service.js';
 import { HttpClient } from '../../src/http/client.js';
 import { mockFetch, page, EmptySessionStore, cuMovies, concessions } from '../helpers/fixtures.js';
 import { inputSchema } from '../../src/mcp/server.js';
+import { Id } from '../../src/core.js';
+import { cuLanguage, cuSiteTitle } from '../../src/providers/cinesunidos/adapter.js';
+import type { DataItem } from '../../src/core.js';
 
 const url = 'https://www.cinex.com.ve/boletos.php?cinemaid=TLN&sessionid=s1';
 
@@ -112,4 +115,136 @@ test('invalid dates and unusable upstream IDs fail visibly instead of returning 
     assert.equal(r.status, 'error'); assert.deepEqual(r.items, []);
   }
   assert.equal(inputSchema('prices').safeParse({ provider: 'cinex', cinema_id: 'TLN', session_id: 's1', movie_id: 'ignored' }).success, false);
+});
+
+test('Cines Unidos falls back to its public search API when the website challenges the client', async () => {
+  const requests: string[] = [];
+  const http = new HttpClient(async input => {
+    const url = new URL(String(input)); requests.push(url.hostname + url.pathname + url.search);
+    if (url.hostname === 'www.cinesunidos.com') return new Response('Just a moment...', { status: 403, headers: { 'cf-mitigated': 'challenge' } });
+    if (url.pathname === '/search/cities') return Response.json(['Caracas', 'Mérida']);
+    if (url.pathname === '/search/cities/M%C3%A9rida/theaters') return Response.json([{ id: '1012', name: 'Alto Prado', address: 'Av. Los Próceres' }]);
+    if (url.pathname === '/search/cities/M%C3%A9rida/films') return Response.json(['Duna Parte 3', 'Otra']);
+    if (url.pathname === '/search/cities/M%C3%A9rida/sessions') {
+      const title = url.searchParams.get('Title');
+      return Response.json(title === 'Duna Parte 3' ? [
+        { showtime: '2026-11-04T18:15:00', sessionId: '44788', screenNumber: 2, format: 'Digital', ho: 'HO00006098', title, cinemaId: '1012', language: 'Español' },
+        { showtime: '2026-11-05T18:15:00', sessionId: '44790', screenNumber: 2, format: 'Digital', ho: 'HO00006098', title, cinemaId: '1012', language: 'Español' },
+      ] : [{ showtime: '2026-11-04T20:00:00', sessionId: '5', screenNumber: 1, format: '3D', ho: 'HO1', title, cinemaId: '9999' }]);
+    }
+    return new Response('missing', { status: 404 });
+  });
+  const s = new CinemaService(http);
+  const cinemas = await s.query('cinemas', { provider: 'cinesunidos', city: 'merida' });
+  assert.equal(cinemas.status, 'available'); assert.equal(cinemas.items[0].cinema_id, '1012'); assert.equal(cinemas.items[0].city, 'Mérida');
+  assert.ok(cinemas.warnings.some(w => /API pública de búsqueda/.test(w)));
+  const showtimes = await s.query('showtimes', { provider: 'cinesunidos', city: 'Mérida', cinema_id: '1012', date: '2026-11-04' });
+  assert.deepEqual(showtimes.items.map(i => [i.id, i.movie_id, i.time, i.screen, i.starts_at]), [['44788', 'HO00006098', '18:15', '2', '2026-11-04T18:15:00-04:00']]);
+  const movies = await s.query('movies', { provider: 'cinesunidos', city: 'Mérida', date: '2026-11-04' });
+  assert.deepEqual(movies.items.map(i => i.id).sort(), ['HO00006098', 'HO1']);
+  assert.ok(requests.every(r => !r.includes('/tickets/')), 'the fallback never touches ticketing routes');
+  // A non-challenge failure is not masked by the fallback.
+  const down = await new CinemaService(new HttpClient(async () => new Response('down', { status: 503 }))).query('cinemas', { provider: 'cinesunidos', city: 'Caracas' });
+  assert.equal(down.status, 'error');
+});
+
+test('the Cines Unidos search fallback searches only matching titles and keeps titles that succeed', async () => {
+  const searched: string[] = [];
+  const http = new HttpClient(async input => {
+    const url = new URL(String(input));
+    if (url.hostname === 'www.cinesunidos.com') return new Response('Just a moment...', { status: 403, headers: { 'cf-mitigated': 'challenge' } });
+    if (url.pathname === '/search/cities') return Response.json(['Caracas']);
+    if (url.pathname.endsWith('/films')) return Response.json(['Good Film', 'Bad Film', 'El Silbón', 'Otra', 'Broken', 'Bad Id']);
+    if (url.pathname.endsWith('/sessions')) {
+      const title = url.searchParams.get('Title')!; searched.push(title);
+      if (title === 'Bad Film') return new Response('down', { status: 500 });
+      if (title === 'Broken') return Response.json([{ showtime: 'not-a-date', sessionId: 'x', ho: 'HOX', title, cinemaId: '1005' }]);
+      if (title === 'Bad Id') return Response.json([{ showtime: '2026-11-04T19:00:00', sessionId: 'y', ho: 'bad/id', title, cinemaId: '1005' }]);
+      return Response.json([{ showtime: '2026-11-04T18:15:00', sessionId: `s-${searched.length}`, screenNumber: 1, format: '2D', ho: `HO${searched.length}`, title, cinemaId: '1005' }]);
+    }
+    return new Response('missing', { status: 404 });
+  });
+  const s = new CinemaService(http);
+  const one = await s.query('movies', { provider: 'cinesunidos', city: 'Caracas', query: 'silbon', date: '2026-11-04' });
+  assert.deepEqual(one.items.map(i => i.name), ['El Silbón']);
+  assert.deepEqual(searched, ['El Silbón'], 'a one-title question searches one title');
+  const all = await s.query('showtimes', { provider: 'cinesunidos', city: 'Caracas', date: '2026-11-04' });
+  assert.equal(all.status, 'available'); assert.equal(all.partial, true);
+  assert.deepEqual(all.items.map(i => i.name).sort(), ['El Silbón', 'Good Film', 'Otra']);
+  // A malformed title fails alone, like a failed request.
+  // An ID the service would reject fails its title too, instead of the whole response.
+  assert.ok(all.warnings.some(w => /3 de 6 títulos/.test(w)), all.warnings.join(' | '));
+});
+
+test('the Cines Unidos search fallback stops at its total deadline and keeps the titles it read', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-04T12:00:00Z') });
+  const http = new HttpClient(async input => {
+    const url = new URL(String(input));
+    if (url.hostname === 'www.cinesunidos.com') return new Response('Just a moment...', { status: 403, headers: { 'cf-mitigated': 'challenge' } });
+    if (url.pathname === '/search/cities') return Response.json(['Caracas']);
+    if (url.pathname.endsWith('/films')) return Response.json(Array.from({ length: 40 }, (_, i) => `Film ${i}`));
+    if (url.pathname.endsWith('/sessions')) {
+      const title = url.searchParams.get('Title')!;
+      t.mock.timers.tick(10000); // every title search takes 10 s
+      return Response.json([{ showtime: '2026-11-04T19:00:00', sessionId: title.replace(' ', '-'), ho: `HO${title.slice(5)}`, title, cinemaId: '1005' }]);
+    }
+    return new Response('missing', { status: 404 });
+  });
+  const r = await new CinemaService(http).query('showtimes', { provider: 'cinesunidos', city: 'Caracas', date: '2026-11-04' });
+  assert.equal(r.status, 'available'); assert.equal(r.partial, true);
+  assert.ok(r.total > 0 && r.total < 10, `${r.total} titles read before the 45 s budget`);
+  assert.ok(r.warnings.some(w => /Se agotó el tiempo de consulta antes de leer \d+ de 40 títulos/.test(w)), r.warnings.join(' | '));
+});
+
+test('the Cines Unidos search fallback counts its setup reads against the hosted time limit', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-04T12:00:00Z') });
+  const started = Date.now();
+  // Every read takes 14 s, just under the per-read deadline: the challenged
+  // page, the city registry and the film list use 42 s before any title search.
+  const http = new HttpClient(async input => {
+    const url = new URL(String(input));
+    t.mock.timers.tick(14000);
+    if (url.hostname === 'www.cinesunidos.com') return new Response('Just a moment...', { status: 403, headers: { 'cf-mitigated': 'challenge' } });
+    if (url.pathname === '/search/cities') return Response.json(['Caracas']);
+    if (url.pathname.endsWith('/films')) return Response.json(Array.from({ length: 8 }, (_, i) => `Film ${i}`));
+    if (url.pathname.endsWith('/sessions')) {
+      const title = url.searchParams.get('Title')!;
+      return Response.json([{ showtime: '2026-11-04T19:00:00', sessionId: title.replace(' ', '-'), ho: `HO${title.slice(5)}`, title, cinemaId: '1005' }]);
+    }
+    return new Response('missing', { status: 404 });
+  }, 15000);
+  const r = await new CinemaService(http).query('showtimes', { provider: 'cinesunidos', city: 'Caracas', date: '2026-11-04' });
+  const elapsed = Date.now() - started;
+  assert.ok(elapsed <= 75000, `finished after ${elapsed} ms; reads must stop starting at 60 s`);
+  assert.equal(r.status, 'available'); assert.equal(r.partial, true);
+  assert.ok(r.total > 0 && r.total < 8, String(r.total));
+});
+
+test('Cines Unidos shows the website title, version and rating on both of its read paths', async () => {
+  // Shapes observed on 2026-11-05: the page puts the version in the title and
+  // features.Language; the search API drops it from the title (leaving a double
+  // space inside "Clayface  Atmos") and sends it as language.
+  const movie = (vistaId: string, title: string, language: string, sessions: [string, string][]) => ({ vistaId, title, features: { Language: language },
+    theaters: [{ id: '1027', name: 'Líder', rating: 'B+12', showTimes: sessions.map(([id, time]) => ({ id, date: `2026-11-05T${time}:00`, screen: 8, format: 'Digital' })) }] });
+  const movies = [movie('HO6136', 'Clayface (Esp)', 'Español', [['1', '15:00']]), movie('HO6338', 'Clayface (Sub) Atmos', 'Subtitulada', [['2', '17:40']])];
+  const api = [{ showtime: '2026-11-05T15:00:00', sessionId: '1', screenNumber: 8, format: 'Digital', ho: 'HO6136', title: 'Clayface', cinemaId: '1027', rating: 'B+12', language: 'Español' },
+    { showtime: '2026-11-05T17:40:00', sessionId: '2', screenNumber: 8, format: 'Digital', ho: 'HO6338', title: 'Clayface  Atmos', cinemaId: '1027', rating: 'B+12', language: 'Subtitulada' }];
+  const reader = (blocked: boolean) => new CinemaService(new HttpClient(async input => {
+    const url = new URL(String(input));
+    if (url.hostname === 'www.cinesunidos.com') return blocked ? new Response('Just a moment...', { status: 403, headers: { 'cf-mitigated': 'challenge' } }) : new Response(page({ movies }));
+    if (url.pathname === '/search/cities') return Response.json(['Caracas']);
+    if (url.pathname.endsWith('/films')) return Response.json(['Clayface']);
+    if (url.pathname.endsWith('/sessions')) return Response.json(api);
+    return new Response('missing', { status: 404 });
+  }));
+  const view = (r: { items: DataItem[] }) => r.items.map(i => [i.id, i.name, i.language, i.rating]);
+  const expected = [['1', 'Clayface (Esp)', 'es', 'B+12'], ['2', 'Clayface (Sub) Atmos', 'subtitulada', 'B+12']];
+  for (const blocked of [false, true]) {
+    const r = await reader(blocked).query('showtimes', { provider: 'cinesunidos', city: 'Caracas', date: '2026-11-05' });
+    assert.deepEqual(view(r), expected, blocked ? 'search API path' : 'page path');
+  }
+  assert.equal(cuSiteTitle('Godzilla Minus Zero', 'Subtitulada'), 'Godzilla Minus Zero (Sub)');
+  assert.equal(cuSiteTitle('Clayface (Sub)', 'Subtitulada'), 'Clayface (Sub)', 'a title that keeps its marker is not marked twice');
+  assert.equal(cuSiteTitle('Un  Evento', 'Original'), 'Un Evento', 'an unknown version adds nothing');
+  assert.equal(cuLanguage('Inglés'), 'Inglés');
 });

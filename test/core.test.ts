@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DateInput, operationItemSchema, outputSchema } from '../src/core.js';
+import { DateInput, operationItemSchema, outputSchema, Id } from '../src/core.js';
 
 test('calendar validation rejects impossible dates and accepts leap day', () => {
   assert.equal(DateInput.safeParse('2026-02-30').success, false);
@@ -53,4 +53,9 @@ test('operation schemas strip fields belonging to another operation and allow ov
     date: '2026-09-11', time: '00:30',
   });
   assert.equal(overnight.starts_at, undefined);
+});
+
+test('IDs allow interior dots but never relative path segments', () => {
+  for (const ok of ['a', 'TLN', 'seres.parte1lainvasion', 'x'.repeat(100)]) assert.ok(Id.safeParse(ok).success, ok);
+  for (const bad of ['', '.', '..', '.a', 'a.', 'a..b', '../x', 'a/b', 'x'.repeat(101)]) assert.equal(Id.safeParse(bad).success, false, bad);
 });
