@@ -1,7 +1,7 @@
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { Result, today } from '../src/core.js';
-import { SeatResult } from '../src/seats.js';
+import { SeatResult } from '../src/seats/seat-map.js';
 import type { QueryResult } from '../src/core.js';
 import * as z from 'zod';
 

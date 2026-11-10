@@ -1,4 +1,4 @@
-import { getSeatMap } from './seats.js';
+import { getSeatMap } from './seats/seat-map.js';
 import { CinexCinemaCatalog } from './providers/cinex/venues.js';
 import { DataError, folded, operationItemSchema, PublicUrl, Result, today, Id } from './core.js';
 import type { DataItem, Operation, Query, QueryResult } from './core.js';

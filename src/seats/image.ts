@@ -144,11 +144,11 @@ export function renderSeatMapSvg(seats: MapSeat[], layout: MapLayout, header: Ma
     + `<rect width="${width}" height="${height}" rx="14" fill="#ffffff"/>${out.join('')}</svg>`;
 }
 
-const asset = (name: string) => readFileSync(new URL(`./assets/${name}`, import.meta.url));
+const asset = (name: string) => readFileSync(new URL(`../assets/${name}`, import.meta.url));
 // initWasm may succeed only once per process, so its promise is kept apart from
 // the fonts: a font failure is retried on the next call without re-initializing.
 let wasmReady: Promise<void> | undefined, fonts: Uint8Array[] | undefined;
-/** resvg needs its WebAssembly and real font files; both ship in assets/. */
+/** resvg needs its WebAssembly and real font files; both ship in src/assets/ (dist/assets/ once built). */
 async function renderer() {
   await (wasmReady ??= (async () => {
     let wasm: Buffer;

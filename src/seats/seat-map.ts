@@ -1,12 +1,12 @@
 import { load } from 'cheerio';
 import * as z from 'zod';
-import { DataError, Id, Provider, Source, Status, requireArg, text } from './core.js';
-import type { Query } from './core.js';
-import { HttpClient } from './http/client.js';
-import { ReadContext } from './http/read-context.js';
-import type { CallOptions } from './http/read-context.js';
-import { cinepicTicketsLeft, cinepicVenueName, cpBuy } from './providers/cinepic/sites.js';
-import { findField, object, rows } from './providers/parsing.js';
+import { DataError, Id, Provider, Source, Status, requireArg, text } from '../core.js';
+import type { Query } from '../core.js';
+import { HttpClient } from '../http/client.js';
+import { ReadContext } from '../http/read-context.js';
+import type { CallOptions } from '../http/read-context.js';
+import { cinepicTicketsLeft, cinepicVenueName, cpBuy } from '../providers/cinepic/sites.js';
+import { findField, object, rows } from '../providers/parsing.js';
 
 // Unicode property escapes (\p{L}) are invalid in Python's re and RE2, and
 // MCP clients such as the Python SDK validate structuredContent against the
