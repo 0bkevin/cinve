@@ -3,6 +3,8 @@ import type { z } from 'zod';
 import type { Source } from '../core.js';
 import { SessionStore } from '../auth.js';
 import { assertPrivateRead, publicHosts } from './allow-list.js';
+import { cancelBody, cancelReader, decodeBody, withSignal } from './response.js';
+import { cinexCinemaRedirect, cinexTicketRedirect } from './redirects.js';
 import type { AuthProviderId } from '../auth.js';
 
 export type EvidenceSource = z.infer<typeof Source>;
@@ -34,80 +36,6 @@ const sessionCheckMs = 60000;
 /** Gateway errors from an edge proxy, and resets of reused connections, are worth one more try. */
 const transientStatus = (status: number) => status === 502 || status === 504;
 const retryPause = () => 200 + Math.floor(Math.random() * 300);
-
-/**
- * Decodes with the charset the response declares (UTF-8 when absent or
- * unknown). The observed providers all send UTF-8; a page declared as
- * ISO-8859-1 or windows-1252 would otherwise lose every accented letter.
- * TextDecoder also drops a UTF-8 byte-order mark, which JSON.parse rejects.
- */
-export function decodeBody(bytes: Uint8Array, contentType: string | null): string {
-  const label = contentType?.match(/;\s*charset\s*=\s*"?([^";\s]+)/i)?.[1];
-  if (label) {
-    try { return new TextDecoder(label).decode(bytes); } catch { /* Unknown label: fall back to UTF-8. */ }
-  }
-  return new TextDecoder('utf-8').decode(bytes);
-}
-
-function cancelBody(body: ReadableStream<Uint8Array> | null | undefined) {
-  if (!body) return;
-  try { void body.cancel().catch(() => {}); } catch { /* Best-effort cleanup must not mask the response error. */ }
-}
-
-function cancelReader(reader: ReadableStreamDefaultReader<Uint8Array>) {
-  try { void reader.cancel().catch(() => {}); } catch { /* Best-effort cleanup must not mask the response error. */ }
-}
-
-function withSignal<T>(operation: PromiseLike<T>, signal: AbortSignal, onLate?: (value: T) => void): Promise<T> {
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    const cleanup = () => signal.removeEventListener('abort', abort);
-    const abort = () => {
-      if (settled) return;
-      settled = true; cleanup(); reject(signal.reason ?? new DOMException('The operation was aborted.', 'AbortError'));
-    };
-    if (signal.aborted) { abort(); return; }
-    signal.addEventListener('abort', abort, { once: true });
-    Promise.resolve(operation).then(value => {
-      if (settled) { try { onLate?.(value); } catch {} return; }
-      settled = true; cleanup(); resolve(value);
-    }, error => {
-      if (settled) return;
-      settled = true; cleanup(); reject(error);
-    });
-    if (signal.aborted) abort();
-  });
-}
-
-function cinexTicketRedirect(url: string, response: Response): string | undefined {
-  if (![301, 302, 303, 307, 308].includes(response.status)) return;
-  const location = response.headers.get('location');
-  if (!location) return;
-  try {
-    const from = new URL(url), to = new URL(location, url);
-    if (from.origin !== 'https://www.cinex.com.ve' || from.pathname !== '/boletos.php' ||
-        to.origin !== from.origin || to.pathname !== '/boletosdev.php') return;
-    assertPrivateRead('cinex', to.href);
-    if (['cinemaid', 'sessionid'].every(key => to.searchParams.get(key) === from.searchParams.get(key))) return to.href;
-  } catch { /* Unrecognized redirects remain unavailable, without leaking their URL. */ }
-}
-
-function cinexCinemaRedirect(url: string, response: Response): string | undefined {
-  if (![301, 302, 303, 307, 308].includes(response.status)) return;
-  const location = response.headers.get('location');
-  if (!location) return;
-  try {
-    const from = new URL(url), to = new URL(location, url);
-    // Cinex has renamed cinema detail pages (for example, sambil.html to
-    // sambilchacao.html). Follow only a single same-origin cinema-page hop;
-    // generic public redirects remain unavailable by design.
-    if (from.origin !== 'https://www.cinex.com.ve' || to.origin !== from.origin ||
-        !/^\/cinex-[A-Za-z0-9_-]{1,80}\.html$/.test(from.pathname) ||
-        !/^\/cinex-[A-Za-z0-9_-]{1,80}\.html$/.test(to.pathname) ||
-        to.username || to.password || to.search || to.hash) return;
-    return to.href;
-  } catch { /* Unrecognized redirects remain unavailable, without leaking their URL. */ }
-}
 
 /**
  * Cinex venue pages are about 55% whitespace (1.9 MB, of which 1 MB is
