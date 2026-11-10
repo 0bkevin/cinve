@@ -48,6 +48,8 @@ export function seatNumber(seat: Pick<MapSeat, 'label' | 'row'>): string {
   const rest = seat.label.startsWith(seat.row) ? seat.label.slice(seat.row.length).replace(/^[\s:._-]+/, '') : seat.label;
   return rest || seat.label;
 }
+/** Two decimals: a hundredth of an SVG unit is invisible, and seat positions no longer print 17 digits. */
+const round = (n: number) => Math.round(n * 100) / 100;
 const caracasTime = (iso: string) => new Intl.DateTimeFormat('es-VE', { timeZone: 'America/Caracas', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso));
 
 /** A self-contained SVG of the seat map, oriented as the provider's own seat page. */
@@ -92,22 +94,25 @@ export function renderSeatMapSvg(seats: MapSeat[], layout: MapLayout, header: Ma
   if (layout.screen === 'top') { screen(y, 'top'); y += 50; }
   for (const g of groups) {
     if (showAreaNames) { out.push(`<text x="${left}" y="${y + 12}" font-size="12" font-weight="700" fill="#3c4043">${escape(`Área ${g.area}`)}</text>`); y += 22; }
+    // Row names and seat numbers are bold and centred; they inherit that from one group per area.
+    out.push('<g font-weight="700" text-anchor="middle">');
     for (let r = 0; r < g.rows; r++) {
       const rowSeats = g.group.filter(s => s.row_index - g.minRow === r);
       const cy = y + r * CELL;
       const name = rowSeats[0]?.row;
       if (name) {
-        out.push(`<text x="${left - LABEL / 2}" y="${cy + SEAT / 2 + 4}" font-size="12" font-weight="700" fill="#5f6368" text-anchor="middle">${escape(name)}</text>`);
-        out.push(`<text x="${left + gridWidth + LABEL / 2}" y="${cy + SEAT / 2 + 4}" font-size="12" font-weight="700" fill="#5f6368" text-anchor="middle">${escape(name)}</text>`);
+        out.push(`<text x="${left - LABEL / 2}" y="${cy + SEAT / 2 + 4}" font-size="12" fill="#5f6368">${escape(name)}</text>`);
+        out.push(`<text x="${left + gridWidth + LABEL / 2}" y="${cy + SEAT / 2 + 4}" font-size="12" fill="#5f6368">${escape(name)}</text>`);
       }
       for (const s of rowSeats) {
         const col = s.column_index - minCol, shown = layout.column_order === 'descending' ? cols - 1 - col : col;
         const x = left + shown * CELL + (CELL - SEAT) / 2, c = palette[s.status], number = seatNumber(s);
         const size = number.length > 3 ? 8 : number.length === 3 ? 9.5 : 11;
-        out.push(`<g><title>${escape(`${s.label}: ${c.name.toLowerCase()}`)}</title><rect x="${x}" y="${cy}" width="${SEAT}" height="${SEAT}" rx="6" fill="${c.fill}" stroke="${c.stroke}" stroke-width="1"${s.status === 'unavailable' ? ' stroke-dasharray="3 2"' : ''}/>`
-          + `<text x="${x + SEAT / 2}" y="${cy + SEAT / 2 + size / 2.8}" font-size="${size}" font-weight="700" fill="${c.text}" text-anchor="middle">${escape(number)}</text></g>`);
+        out.push(`<g><title>${escape(`${s.label}: ${c.name.toLowerCase()}`)}</title><rect x="${x}" y="${cy}" width="${SEAT}" height="${SEAT}" rx="6" fill="${c.fill}" stroke="${c.stroke}"${s.status === 'unavailable' ? ' stroke-dasharray="3 2"' : ''}/>`
+          + `<text x="${x + SEAT / 2}" y="${round(cy + SEAT / 2 + size / 2.8)}" font-size="${size}" fill="${c.text}">${escape(number)}</text></g>`);
       }
     }
+    out.push('</g>');
     y += g.rows * CELL + 14;
   }
   if (layout.screen === 'bottom') { screen(y, 'bottom'); y += 44; }
