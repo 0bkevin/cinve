@@ -136,6 +136,9 @@ export async function createHostedApp(options: {
         res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8' }); res.end(loginScript); return;
       }
       if (req.url === '/mcp') {
+        // The tool call's read budget counts from here, so a slow body upload
+        // or OAuth check cannot push the call past the platform limit.
+        const receivedAt = Date.now();
         const authorization = req.headers.authorization ?? '';
         const principal = authorization.startsWith('Bearer ') ? await oauth.authenticate(authorization.slice(7)) ?? await users.authenticate(authorization.slice(7)) : undefined;
         if (authorization && !principal) { res.setHeader('WWW-Authenticate', oauth.challenge(true)); throw new HttpError(401, 'Acceso Cinev requerido.'); }
@@ -170,7 +173,7 @@ export async function createHostedApp(options: {
               return { url: `${origin}/connect#${link.token}`, expires_at: link.expires_at };
             },
             disconnect: async provider => { await store.remove(provider); },
-          } : undefined, !principal), { maxSubscriptions: 0, keepAliveMs: 0 });
+          } : undefined, !principal, receivedAt), { maxSubscriptions: 0, keepAliveMs: 0 });
           await toNodeHandler(handler)(req, res, parsed);
         } finally {
           await handler?.close();

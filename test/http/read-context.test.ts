@@ -95,3 +95,14 @@ test('a call starts no provider read past its own deadline, whatever chain of re
   await assert.rejects(c.get('https://www.cinex.com.ve/cartelera.html'), (e: DataError) => e.status === 'error' && /Se agotó el tiempo de esta consulta/.test(e.message));
   assert.equal(reads, 1);
 });
+
+test('a call budget counts from when the hosted server received the request', async () => {
+  let calls = 0;
+  const http = new HttpClient(async () => { calls++; return new Response('["Caracas"]'); });
+  const late = new ReadContext(http, false, { startedAt: Date.now() - 61000 });
+  await assert.rejects(late.json('https://gateway.cinesunidos.com/search/cities'), /Se agotó el tiempo de esta consulta/);
+  assert.equal(calls, 0);
+  const fresh = new ReadContext(http, false, { startedAt: Date.now() - 1000 });
+  assert.ok(fresh.deadline <= Date.now() + 59000);
+  assert.deepEqual(await fresh.json('https://gateway.cinesunidos.com/search/cities'), ['Caracas']);
+});

@@ -6,7 +6,16 @@ import type { EvidenceSource, Page } from './client.js';
 import { exclusive } from './account-lock.js';
 
 /** Per-call options from the MCP request: its cancellation and progress reporting. */
-export type CallOptions = { signal?: AbortSignal; progress?: (message: string) => void };
+export type CallOptions = {
+  signal?: AbortSignal;
+  progress?: (message: string) => void;
+  /**
+   * When the request reached the server (epoch ms). The hosted service sets it
+   * so time spent before the tool runs (reading the body, OAuth, admission)
+   * counts against the call's budget. Defaults to when the context is created.
+   */
+  startedAt?: number;
+};
 
 /**
  * The call itself stopped: the client cancelled it or its deadline passed.
@@ -19,8 +28,9 @@ export class CallStopped extends DataError {
 /**
  * No provider read starts once this much of one tool call has elapsed. A read
  * already in flight may still take its own 15 s (25 s for Cinepic's slow
- * backend), so a call stays near 75 s (85 s at worst),
- * under the hosted 90 s limit, however its reads are chained or fanned out.
+ * backend), so a call stays near 75 s (85 s at worst, counted from when the
+ * hosted server received the request), under the hosted 90 s limit, however
+ * its reads are chained or fanned out.
  */
 const operationBudgetMs = 60000;
 export class ReadContext {
@@ -35,7 +45,7 @@ export class ReadContext {
    * in flight finish, since other callers may share them through the cache.
    */
   constructor(private http: HttpClient, private refresh = false, private call: CallOptions = {}, budgetMs = operationBudgetMs) {
-    this.deadline = Date.now() + budgetMs;
+    this.deadline = Math.min(Date.now(), call.startedAt ?? Infinity) + budgetMs;
   }
   /** The earlier of `ms` from now and the call's own deadline, for a fan-out's loop. */
   budget(ms: number) { return Math.min(Date.now() + ms, this.deadline); }
