@@ -40,7 +40,8 @@ export function textWidth(value: string, size: number, bold = false): number {
   let em = 0;
   for (const char of value) {
     const code = char.normalize('NFD').charCodeAt(0);
-    em += code >= 32 && code <= 126 ? table[code - 32] / 1000 : 1;
+    // The tables cover ASCII 32-126; any other glyph counts as a full em.
+    em += (table[code - 32] ?? 1000) / 1000;
   }
   return em * size;
 }
@@ -196,12 +197,22 @@ function discard(bytes: Uint8Array) {
 
 // Colours the SVG draws solid; the PNG palette always keeps them exact, however few pixels use them.
 const solidInks = [...new Set([...Object.values(palette).flatMap(c => [c.fill, c.stroke, c.text]), '#ffffff', '#202124', '#3c4043', '#5f6368', '#80868b', '#9aa0a6'])];
+/**
+ * Element `i` of a typed array at an index the caller has already bounded (a
+ * masked hash slot, a loop over the array's own length). Out of range is a
+ * bug in this encoder, never something an image can cause.
+ */
+function entry(array: Uint8Array | Uint32Array | Int32Array | Float64Array, i: number): number {
+  const value = array[i];
+  if (value === undefined) throw new RangeError(`Index ${i} is outside a ${array.length}-element buffer.`);
+  return value;
+}
 const crcTable = Int32Array.from({ length: 256 }, (_, n) => { for (let k = 0; k < 8; k++) n = n & 1 ? 0xedb88320 ^ (n >>> 1) : n >>> 1; return n; });
 const pngChunk = (type: string, data: Uint8Array) => {
   const out = Buffer.alloc(12 + data.length);
   out.writeUInt32BE(data.length, 0); out.write(type, 4, 'latin1'); out.set(data, 8);
   let crc = -1;
-  for (let i = 4; i < 8 + data.length; i++) crc = crcTable[(crc ^ out[i]) & 255] ^ (crc >>> 8);
+  for (const byte of out.subarray(4, 8 + data.length)) crc = entry(crcTable, (crc ^ byte) & 255) ^ (crc >>> 8);
   out.writeUInt32BE(~crc >>> 0, 8 + data.length);
   return out;
 };
@@ -230,21 +241,26 @@ export function encodeIndexedPng(rgba: Uint8Array, width: number, height: number
       if (++size * 2 > keys.length) {
         const [k, u, c] = [keys, used, counts];
         keys = new Uint32Array(k.length * 2); used = new Uint8Array(k.length * 2); counts = new Float64Array(k.length * 2);
-        for (let j = 0; j < k.length; j++) if (u[j]) { const at = find(k[j]); used[at] = 1; keys[at] = k[j]; counts[at] = c[j]; }
+        for (const [j, key] of k.entries()) if (u[j]) { const at = find(key); used[at] = 1; keys[at] = key; counts[at] = entry(c, j); }
         i = find(p);
       }
       used[i] = 1; keys[i] = p;
     }
-    counts[i] += runs;
+    counts[i] = entry(counts, i) + runs;
   };
-  for (let i = 1, prev = px[0], run = 1; i <= n; i++) {
-    if (i < n && px[i] === prev) { run++; continue; }
-    count(prev, run); prev = px[i]; run = 1;
+  // -1 equals no 32-bit pixel, so the first pixel starts the first run.
+  let prev = -1, run = 0;
+  for (let i = 0; i < px.length; i++) {
+    const p = entry(px, i);
+    if (p === prev) { run++; continue; }
+    if (run) count(prev, run);
+    prev = p; run = 1;
   }
+  if (run) count(prev, run);
   const slot = new Uint8Array(keys.length), colors: number[] = [];
   const take = (p: number) => {
     const i = find(p);
-    if (used[i] && counts[i] < 0) return;
+    if (used[i] && entry(counts, i) < 0) return;
     if (used[i]) { slot[i] = colors.length; counts[i] = -1; }
     if (colors.length < 256) colors.push(p);
   };
@@ -252,15 +268,14 @@ export function encodeIndexedPng(rgba: Uint8Array, width: number, height: number
   for (let a = 0; a < 255; a += 17) take((a << 24 | a << 16 | a << 8 | a) >>> 0);
   for (const ink of solidInks) { const v = parseInt(ink.slice(1), 16); take((0xff000000 | (v & 0xff) << 16 | (v & 0xff00) | (v >>> 16)) >>> 0); }
   const present: number[] = [];
-  for (let i = 0; i < keys.length; i++) if (used[i] && counts[i] >= 0) present.push(i);
-  present.sort((a, b) => counts[b] - counts[a]);
-  for (const i of present.splice(0, Math.max(0, 256 - colors.length))) { slot[i] = colors.length; counts[i] = -1; colors.push(keys[i]); }
+  for (let i = 0; i < keys.length; i++) if (used[i] && entry(counts, i) >= 0) present.push(i);
+  present.sort((a, b) => entry(counts, b) - entry(counts, a));
+  for (const i of present.splice(0, Math.max(0, 256 - colors.length))) { slot[i] = colors.length; counts[i] = -1; colors.push(entry(keys, i)); }
   // Any rarer colour takes the entry that looks closest over both a white and a black background.
   for (const i of present) {
-    const p = keys[i];
+    const p = entry(keys, i);
     let best = 0, bestError = Infinity;
-    for (let j = 0; j < colors.length; j++) {
-      const q = colors[j];
+    for (const [j, q] of colors.entries()) {
       const r = (p & 255) - (q & 255), g = (p >>> 8 & 255) - (q >>> 8 & 255), b = (p >>> 16 & 255) - (q >>> 16 & 255), a = (p >>> 24) - (q >>> 24);
       const error = r * r + g * g + b * b + (r - a) ** 2 + (g - a) ** 2 + (b - a) ** 2;
       if (error < bestError) { bestError = error; best = j; }
@@ -268,9 +283,9 @@ export function encodeIndexedPng(rgba: Uint8Array, width: number, height: number
     slot[i] = best;
   }
   const raw = new Uint8Array((width + 1) * height);
-  for (let y = 0, i = 0, o = 0, prev = -1, index = 0; y < height; y++) {
+  for (let y = 0, o = 0, prev = -1, index = 0; y < height; y++) {
     raw[o++] = 0; // filter type None, the usual best for indexed images
-    for (let x = 0; x < width; x++, i++) { const p = px[i]; if (p !== prev) { prev = p; index = slot[find(p)]; } raw[o++] = index; }
+    for (let x = 0, i = y * width; x < width; x++, i++) { const p = entry(px, i); if (p !== prev) { prev = p; index = entry(slot, find(p)); } raw[o++] = index; }
   }
   let idat: Uint8Array;
   try { idat = deflateSync(raw); } finally { discard(raw); }
