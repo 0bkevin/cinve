@@ -1,60 +1,14 @@
 import { parseCinemaDirectory } from './cinema-directory.js';
 import { CinexCinemaCatalog } from './cinex-cinemas.js';
 import { load } from 'cheerio';
-import { DataError, DateInput, folded, Id, number, operationItemSchema, requireArg, text, today } from './core.js';
+import { DataError, DateInput, folded, Id, isoDate, number, requireArg, text } from './core.js';
 import type { DataItem, Operation, Query } from './core.js';
 import { CallStopped, ReadContext } from './http.js';
-import { decodeLabel, findField, pageFields, flight, object, objects, requiredText, rows } from './providers/parsing.js';
+import { checkedShowtime, decodeLabel, findField, pageFields, flight, object, objects, requiredText, rows } from './providers/parsing.js';
+import { providerWarning, providerWarningSummary, warningLabel } from './providers/diagnostics.js';
+import { catalogTtl, flightPage, hourTtl } from './providers/read-policy.js';
 import type { Obj } from './providers/parsing.js';
 import { parseCinesUnidosPrices, parseCinexPrices, parseCinexConcessions } from './authenticated-parsers.js';
-
-const providerWarningKinds = 32;
-const providerWarningLabelLength = 120;
-type ProviderWarningState = { entries: Map<string, { index: number; count: number; base: string }>; suppressed: number; aggregateIndex?: number };
-const providerWarningStates = new WeakMap<ReadContext, ProviderWarningState>();
-
-function warningLabel(value: unknown, max = providerWarningLabelLength): string {
-  const textValue = typeof value === 'string' ? value : String(value ?? '');
-  const compact = textValue.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim();
-  return compact.length > max ? `${compact.slice(0, max - 1)}…` : compact;
-}
-
-/** Keep parser diagnostics bounded before they enter the request-scoped context. */
-function providerWarning(c: ReadContext, key: string, message: string | (() => string)) {
-  const state: ProviderWarningState = providerWarningStates.get(c) ?? { entries: new Map(), suppressed: 0 };
-  providerWarningStates.set(c, state);
-  const existing = state.entries.get(key);
-  if (existing) {
-    existing.count++;
-    return;
-  }
-  if (state.entries.size < providerWarningKinds) {
-    const bounded = warningLabel(typeof message === 'function' ? message() : message, 512);
-    const index = c.warnings.length;
-    c.warnings.push(bounded);
-    state.entries.set(key, { index, count: 1, base: bounded.replace(/ \(repetido \d+ veces\)\.$/, '') });
-    return;
-  }
-  state.suppressed++;
-  if (state.aggregateIndex === undefined) {
-    state.aggregateIndex = c.warnings.length;
-    c.warnings.push('Se omitieron diagnósticos repetidos o excedentes del proveedor; la respuesta puede ser parcial.');
-  }
-}
-
-function providerWarningSummary(c: ReadContext) {
-  const state = providerWarningStates.get(c);
-  if (!state) return;
-  for (const entry of state.entries.values()) {
-    if (entry.count > 1) c.warnings[entry.index] = `${entry.base} (repetido ${entry.count} veces).`;
-  }
-  if (state.aggregateIndex !== undefined && state.suppressed > 1) c.warnings[state.aggregateIndex] = `Se omitieron ${state.suppressed} diagnósticos repetidos o excedentes del proveedor; la respuesta puede ser parcial.`;
-}
-
-// Cache lifetimes by how fast the data changes. Seats are never cached.
-const hourTtl = 3600000, catalogTtl = 120000;
-/** A Next.js page that still carries its data stream; anything else is not cached. */
-const flightPage = (body: string) => body.includes('self.__next_f.push(');
 
 const CP = {
   '123300': { name: 'Cinepic Candelaria', host: 'https://cinepiccandelaria.com' },
@@ -67,7 +21,6 @@ function cpSite(q: Query) {
   if (!(id in CP)) throw new DataError('unavailable', 'Cinepic admite las sedes 123300 (Candelaria) y 123301 (VVIP Lido).');
   return CP[id as keyof typeof CP];
 }
-function isoDate(q: Query) { return q.date ?? today(); }
 function flagValue(value: unknown): boolean | undefined {
   if (value === true || value === 1 || value === '1') return true;
   if (value === false || value === 0 || value === '0') return false;
@@ -358,15 +311,6 @@ async function cinesUnidosCity(city: string, q: Query, c: ReadContext): Promise<
   const canonical = cities.find(r => folded(r.name) === folded(city))?.name;
   if (!canonical) throw new DataError('unavailable', 'Ciudad no reconocida por Cines Unidos; consulta list_cities.');
   return canonical;
-}
-
-/**
- * Applies the service's result validation to one fan-out item, so an invalid
- * ID or an oversized title fails its own title or venue, not the response.
- */
-function checkedShowtime(item: DataItem): DataItem {
-  operationItemSchema('showtimes').parse(item); Id.parse(item.id);
-  return item;
 }
 
 const cuGatewayTitles = 80;

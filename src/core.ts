@@ -143,6 +143,8 @@ export const text = (v: unknown): string => typeof v === 'string' && !v.startsWi
 export const number = (v: unknown): number | undefined => (typeof v === 'number' || (typeof v === 'string' && /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(v.trim()))) && Number.isFinite(Number(v)) ? Number(v) : undefined;
 export const folded = (s: string) => s.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
 export const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Caracas', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+/** The commercial date a query reads: the requested one, else today in Caracas. */
+export function isoDate(q: Query) { return q.date ?? today(); }
 export function requireArg(q: Query, field: keyof Query): string {
   const value = q[field];
   if (typeof value !== 'string' || !value) throw new DataError('unavailable', `Se requiere ${field}; obtén el identificador mediante las herramientas de catálogo.`);

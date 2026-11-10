@@ -1,5 +1,6 @@
 import { load } from 'cheerio';
-import { DataError, text } from '../core.js';
+import { DataError, Id, operationItemSchema, text } from '../core.js';
+import type { DataItem } from '../core.js';
 
 export type Obj = Record<string, unknown>;
 export const object = (v: unknown): Obj => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Obj : {};
@@ -86,4 +87,13 @@ export function requiredText(row: Obj, key: string): string {
   const value = text(row[key]);
   if (!value) throw new DataError('error', `Campo obligatorio ausente: ${key}.`);
   return value;
+}
+
+/**
+ * Applies the service's result validation to one fan-out item, so an invalid
+ * ID or an oversized title fails its own title or venue, not the response.
+ */
+export function checkedShowtime(item: DataItem): DataItem {
+  operationItemSchema('showtimes').parse(item); Id.parse(item.id);
+  return item;
 }
