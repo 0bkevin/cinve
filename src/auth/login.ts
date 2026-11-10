@@ -30,7 +30,7 @@ export class LoginHttp {
         headers.set('User-Agent', 'cinev-mcp/0.1');
         const cookie = await this.jar.getCookieString(url);
         if (cookie) headers.set('Cookie', cookie);
-        const r = await this.request(url, { method, body, headers, redirect: 'manual', signal });
+        const r = await this.request(url, { method, ...(body === undefined ? {} : { body }), headers, redirect: 'manual', signal });
         for (const c of r.headers.getSetCookie()) await this.jar.setCookie(c, url);
         if ([301, 302, 303, 307, 308].includes(r.status)) {
           const location = r.headers.get('location'); await r.body?.cancel();

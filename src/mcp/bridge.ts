@@ -72,7 +72,8 @@ export async function createRemoteServer(config: { url: string; token: string },
     return { ...body, ...(forwarded ? { _meta: forwarded } : {}) } as typeof result;
   };
   const register = (tool: UpstreamTool) => server.registerTool(tool.name, {
-    title: tool.title, description: tool.description, annotations: tool.annotations,
+    ...(tool.title === undefined ? {} : { title: tool.title }), ...(tool.description === undefined ? {} : { description: tool.description }),
+    ...(tool.annotations ? { annotations: tool.annotations } : {}),
     ...(tool.icons ? { icons: tool.icons } : {}), ...(tool._meta ? { _meta: tool._meta } : {}),
     inputSchema: upstreamSchema(tool.inputSchema as JsonSchemaType),
     ...(tool.outputSchema ? { outputSchema: upstreamSchema(tool.outputSchema as JsonSchemaType) } : {}),

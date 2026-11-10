@@ -5,7 +5,7 @@ import { CallStopped, type ReadContext } from '../../http/read-context.js';
 
 const base = 'https://www.cinex.com.ve';
 const detailPath = /^cinex-[A-Za-z0-9_-]{1,80}\.html$/;
-type Venue = { href: string; name: string; city: string; image?: string };
+type Venue = { href: string; name: string; city: string; image?: string | undefined };
 const normalizedName = (name: string) => folded(name).replace(/^cinex\s+/, '').replace(/[^a-z0-9]/g, '');
 const cinemaPageTtl = 120000;
 // Venue identity (code and name) changes about as often as the directory, so

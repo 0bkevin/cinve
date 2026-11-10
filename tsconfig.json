@@ -10,6 +10,7 @@
     "noImplicitOverride": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
     "types": ["node"],
     "outDir": "dist",
     "rootDir": "src",

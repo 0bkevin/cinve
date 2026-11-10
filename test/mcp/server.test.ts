@@ -109,7 +109,7 @@ test('long fan-outs report increasing progress to clients that send a progress t
   const client = new Client({ name: 'progress', version: '1' });
   await client.connect(clientTransport);
   try {
-    const updates: { progress: number; message?: string }[] = [];
+    const updates: { progress: number; message?: string | undefined }[] = [];
     const r = await client.callTool({ name: 'get_showtimes', arguments: { provider: 'cinex', city: 'Caracas', date: '2026-09-18' } }, { onprogress: p => updates.push(p) });
     assert.equal((r.structuredContent as { total: number }).total, 3);
     assert.ok(updates.length >= 4, JSON.stringify(updates)); // discovery batch + three venues

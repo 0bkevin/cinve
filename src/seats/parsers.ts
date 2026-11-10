@@ -20,7 +20,7 @@ export function showing(fields: Showing): Showing | undefined {
 }
 
 /** Cinex's seat page names its function in one line: "CINEX SAMBIL CHACAO | Sala 3 | Fecha: 05-11-2026 | Hora: 02:45pm | ... | Asientos disponibles: 154 asiento(s)". */
-export function parseCinexShowing(html: string): { showing?: Showing; available?: number } {
+export function parseCinexShowing(html: string): { showing?: Showing | undefined; available?: number | undefined } {
   const $ = load(html);
   const line = $('div').filter((_, el) => $(el).children('b').filter((_, b) => /^Asientos disponibles:/.test($(b).text().trim())).length === 1).first().text();
   const parts = line.split('|').map(p => p.replace(/\s+/g, ' ').trim());

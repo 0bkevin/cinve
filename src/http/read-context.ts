@@ -14,7 +14,7 @@ export type CallOptions = {
    * so time spent before the tool runs (reading the body, OAuth, admission)
    * counts against the call's budget. Defaults to when the context is created.
    */
-  startedAt?: number;
+  startedAt?: number | undefined;
 };
 
 /**

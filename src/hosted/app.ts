@@ -10,6 +10,7 @@ import type { Pool } from 'pg';
 import { timingSafeEqual } from 'node:crypto';
 import { createMcpHandler } from '@modelcontextprotocol/server';
 import { toNodeHandler } from '@modelcontextprotocol/node';
+import type { NodeIncomingMessageLike } from '@modelcontextprotocol/node';
 import { createServer } from '../mcp/server.js';
 import { CinemaService } from '../service.js';
 import { CinexCinemaCatalog } from '../providers/cinex/venues.js';
@@ -76,8 +77,8 @@ function refreshCalls(message: unknown): number {
   }).length;
 }
 export async function createHostedApp(options: {
-  publicUrl: string; pool: Pool; key: Buffer; allowLocal?: boolean; trustedVercelProxy?: boolean; cleanupSecret?: string;
-  authenticate?: typeof login; request?: typeof fetch; bodyTimeoutMs?: number; clientMetadata?: ClientMetadataFetcher;
+  publicUrl: string; pool: Pool; key: Buffer; allowLocal?: boolean; trustedVercelProxy?: boolean; cleanupSecret?: string | undefined;
+  authenticate?: typeof login | undefined; request?: typeof fetch; bodyTimeoutMs?: number; clientMetadata?: ClientMetadataFetcher;
 }) {
   const publicUrl = new URL(options.publicUrl);
   if (publicUrl.pathname !== '/' || publicUrl.search || publicUrl.hash || publicUrl.username || publicUrl.password ||
@@ -176,7 +177,8 @@ export async function createHostedApp(options: {
             },
             disconnect: async provider => { await store.remove(provider); },
           } : undefined, !principal, receivedAt), { maxSubscriptions: 0, keepAliveMs: 0 });
-          await toNodeHandler(handler)(req, res, parsed);
+          // The SDK declares method?: string, which Node's method?: string | undefined fails under exactOptionalPropertyTypes.
+          await toNodeHandler(handler)(req as NodeIncomingMessageLike, res, parsed);
         } finally {
           await handler?.close();
           active.set(clientKey, active.get(clientKey)! - 1); if (!active.get(clientKey)) active.delete(clientKey); totalActive--;

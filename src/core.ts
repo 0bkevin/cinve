@@ -132,9 +132,11 @@ export type QueryResult = z.infer<typeof Result>;
 export function outputSchema<Op extends Operation>(op: Op) {
   return z.object({ ...resultFields, items: z.array(operationItemSchema(op)) });
 }
+// Optional fields admit undefined: zod's inferred .optional() output does,
+// and callers forward a field they may not have (city: q.city).
 export type Query = {
-  provider: ProviderId; city?: string; cinema_id?: string; movie_id?: string; session_id?: string;
-  date?: string; query?: string; offset?: number; limit?: number; refresh?: boolean;
+  provider: ProviderId; city?: string | undefined; cinema_id?: string | undefined; movie_id?: string | undefined; session_id?: string | undefined;
+  date?: string | undefined; query?: string | undefined; offset?: number | undefined; limit?: number | undefined; refresh?: boolean | undefined;
 };
 export class DataError extends Error {
   constructor(public status: StatusId, message: string) { super(message); }

@@ -9,7 +9,7 @@ import { createHostedApp } from '../../src/hosted/app.js';
 import type { login } from '../../src/auth/login.js';
 import type { ClientMetadataFetcher } from '../../src/hosted/client-metadata.js';
 
-export async function fixture(t: { after(fn: () => Promise<void>): void }, authenticate?: typeof login,
+export async function fixture(t: { after(fn: () => Promise<void>): void }, authenticate?: typeof login | undefined,
   request: typeof fetch = async () => new Response('["Caracas"]'), extra: { bodyTimeoutMs?: number; clientMetadata?: ClientMetadataFetcher } = {}) {
   const schema = 'test_' + randomBytes(12).toString('hex');
   const admin = new Pool({ connectionString: process.env.TEST_DATABASE_URL });

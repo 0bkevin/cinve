@@ -8,7 +8,7 @@ export type MapSeat = { label: string; row: string; area: string; row_index: num
 /** The provider-verified orientation from SeatResult.layout. */
 export type MapLayout = { screen: 'top' | 'bottom' | 'unverified'; column_order: 'ascending' | 'descending' };
 /** cinema: the venue's name when known, else its ID. The rest, when the provider named them, label the function. */
-export type MapHeader = { provider: string; cinema: string; session: string; queriedAt: string; movie?: string; screen?: string; date?: string; time?: string };
+export type MapHeader = { provider: string; cinema: string; session: string; queriedAt: string; movie?: string | undefined; screen?: string | undefined; date?: string | undefined; time?: string | undefined };
 
 const providerNames: Record<string, string> = { cinex: 'Cinex', cinesunidos: 'Cines Unidos', cinepic: 'Cinepic' };
 const palette: Record<SeatStatus, { fill: string; stroke: string; text: string; name: string }> = {

@@ -6,8 +6,13 @@ import { Result } from '../../src/core.js';
 import { createRemoteServer, upstreamCallTimeoutMs } from '../../src/mcp/bridge.js';
 import { fixture } from '../helpers/hosted.js';
 import { createServer as nodeServer } from 'node:http';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { toNodeHandler } from '@modelcontextprotocol/node';
+import type { NodeIncomingMessageLike } from '@modelcontextprotocol/node';
 import * as z from 'zod';
+
+// The SDK declares method?: string, which Node's method?: string | undefined fails under exactOptionalPropertyTypes.
+const serve = (handler: Parameters<typeof toNodeHandler>[0]) => (req: IncomingMessage, res: ServerResponse) => { void toNodeHandler(handler)(req as NodeIncomingMessageLike, res); };
 
 test('stdio bridge forwards tools to authenticated hosted MCP with fresh retrieval', async t => {
   const f = await fixture(t);
@@ -40,7 +45,7 @@ test('stdio bridge forwards application metadata but keeps its own server identi
     return { content: [{ type: 'text', text: `${city}|${String(ctx.mcpReq._meta?.['fixture/request'] ?? '')}` }] };
   });
   const upstreamHandler = createMcpHandler(() => upstream, { maxSubscriptions: 0, keepAliveMs: 0 });
-  const http = nodeServer((req, res) => { void toNodeHandler(upstreamHandler)(req, res); });
+  const http = nodeServer(serve(upstreamHandler));
   await new Promise<void>(resolve => http.listen(0, '127.0.0.1', resolve));
   const address = http.address(); assert.ok(address && typeof address !== 'string');
   const bridge = await createRemoteServer({ url: `http://127.0.0.1:${address.port}/mcp`, token: 'unused' });
@@ -61,7 +66,7 @@ test('stdio bridge forwards application metadata but keeps its own server identi
   assert.equal(echo?._meta?.['fixture/tool'], 'kept', 'tool-definition metadata is kept');
   assert.equal(((await client.callTool({ name: 'echo_fixture', arguments: { city: 'Caracas' } })).content[0] as { text: string }).text, 'Caracas|');
   // Request metadata reaches upstream, and upstream progress returns to the caller.
-  const updates: { progress: number; message?: string }[] = [];
+  const updates: { progress: number; message?: string | undefined }[] = [];
   const withMeta = await client.callTool({ name: 'echo_fixture', arguments: { city: 'Caracas' }, _meta: { 'fixture/request': 'forwarded' } }, { onprogress: p => updates.push(p) });
   assert.equal((withMeta.content[0] as { text: string }).text, 'Caracas|forwarded');
   assert.deepEqual(updates.map(u => [u.progress, u.message]), [[1, 'paso 1'], [2, 'paso 2']]);
@@ -86,7 +91,7 @@ test('stdio bridge follows upstream tool changes made while it runs', async t =>
     return s;
   };
   const handler = createMcpHandler(upstreamFor, { maxSubscriptions: 0, keepAliveMs: 0 });
-  const http = nodeServer((req, res) => { void toNodeHandler(handler)(req, res); });
+  const http = nodeServer(serve(handler));
   await new Promise<void>(resolve => http.listen(0, '127.0.0.1', resolve));
   const address = http.address(); assert.ok(address && typeof address !== 'string');
   const bridge = await createRemoteServer({ url: `http://127.0.0.1:${address.port}/mcp`, token: 'unused' });
@@ -124,7 +129,7 @@ test('stdio bridge waits for upstream calls longer than the SDK default and the 
     return s;
   };
   const handler = createMcpHandler(upstream, { maxSubscriptions: 0, keepAliveMs: 0 });
-  const http = nodeServer((req, res) => { void toNodeHandler(handler)(req, res); });
+  const http = nodeServer(serve(handler));
   await new Promise<void>(resolve => http.listen(0, '127.0.0.1', resolve));
   const address = http.address(); assert.ok(address && typeof address !== 'string');
   const url = `http://127.0.0.1:${address.port}/mcp`;
