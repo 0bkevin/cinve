@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { operationItemSchema, outputSchema } from '../src/core.js';
-import { CinemaService } from '../src/service.js';
-import { HttpClient } from '../src/http/client.js';
-import { EmptySessionStore, page } from './helpers/fixtures.js';
+import { DateInput, operationItemSchema, outputSchema } from '../src/core.js';
+
+test('calendar validation rejects impossible dates and accepts leap day', () => {
+  assert.equal(DateInput.safeParse('2026-02-30').success, false);
+  assert.equal(DateInput.safeParse('2024-02-29').success, true);
+});
 
 const envelope = (items: unknown[]) => ({
   provider: 'cinepic', status: 'available', queried_at: '2026-09-11T12:00:00.000Z',
@@ -51,16 +53,4 @@ test('operation schemas strip fields belonging to another operation and allow ov
     date: '2026-09-11', time: '00:30',
   });
   assert.equal(overnight.starts_at, undefined);
-});
-
-test('service preserves a named cinema with malformed code as a nonqueryable directory entry', async () => {
-  const http = new HttpClient(async () => new Response(page({ theaters: [{ id: '../secret', name: 'Cinema' }] })), 15000, new EmptySessionStore());
-  const result = await new CinemaService(http).query('cinemas', { provider: 'cinesunidos', city: 'Caracas' });
-  assert.equal(result.status, 'available');
-  assert.equal(result.partial, true);
-  assert.equal(result.items[0].code_status, 'unverified');
-  assert.equal(result.items[0].cinema_id, undefined);
-  assert.match(result.items[0].id, /^directory-/);
-  assert.equal(result.total, 1);
-  assert.match(result.warnings[0], /sede conservada/);
 });

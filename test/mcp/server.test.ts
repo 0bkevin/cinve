@@ -5,7 +5,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
 import { Result } from '../../src/core.js';
 import { SeatResult } from '../../src/seats/schema.js';
-import { createServer } from '../../src/mcp/server.js';
+import { createServer, inputSchema } from '../../src/mcp/server.js';
 import { CinemaService } from '../../src/service.js';
 import { CinexCinemaCatalog } from '../../src/providers/cinex/venues.js';
 import { HttpClient } from '../../src/http/client.js';
@@ -115,4 +115,12 @@ test('long fan-outs report increasing progress to clients that send a progress t
     assert.ok(updates.every((u, i) => i === 0 || u.progress > updates[i - 1].progress), 'progress only increases');
     assert.ok(updates.some(u => u.message === 'Cinex: 3 de 3 sedes leídas.'), JSON.stringify(updates));
   } finally { await client.close(); }
+});
+
+test('tool validation rejects missing provider context and arbitrary IDs', () => {
+  assert.equal(inputSchema('showtimes').safeParse({ provider: 'cinepic' }).success, false);
+  assert.equal(inputSchema('movies').safeParse({ provider: 'cinesunidos' }).success, false);
+  assert.equal(inputSchema('showtimes').safeParse({ provider: 'cinex', movie_id: '../../secret' }).success, false);
+  assert.equal(inputSchema('movies').safeParse({ provider: 'cinex', date: '2026-09-11' }).success, false);
+  assert.equal(inputSchema('showtimes').safeParse({ provider: 'cinepic', cinema_id: '123300' }).success, true);
 });
