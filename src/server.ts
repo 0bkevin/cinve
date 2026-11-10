@@ -5,7 +5,7 @@ import { cinepicVenueName } from './providers/cinepic/sites.js';
 import { hostedAuthInstructions } from './hosted-auth-guidance.js';
 import { McpServer } from '@modelcontextprotocol/server';
 import type { ServerContext } from '@modelcontextprotocol/server';
-import type { CallOptions } from './http/client.js';
+import type { CallOptions } from './http/read-context.js';
 import * as z from 'zod';
 import { DateInput, Id, Provider, idString, outputSchema } from './core.js';
 import type { Operation, Query } from './core.js';

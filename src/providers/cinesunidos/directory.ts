@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { DataError, folded, Id, text } from '../../core.js';
 import type { DataItem } from '../../core.js';
 import { object } from '../parsing.js';
-import type { ReadContext } from '../../http/client.js';
+import type { ReadContext } from '../../http/read-context.js';
 
 /** Preserve named directory entries independently of code availability. */
 export function parseCinemaDirectory(fields: unknown[], city: string, url: string, c: ReadContext): DataItem[] {

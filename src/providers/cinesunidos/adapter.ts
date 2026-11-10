@@ -1,6 +1,6 @@
 import { DataError, DateInput, folded, isoDate, number, requireArg, text } from '../../core.js';
 import type { DataItem, Operation, Query } from '../../core.js';
-import { ReadContext } from '../../http/client.js';
+import { ReadContext } from '../../http/read-context.js';
 import { checkedShowtime, flight, object, pageFields, requiredText, rows } from '../parsing.js';
 import type { Obj } from '../parsing.js';
 import { warningLabel } from '../diagnostics.js';

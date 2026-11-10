@@ -18,7 +18,7 @@ import { HostedHttpClient } from './hosted-http.js';
 import { SessionStore, login } from './auth.js';
 import type { AuthSession, AuthProviderId } from './auth.js';
 import type { Operation, Query } from './core.js';
-import type { CallOptions } from './http/client.js';
+import type { CallOptions } from './http/read-context.js';
 import { ConnectionLinks } from './hosted-links.js';
 import { EncryptedSessionStore, HostedUsers, digest } from './hosted-store.js';
 import { loginPage, loginScript } from './auth-web.js';

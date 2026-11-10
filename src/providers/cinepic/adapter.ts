@@ -1,6 +1,6 @@
 import { DataError, folded, Id, isoDate, number, text } from '../../core.js';
 import type { DataItem, Operation, Query } from '../../core.js';
-import { CallStopped, ReadContext } from '../../http/client.js';
+import { CallStopped, ReadContext } from '../../http/read-context.js';
 import { findField, flight, object, objects, requiredText, rows } from '../parsing.js';
 import type { Obj } from '../parsing.js';
 import { providerWarning, warningLabel } from '../diagnostics.js';

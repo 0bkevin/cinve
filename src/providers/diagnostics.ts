@@ -1,6 +1,6 @@
 // Parser warnings the adapters emit while reading one call's provider data,
 // deduplicated by kind and bounded before they reach the result.
-import type { ReadContext } from '../http/client.js';
+import type { ReadContext } from '../http/read-context.js';
 
 const providerWarningKinds = 32;
 const providerWarningLabelLength = 120;
