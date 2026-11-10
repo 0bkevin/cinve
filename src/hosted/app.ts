@@ -19,7 +19,7 @@ import { HostedHttpClient } from './http-client.js';
 import { SessionStore } from '../auth/sessions.js';
 import { login } from '../auth/login.js';
 import type { AuthSession, AuthProviderId } from '../auth/sessions.js';
-import { beforeFirst } from '../core.js';
+import { beforeFirst, isObj } from '../core.js';
 import type { Operation, Query } from '../core.js';
 import type { CallOptions } from '../http/read-context.js';
 import { ConnectionLinks } from './connection-links.js';
@@ -69,12 +69,7 @@ async function body(req: IncomingMessage, max: number, deadlineMs = 10000): Prom
 /** Tool calls in a JSON-RPC message (single or batch) that ask to bypass the public cache. */
 function refreshCalls(message: unknown): number {
   const calls = Array.isArray(message) ? message : [message];
-  return calls.filter(m => {
-    if (!m || typeof m !== 'object') return false;
-    const { method, params } = m as { method?: unknown; params?: unknown };
-    const args = params && typeof params === 'object' ? (params as { arguments?: unknown }).arguments : undefined;
-    return method === 'tools/call' && !!args && typeof args === 'object' && (args as { refresh?: unknown }).refresh === true;
-  }).length;
+  return calls.filter(m => isObj(m) && m.method === 'tools/call' && isObj(m.params) && isObj(m.params.arguments) && m.params.arguments.refresh === true).length;
 }
 export async function createHostedApp(options: {
   publicUrl: string; pool: Pool; key: Buffer; allowLocal?: boolean; trustedVercelProxy?: boolean; cleanupSecret?: string | undefined;
@@ -181,7 +176,9 @@ export async function createHostedApp(options: {
           await toNodeHandler(handler)(req as NodeIncomingMessageLike, res, parsed);
         } finally {
           await handler?.close();
-          active.set(clientKey, active.get(clientKey)! - 1); if (!active.get(clientKey)) active.delete(clientKey); totalActive--;
+          const remaining = (active.get(clientKey) ?? 0) - 1;
+          if (remaining > 0) active.set(clientKey, remaining); else active.delete(clientKey);
+          totalActive--;
         }
         return;
       }
@@ -204,8 +201,8 @@ export async function createHostedApp(options: {
       let data: Record<string, unknown> = {};
       try {
         const parsed = await body(req, 16384);
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new HttpError(400, 'Solicitud no válida.');
-        data = parsed as Record<string, unknown>;
+        if (!isObj(parsed)) throw new HttpError(400, 'Solicitud no válida.');
+        data = parsed;
         if (Object.keys(data).some(k => !['username', 'password'].includes(k)) || typeof data.username !== 'string' || !data.username.trim() || data.username.length > 320 || typeof data.password !== 'string' || !data.password || data.password.length > 4096) throw new HttpError(400, 'Revisa correo y contraseña.');
         if (!await links.claim(token)) throw new HttpError(429, 'Conexión en uso o vencida. Pide un enlace nuevo.');
         claimed = true;

@@ -1,8 +1,10 @@
 import { randomBytes } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
-import { digest, EncryptedSessionStore, lockUser, transaction } from './store.js';
+import { digest, EncryptedSessionStore, lockUser, returnedRow, transaction } from './store.js';
 import type { AuthProviderId, AuthSession } from '../auth/sessions.js';
 
+/** The cinev_links columns lookup() reads, with the owner's current token hash. */
+type LinkRow = { user_id: string; owner_hash: string; provider: AuthProviderId; expires_at: Date; attempts: number; busy: boolean };
 type Connection = { user: string; tokenHash: string; provider: AuthProviderId; expires: number; attempts: number; busy: boolean };
 export class ConnectionLinks {
   constructor(readonly pool: Pool) {}
@@ -10,15 +12,15 @@ export class ConnectionLinks {
     return transaction(this.pool, async client => {
       if (await lockUser(client, user) !== tokenHash) throw new Error('Acceso revocado.');
       const token = randomBytes(32).toString('hex');
-      const { rows } = await client.query(`INSERT INTO cinev_links(token_hash,user_id,provider,stage,expires_at)
+      const { rows } = await client.query<{ expires_at: Date }>(`INSERT INTO cinev_links(token_hash,user_id,provider,stage,expires_at)
         VALUES($1,$2,$3,'invitation',now()+interval '10 minutes')
         ON CONFLICT(user_id,provider) DO UPDATE SET token_hash=EXCLUDED.token_hash,stage='invitation',
         expires_at=EXCLUDED.expires_at,attempts=0,busy=false RETURNING expires_at`, [digest(token), user, provider]);
-      return { token, expires_at: rows[0].expires_at.toISOString() as string };
+      return { token, expires_at: returnedRow(rows).expires_at.toISOString() };
     });
   }
   private async lookup(client: Pool | PoolClient, token: string, stage: string): Promise<Connection | undefined> {
-    const { rows } = await client.query(`SELECT l.*,c.token_hash AS owner_hash FROM cinev_links l
+    const { rows } = await client.query<LinkRow>(`SELECT l.*,c.token_hash AS owner_hash FROM cinev_links l
       JOIN cinev_clients c ON c.id=l.user_id WHERE l.token_hash=$1 AND stage=$2
       AND expires_at>clock_timestamp() AND c.revoked_at IS NULL`, [digest(token), stage]);
     const row = rows[0];
@@ -68,12 +70,12 @@ export class ConnectionLinks {
     });
   }
   async budget(key: string, limit: number) {
-    const { rows } = await this.pool.query(`INSERT INTO cinev_budgets(key_hash,expires_at,count)
+    const { rows } = await this.pool.query<{ count: number }>(`INSERT INTO cinev_budgets(key_hash,expires_at,count)
       VALUES($1,now()+interval '1 minute',1) ON CONFLICT(key_hash) DO UPDATE SET
       count=CASE WHEN cinev_budgets.expires_at<=now() THEN 1 ELSE LEAST(cinev_budgets.count+1,$2+1) END,
       expires_at=CASE WHEN cinev_budgets.expires_at<=now() THEN EXCLUDED.expires_at ELSE cinev_budgets.expires_at END
       RETURNING count`, [digest(key), limit]);
-    return rows[0].count <= limit;
+    return returnedRow(rows).count <= limit;
   }
   async cleanup() {
     await this.pool.query('DELETE FROM cinev_oauth_requests WHERE expires_at<=now()');

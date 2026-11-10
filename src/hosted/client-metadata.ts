@@ -1,7 +1,7 @@
 import { lookup } from 'node:dns';
-import type { LookupAddress } from 'node:dns';
 import { request } from 'node:https';
 import { isIP } from 'node:net';
+import type { LookupFunction } from 'node:net';
 import * as z from 'zod';
 import { beforeFirst, group } from '../core.js';
 
@@ -115,9 +115,8 @@ export function isBlockedAddress(address: string): boolean {
   return blockedV6.some(range => inRange(bytes, range));
 }
 
-type LookupCallback = (error: NodeJS.ErrnoException | null, address: string | LookupAddress[], family?: number) => void;
 /** Resolves once and hands the socket only addresses that passed the check. */
-function checkedLookup(hostname: string, options: { all?: boolean }, callback: LookupCallback) {
+const checkedLookup: LookupFunction = (hostname, options, callback) => {
   lookup(hostname, { all: true }, (error, addresses) => {
     if (error) return callback(error, '');
     const [first] = addresses;
@@ -127,7 +126,7 @@ function checkedLookup(hostname: string, options: { all?: boolean }, callback: L
     if (options.all) return callback(null, addresses);
     callback(null, first.address, first.family);
   });
-}
+};
 
 /** `noStore`: the response forbids reuse (no-store, no-cache or max-age=0). */
 export type FetchedDocument = { document: unknown; maxAgeSeconds?: number; noStore?: boolean };
@@ -142,7 +141,7 @@ export function cacheDirectives(control = ''): Pick<FetchedDocument, 'maxAgeSeco
 export const fetchClientMetadataDocument: ClientMetadataFetcher = url => new Promise((resolve, reject) => {
   if (!isClientIdUrl(url)) { reject(new Error('Invalid client_id URL.')); return; }
   const req = request(url, {
-    method: 'GET', lookup: checkedLookup as never, timeout: metadataTimeoutMs,
+    method: 'GET', lookup: checkedLookup, timeout: metadataTimeoutMs,
     headers: { Accept: 'application/json', 'User-Agent': 'cinve-oauth/0.1' },
   }, res => {
     const header = res.headers['content-type'], type = header === undefined ? undefined : beforeFirst(header, ';').trim().toLowerCase();
@@ -232,7 +231,8 @@ export class ClientMetadataCache {
     const metadata = validateClientMetadata(url, document);
     if (noStore) return metadata;
     const ttl = Math.min(Math.max(maxAgeSeconds ?? 300, 60), 86400) * 1000;
-    if (this.entries.size >= this.capacity) this.entries.delete(this.entries.keys().next().value!);
+    const oldest = this.entries.keys().next();
+    if (this.entries.size >= this.capacity && !oldest.done) this.entries.delete(oldest.value);
     this.entries.set(url, { metadata, expires: Date.now() + ttl });
     return metadata;
   }

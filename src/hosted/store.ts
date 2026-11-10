@@ -1,9 +1,12 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { Pool, type PoolClient } from 'pg';
+import * as z from 'zod';
 import { Session, SessionStore } from '../auth/sessions.js';
 import type { AuthProviderId, AuthSession } from '../auth/sessions.js';
 import { DataError, group } from '../core.js';
 
+/** The stored form of an encrypted session (see encrypt). */
+const Envelope = z.object({ v: z.literal(1), iv: z.string(), tag: z.string(), data: z.string() });
 export const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 export function databasePool(url = process.env.DATABASE_URL) {
   if (!url) throw new Error('Configura DATABASE_URL.');
@@ -18,11 +21,17 @@ export async function transaction<T>(pool: Pool, fn: (client: PoolClient) => Pro
   catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; }
   finally { client.release(); }
 }
+/** The row an INSERT ... RETURNING or an upsert always yields. */
+export function returnedRow<T>(rows: T[]): T {
+  const [row] = rows;
+  if (row === undefined) throw new Error('The statement returned no row.');
+  return row;
+}
 // Every account mutation takes the same row lock. Upstream cinema requests NEVER
 // run inside this transaction; only the final, still-authorized session is saved.
 export async function lockUser(client: PoolClient, id: string) {
-  const { rows } = await client.query('SELECT token_hash FROM cinev_clients WHERE id=$1 AND revoked_at IS NULL FOR UPDATE', [id]);
-  return rows[0]?.token_hash as string | undefined;
+  const { rows } = await client.query<{ token_hash: string }>('SELECT token_hash FROM cinev_clients WHERE id=$1 AND revoked_at IS NULL FOR UPDATE', [id]);
+  return rows[0]?.token_hash;
 }
 export class HostedUsers {
   constructor(readonly pool: Pool) {}
@@ -39,7 +48,7 @@ export class HostedUsers {
     return { id, tokenHash: expected };
   }
   async hash(id: string): Promise<string | undefined> {
-    const { rows } = await this.pool.query('SELECT token_hash FROM cinev_clients WHERE id=$1 AND revoked_at IS NULL', [id]);
+    const { rows } = await this.pool.query<{ token_hash: string }>('SELECT token_hash FROM cinev_clients WHERE id=$1 AND revoked_at IS NULL', [id]);
     return rows[0]?.token_hash;
   }
   async revoke(id: string) {
@@ -65,12 +74,11 @@ export class EncryptedSessionStore extends SessionStore {
   }
   override async read(provider: AuthProviderId): Promise<AuthSession | undefined> { return this.readWith(this.pool, provider); }
   private async readWith(db: Pool | PoolClient, provider: AuthProviderId): Promise<AuthSession | undefined> {
-    const { rows } = await db.query(`SELECT ciphertext FROM cinev_sessions s JOIN cinev_clients c ON c.id=s.user_id
+    const { rows: [row] } = await db.query<{ ciphertext: string }>(`SELECT ciphertext FROM cinev_sessions s JOIN cinev_clients c ON c.id=s.user_id
       WHERE s.user_id=$1 AND provider=$2 AND c.revoked_at IS NULL`, [this.user, provider]);
-    if (!rows.length) return undefined;
+    if (!row) return undefined;
     try {
-      const { v, iv, tag, data } = JSON.parse(rows[0].ciphertext);
-      if (v !== 1 || ![iv, tag, data].every(s => typeof s === 'string')) throw new Error();
+      const { iv, tag, data } = Envelope.parse(JSON.parse(row.ciphertext));
       const decipher = createDecipheriv('aes-256-gcm', this.key, Buffer.from(iv, 'base64'));
       decipher.setAAD(this.aad(provider)); decipher.setAuthTag(Buffer.from(tag, 'base64'));
       const session = Session.parse(JSON.parse(Buffer.concat([decipher.update(Buffer.from(data, 'base64')), decipher.final()]).toString('utf8')));

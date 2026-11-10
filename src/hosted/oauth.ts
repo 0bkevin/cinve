@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Pool, PoolClient } from 'pg';
 import * as z from 'zod';
 import { beforeFirst } from '../core.js';
-import { digest, lockUser, transaction } from './store.js';
+import { digest, lockUser, returnedRow, transaction } from './store.js';
 import { ConnectionLinks } from './connection-links.js';
 import { ClientMetadataCache, isClientIdUrl, redirectUri } from './client-metadata.js';
 
@@ -24,7 +24,18 @@ function required(value: string | null | undefined) {
   if (!value) throw new OAuthError('invalid_request');
   return value;
 }
-async function payload(req: IncomingMessage, json = false) {
+// The columns each query reads (pg types rows as any otherwise).
+type AppRow = { id: string; name: string; redirect_uris: string[] };
+type RequestRow = {
+  id: string; app_id: string; redirect_uri: string; resource: string; state: string | null; challenge: string;
+  csrf_hash: string; expires_at: Date; code_hash: string | null; user_id: string | null; consumed_at: Date | null;
+};
+type RefreshRow = { user_id: string; expires_at: Date; used_at: Date | null; app_id: string; resource: string; grant_expiry: Date };
+
+/** A bounded form (or, with json, JSON) request body. */
+async function payload(req: IncomingMessage, json: true): Promise<unknown>;
+async function payload(req: IncomingMessage, json?: false): Promise<URLSearchParams>;
+async function payload(req: IncomingMessage, json = false): Promise<unknown> {
   const header = req.headers['content-type'], type = header === undefined ? undefined : beforeFirst(header, ';').trim();
   if (type !== (json ? 'application/json' : 'application/x-www-form-urlencoded')) throw new OAuthError('invalid_request', 415);
   let bytes = 0; const chunks: Buffer[] = [];
@@ -34,7 +45,7 @@ async function payload(req: IncomingMessage, json = false) {
     chunks.push(Buffer.from(chunk));
   }
   const value = Buffer.concat(chunks).toString('utf8');
-  if (json) { try { return JSON.parse(value) as unknown; } catch { throw new OAuthError('invalid_request'); } }
+  if (json) { try { return JSON.parse(value); } catch { throw new OAuthError('invalid_request'); } }
   const params = new URLSearchParams(value);
   for (const key of params.keys()) if (params.getAll(key).length !== 1) throw new OAuthError('invalid_request');
   return params;
@@ -59,10 +70,10 @@ export class HostedOAuth {
     if (!await this.budgets.budget(`oauth:metadata:${ip}`, 20)) throw new OAuthError('temporarily_unavailable', 429);
     let metadata;
     try { metadata = await this.clientMetadata.get(clientId); } catch { throw new OAuthError('invalid_client'); }
-    const { rows } = await this.pool.query(`INSERT INTO cinev_oauth_apps(id,name,redirect_uris) VALUES($1,$2,$3)
+    const { rows } = await this.pool.query<AppRow>(`INSERT INTO cinev_oauth_apps(id,name,redirect_uris) VALUES($1,$2,$3)
       ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, redirect_uris=EXCLUDED.redirect_uris RETURNING *`,
       [clientId, metadata.client_name, JSON.stringify(metadata.redirect_uris)]);
-    return rows[0];
+    return returnedRow(rows);
   }
   get resource() { return this.getOrigin() + '/mcp'; }
   challenge(invalid = false) {
@@ -70,11 +81,11 @@ export class HostedOAuth {
   }
   async authenticate(token: string) {
     if (!/^cva_[A-Za-z0-9_-]{43}$/.test(token)) return undefined;
-    const { rows } = await this.pool.query(`SELECT c.id,c.token_hash FROM cinev_oauth_tokens t
+    const { rows: [row] } = await this.pool.query<{ id: string; token_hash: string }>(`SELECT c.id,c.token_hash FROM cinev_oauth_tokens t
       JOIN cinev_oauth_grants g ON g.user_id=t.user_id JOIN cinev_clients c ON c.id=t.user_id
       WHERE t.token_hash=$1 AND t.kind='access' AND t.expires_at>clock_timestamp()
       AND g.expires_at>clock_timestamp() AND g.resource=$2 AND c.revoked_at IS NULL`, [digest(token), this.resource]);
-    return rows[0] ? { id: rows[0].id as string, tokenHash: rows[0].token_hash as string } : undefined;
+    return row ? { id: row.id, tokenHash: row.token_hash } : undefined;
   }
   private async tokens(client: PoolClient, user: string) {
     const access = 'cva_' + secret(), refresh = 'cvr_' + secret();
@@ -96,8 +107,7 @@ export class HostedOAuth {
       const code = required(p.get('code')), verifier = required(p.get('code_verifier'));
       if (!/^[A-Za-z0-9._~-]{43,128}$/.test(verifier)) throw new OAuthError('invalid_grant');
       const result = await transaction(this.pool, async client => {
-        const { rows } = await client.query('SELECT * FROM cinev_oauth_requests WHERE code_hash=$1 FOR UPDATE', [digest(code)]);
-        const r = rows[0];
+        const { rows: [r] } = await client.query<RequestRow>('SELECT * FROM cinev_oauth_requests WHERE code_hash=$1 FOR UPDATE', [digest(code)]);
         if (!r || r.app_id !== app || r.resource !== this.resource || r.redirect_uri !== p.get('redirect_uri') ||
             r.challenge !== createHash('sha256').update(verifier).digest('base64url') || r.expires_at.getTime() <= Date.now()) return undefined;
         if (r.consumed_at) {
@@ -118,11 +128,14 @@ export class HostedOAuth {
       const token = required(p.get('refresh_token'));
       if (p.has('scope') && p.get('scope') !== scope) throw new OAuthError('invalid_scope');
       const result = await transaction(this.pool, async client => {
-        const find = () => client.query(`SELECT t.*,g.app_id,g.resource,g.expires_at AS grant_expiry FROM cinev_oauth_tokens t
+        const find = () => client.query<RefreshRow>(`SELECT t.*,g.app_id,g.resource,g.expires_at AS grant_expiry FROM cinev_oauth_tokens t
           JOIN cinev_oauth_grants g ON g.user_id=t.user_id WHERE t.token_hash=$1 AND t.kind='refresh'`, [digest(token)]);
         const candidate = (await find()).rows[0];
         if (!candidate || candidate.app_id !== app || candidate.resource !== this.resource || !await lockUser(client, candidate.user_id)) return undefined;
+        // The user lock taken above keeps the token row: every delete of it
+        // cascades from cinev_clients, which that lock blocks.
         const r = (await find()).rows[0];
+        if (!r) return undefined;
         if (r.used_at) { await revoke(client, r.user_id); return undefined; }
         if (r.expires_at.getTime() <= Date.now() || r.grant_expiry.getTime() <= Date.now()) return undefined;
         await client.query('UPDATE cinev_oauth_tokens SET used_at=now() WHERE token_hash=$1', [digest(token)]);
@@ -135,7 +148,8 @@ export class HostedOAuth {
     throw new OAuthError('unsupported_grant_type');
   }
   async handle(req: IncomingMessage, res: ServerResponse, ip: string): Promise<boolean> {
-    const origin = this.getOrigin(), url = new URL(req.url!, origin), path = url.pathname;
+    if (req.url === undefined) return false;
+    const origin = this.getOrigin(), url = new URL(req.url, origin), path = url.pathname;
     const metadata = ['/.well-known/oauth-protected-resource', '/.well-known/oauth-protected-resource/mcp', '/.well-known/oauth-authorization-server'];
     if (!metadata.includes(path) && !['/oauth/register', '/oauth/authorize', '/oauth/token', '/oauth/revoke'].includes(path)) return false;
     const send = (status: number, value: unknown) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(value)); };
@@ -181,7 +195,7 @@ export class HostedOAuth {
         for (const key of p.keys()) if (p.getAll(key).length !== 1) throw new OAuthError('invalid_request');
         const clientId = required(p.get('client_id'));
         const app = isClientIdUrl(clientId) ? await this.metadataApp(clientId, ip)
-          : (await this.pool.query('SELECT * FROM cinev_oauth_apps WHERE id=$1', [clientId])).rows[0];
+          : (await this.pool.query<AppRow>('SELECT * FROM cinev_oauth_apps WHERE id=$1', [clientId])).rows[0];
         const redirect = required(p.get('redirect_uri'));
         // Never redirect errors to an unvalidated client URI.
         if (!app || !app.redirect_uris.includes(redirect)) throw new OAuthError('invalid_request');
@@ -207,14 +221,13 @@ export class HostedOAuth {
       }
       if (path === '/oauth/authorize' && req.method === 'POST') {
         if (req.headers.origin !== origin) throw new OAuthError('invalid_request', 403);
-        const p = await payload(req) as URLSearchParams;
+        const p = await payload(req);
         const id = required(p.get('request_id')), csrf = required(p.get('csrf'));
         if (!/^[a-f0-9]{32}$/.test(id) || !/^[A-Za-z0-9_-]{43}$/.test(csrf) || !['approve', 'deny'].includes(p.get('decision') ?? '')) throw new OAuthError('invalid_request');
         const cookie = req.headers.cookie?.split(';').map(v => v.trim()).find(v => v.startsWith(`cinve_approval_${id}=`))?.split('=')[1];
         if (cookie !== csrf) throw new OAuthError('invalid_request', 403);
         const destination = await transaction(this.pool, async client => {
-          const { rows } = await client.query('SELECT * FROM cinev_oauth_requests WHERE id=$1 FOR UPDATE', [id]);
-          const r = rows[0];
+          const { rows: [r] } = await client.query<RequestRow>('SELECT * FROM cinev_oauth_requests WHERE id=$1 FOR UPDATE', [id]);
           if (!r || r.csrf_hash !== digest(csrf) || r.expires_at.getTime() <= Date.now() || r.code_hash) throw new OAuthError('invalid_request');
           const dest = new URL(r.redirect_uri);
           if (p.get('decision') === 'deny') {
@@ -233,15 +246,15 @@ export class HostedOAuth {
         res.writeHead(303, { Location: destination }); res.end(); return true;
       }
       if (path === '/oauth/token' && req.method === 'POST') {
-        send(200, await this.exchange(await payload(req) as URLSearchParams)); return true;
+        send(200, await this.exchange(await payload(req))); return true;
       }
       if (path === '/oauth/revoke' && req.method === 'POST') {
-        const p = await payload(req) as URLSearchParams;
+        const p = await payload(req);
         const token = required(p.get('token')), app = required(p.get('client_id'));
         await transaction(this.pool, async client => {
-          const { rows } = await client.query(`SELECT t.user_id FROM cinev_oauth_tokens t JOIN cinev_oauth_grants g ON g.user_id=t.user_id
+          const { rows: [row] } = await client.query<{ user_id: string }>(`SELECT t.user_id FROM cinev_oauth_tokens t JOIN cinev_oauth_grants g ON g.user_id=t.user_id
             WHERE t.token_hash=$1 AND g.app_id=$2 AND g.resource=$3`, [digest(token), app, this.resource]);
-          if (rows[0] && await lockUser(client, rows[0].user_id)) await revoke(client, rows[0].user_id);
+          if (row && await lockUser(client, row.user_id)) await revoke(client, row.user_id);
         });
         send(200, {}); return true;
       }
