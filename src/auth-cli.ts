@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { AuthProvider, login, SessionStore } from './auth/sessions.js';
+import { AuthProvider, SessionStore } from './auth/sessions.js';
+import { login } from './auth/login.js';
 import { readCredentials } from './auth/credentials-prompt.js';
 
 async function main() {
