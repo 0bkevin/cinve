@@ -108,7 +108,6 @@ const operationItemSchemas = {
   }),
 } as const;
 
-export type OperationItem = z.infer<(typeof operationItemSchemas)[Operation]>;
 export function operationItemSchema<Op extends Operation>(op: Op): (typeof operationItemSchemas)[Op];
 export function operationItemSchema(op: Operation) {
   return operationItemSchemas[op];

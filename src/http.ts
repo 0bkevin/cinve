@@ -283,7 +283,6 @@ export class HttpClient {
   private touch(entry: CacheEntry) {
     for (const key of entry.keys) if (this.cache.get(key) === entry) { this.cache.delete(key); this.cache.set(key, entry); }
   }
-  private evict(url: string) { const entry = this.cache.get(url); if (entry) this.evictEntry(entry); }
   private evictEntry(entry: CacheEntry) {
     for (const key of entry.keys) if (this.cache.get(key) === entry) this.cache.delete(key);
     this.cacheBytes -= entry.bytes;
