@@ -14,16 +14,19 @@ function upstreamSchema(schema: JsonSchemaType): StandardSchemaWithJSON {
   return { '~standard': { ...published, validate: (value: unknown) => ({ value }) } };
 }
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
+import { isObj } from '../core.js';
+import { object } from '../providers/parsing.js';
 
 export async function remoteConfig(path: string) {
   const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const stat = await file.stat();
     if (!stat.isFile() || stat.size > 8192 || (stat.mode & 0o077)) throw new Error('El archivo de conexión debe ser privado (0600).');
-    const data = JSON.parse(await file.readFile('utf8'));
-    const url = new URL(data.url);
-    if (url.protocol !== 'https:' || url.username || url.password || url.hash || url.search || url.pathname !== '/mcp' || typeof data.token !== 'string' || !/^cv_[a-f0-9-]{36}\.[a-f0-9]{64}$/.test(data.token)) throw new Error('Configuración remota no válida.');
-    return { url: url.href, token: data.token as string };
+    const data = object(JSON.parse(await file.readFile('utf8'))), { token } = data;
+    // String() is the conversion new URL() applies to a non-string anyway.
+    const url = new URL(String(data.url));
+    if (url.protocol !== 'https:' || url.username || url.password || url.hash || url.search || url.pathname !== '/mcp' || typeof token !== 'string' || !/^cv_[a-f0-9-]{36}\.[a-f0-9]{64}$/.test(token)) throw new Error('Configuración remota no válida.');
+    return { url: url.href, token };
   } finally { await file.close(); }
 }
 /** Longer than the hosted function's 90 s limit, so the server's own deadline answers first. */
@@ -55,7 +58,7 @@ export async function createRemoteServer(config: { url: string; token: string },
     // update is re-sent to the caller under the caller's token.
     const { progressToken, ...meta } = ctx.mcpReq._meta ?? {};
     const result = await client.callTool(
-      { name, arguments: args as Record<string, unknown>, ...(Object.keys(meta).length ? { _meta: meta } : {}) },
+      { name, ...(isObj(args) ? { arguments: args } : {}), ...(Object.keys(meta).length ? { _meta: meta } : {}) },
       {
         signal: ctx.mcpReq.signal,
         // The SDK's default 60 s would cut off a city-wide fan-out that the
@@ -69,12 +72,14 @@ export async function createRemoteServer(config: { url: string; token: string },
       });
     const { _meta, ...body } = result;
     const forwarded = stripServerIdentity(_meta);
-    return { ...body, ...(forwarded ? { _meta: forwarded } : {}) } as typeof result;
+    return { ...body, ...(forwarded ? { _meta: forwarded } : {}) };
   };
   const register = (tool: UpstreamTool) => server.registerTool(tool.name, {
     ...(tool.title === undefined ? {} : { title: tool.title }), ...(tool.description === undefined ? {} : { description: tool.description }),
     ...(tool.annotations ? { annotations: tool.annotations } : {}),
     ...(tool.icons ? { icons: tool.icons } : {}), ...(tool._meta ? { _meta: tool._meta } : {}),
+    // The client SDK's listed schema type marks absent fields `| undefined`;
+    // the server SDK's JsonSchemaType does not, so the two do not unify.
     inputSchema: upstreamSchema(tool.inputSchema as JsonSchemaType),
     ...(tool.outputSchema ? { outputSchema: upstreamSchema(tool.outputSchema as JsonSchemaType) } : {}),
   }, callUpstream(tool.name));

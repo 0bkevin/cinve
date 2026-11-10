@@ -20,13 +20,15 @@ const paging = {
   limit: z.number().int().min(1).max(100).default(50),
 };
 const provider = Provider.describe('Proveedor de cine; obtén capacidades y limitaciones con list_providers.');
-const cinemaId = Id.describe('ID de sede devuelto por list_cinemas del mismo proveedor. No mezcles IDs entre proveedores. Si la sede incluye code_status, usa cinema_id solo cuando sea verified; los IDs directory-* no permiten consultas.');
+const cinemaIdText = 'ID de sede devuelto por list_cinemas del mismo proveedor. No mezcles IDs entre proveedores. Si la sede incluye code_status, usa cinema_id solo cuando sea verified; los IDs directory-* no permiten consultas.';
+const sessionIdText = 'ID de función devuelto por get_showtimes del mismo proveedor.';
+const cinemaId = Id.describe(cinemaIdText);
 const movieId = Id.describe('ID de película devuelto por list_movies del mismo proveedor; opcional en Cinex cuando se consulta una sede completa.');
-const sessionId = Id.describe('ID de función devuelto por get_showtimes del mismo proveedor.');
+const sessionId = Id.describe(sessionIdText);
 // A missing required ID gets the same guidance as the provider-specific checks.
 const missing = (field: string, source: string) => (issue: { input?: unknown }) => issue.input === undefined ? `Se requiere ${field}; obtenlo con ${source}.` : undefined;
-const requiredCinemaId = idString({ error: missing('cinema_id', 'list_cinemas') }).describe(cinemaId.description!);
-const requiredSessionId = idString({ error: missing('session_id', 'get_showtimes') }).describe(sessionId.description!);
+const requiredCinemaId = idString({ error: missing('cinema_id', 'list_cinemas') }).describe(cinemaIdText);
+const requiredSessionId = idString({ error: missing('session_id', 'get_showtimes') }).describe(sessionIdText);
 const schema = z.object({
   provider,
   city: z.string().trim().min(1).max(80).optional().describe('Nombre de ciudad tal como lo devuelve list_cities del mismo proveedor (p. ej. Caracas); no distingue tildes ni mayúsculas en Cines Unidos.'),
@@ -58,8 +60,7 @@ export function inputSchema(op: Operation): z.ZodType<Query> {
     : op === 'prices' ? schema.pick({ provider: true, movie_id: true, offset: true, limit: true, refresh: true }).extend({ cinema_id: requiredCinemaId, session_id: requiredSessionId })
     : op === 'concessions' ? schema.pick({ provider: true, query: true, offset: true, limit: true, refresh: true }).extend({ cinema_id: requiredCinemaId })
     : schema.omit({ session_id: true });
-  return z.preprocess(absentNulls(base.shape), base.superRefine((value, ctx) => {
-    const q = value as Query;
+  return z.preprocess(absentNulls(base.shape), base.superRefine((q: Query, ctx) => {
     const need = (field: 'city' | 'cinema_id' | 'movie_id' | 'session_id') => {
       // Cinepic has two fixed venues: naming them saves the model a discovery call.
       const hint = q.provider === 'cinepic' && field === 'cinema_id' ? ' Usa 123300 (Candelaria) o 123301 (VVIP Lido).' : '';
@@ -84,7 +85,7 @@ export function inputSchema(op: Operation): z.ZodType<Query> {
       if (op === 'movies' && (q.date || q.cinema_id || q.city || q.movie_id)) ctx.addIssue({ code: 'custom', message: 'Cinex movies ofrece catálogo general: usa query para buscar y get_showtimes para filtrar fecha/sede.' });
       if (op === 'showtimes' && q.city && (q.cinema_id || q.movie_id)) ctx.addIssue({ code: 'custom', path: ['city'], message: 'Cinex: usa city sola para todas las sedes de la ciudad, o cinema_id/movie_id sin city.' });
     }
-  })) as unknown as z.ZodType<Query>;
+  }));
 }
 
 /**
@@ -129,7 +130,8 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
     annotations: { ...annotations, openWorldHint: false },
   }, async () => {
     try {
-      const data = { connection: { mode: (publicHosted || accounts ? 'hosted' : 'local') as 'hosted' | 'local', client_authorized: !publicHosted }, providers: await service.authStatus() };
+      const mode: 'hosted' | 'local' = publicHosted || accounts ? 'hosted' : 'local';
+      const data = { connection: { mode, client_authorized: !publicHosted }, providers: await service.authStatus() };
       return { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data };
     } catch {
       throw new Error('No se pudo leer el estado de autenticación. Inténtalo de nuevo más tarde.');
@@ -222,10 +224,10 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
     title: ({
       cities: 'Listar ciudades', cinemas: 'Listar sedes', movies: 'Listar películas',
       showtimes: 'Consultar funciones', prices: 'Consultar tarifas', concessions: 'Consultar caramelería',
-    } as Record<Operation, string>)[op],
+    } satisfies Record<Operation, string>)[op],
     description, inputSchema: inputSchema(op), outputSchema: outputSchema(op), annotations,
   }, async (args, ctx) => {
-    const data = await service.query(op, args as Query, callOptions(ctx, receivedAt));
+    const data = await service.query(op, args, callOptions(ctx, receivedAt));
     if (publicHosted && data.status === 'auth_required') data.warnings = ['El proveedor exige una cuenta para esta consulta. Llama connect_account con este proveedor para iniciar la autorización de Cinve y obtener el enlace privado del cine. Presenta el enlace al usuario; después de conectar, comprueba get_auth_status y repite esta consulta. No busques páginas de acceso en la web ni pidas contraseñas o tokens en el chat. Los datos públicos siguen disponibles. ' + hostedAuthInstructions];
     // A provider-level failure is still a valid Result payload, but MCP clients
     // need isError to distinguish it from an empty/available business result.
