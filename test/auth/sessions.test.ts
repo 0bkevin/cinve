@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, stat, readFile, chmod, symlink } from 'node:fs/promises';
+import { mkdtemp, rm, stat, readFile, chmod, symlink, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CookieJar } from 'tough-cookie';
@@ -8,6 +8,8 @@ import { SessionStore } from '../../src/auth/sessions.js';
 import { HttpClient } from '../../src/http/client.js';
 import { CinemaService } from '../../src/service.js';
 import { DataError } from '../../src/core.js';
+import { spawnSync } from 'node:child_process';
+import { login } from '../../src/auth/login.js';
 
 const ticketUrl = 'https://gateway.cinesunidos.com/tickets/www/theaters/1002/sessions/s1/';
 async function fixture(t: { after(fn: () => Promise<void>): void }) {
@@ -72,4 +74,36 @@ test('authenticated 401 returns auth_required without leaking bearer or response
   const service = new CinemaService(new HttpClient(async () => new Response('PRIVATE_PROFILE', { status: 401 }), 1000, store));
   const result = await service.query('prices', { provider: 'cinesunidos', cinema_id: '1002', session_id: 's1' });
   assert.equal(result.status, 'auth_required'); assert.ok(!/SYNTHETIC_TOKEN|PRIVATE_PROFILE/.test(JSON.stringify(result)));
+});
+
+test('session FIFO fails promptly and logout cannot follow a symlinked directory', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'cinev-file-auth-')); t.after(() => rm(dir, { recursive: true, force: true }));
+  const store = new SessionStore(join(dir, 'sessions')); await mkdir(store.directory, { mode: 0o700 });
+  const fifo = spawnSync('mkfifo', [join(store.directory, 'cinex.json')]); assert.equal(fifo.status, 0);
+  await assert.rejects(store.read('cinex'), DataError);
+  const outside = join(dir, 'outside'); await mkdir(outside); await writeFile(join(outside, 'cinex.json'), 'DO_NOT_DELETE');
+  await symlink(outside, join(dir, 'link'));
+  await assert.rejects(new SessionStore(join(dir, 'link')).remove('cinex'));
+  assert.equal(await readFile(join(outside, 'cinex.json'), 'utf8'), 'DO_NOT_DELETE');
+});
+
+test('a session Cinex refuses is recorded as expired, but a newer login is kept', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'cinev-expire-')); t.after(() => rm(dir, { recursive: true, force: true }));
+  const store = new SessionStore(join(dir, 'sessions'));
+  const jar = JSON.stringify({ version: 'tough-cookie@4.1.4', storeType: 'MemoryCookieStore', rejectPublicSuffixes: true, cookies: [{ key: 'PHPSESSID', value: 'x', domain: 'www.cinex.com.ve', path: '/', hostOnly: true, creation: new Date().toISOString(), lastAccessed: new Date().toISOString() }] });
+  const save = (saved_at?: number) => store.save({ version: 1, provider: 'cinex', expires_at: Date.now() + 3600000, cookie_jar: jar, ...(saved_at ? { saved_at } : {}) });
+  // Cinex answers "off": the next get_auth_status must not say configured.
+  let calls = 0;
+  const service = new CinemaService(new HttpClient(async url => { calls++; return new Response(String(url).endsWith('checklogin.php') ? 'off' : ''); }, 15000, store));
+  await save(Date.now() - 1000);
+  const seats = await service.seats({ provider: 'cinex', cinema_id: 'SBC', session_id: 's1' });
+  assert.equal(seats.status, 'auth_required'); assert.equal(calls, 1);
+  assert.equal((await store.status('cinex')).status, 'expired');
+  // Sessions saved before saved_at existed are treated as old.
+  await save(); await store.expire('cinex', Date.now());
+  assert.equal((await store.status('cinex')).status, 'expired');
+  // A login saved after the refused check started is newer than the refusal.
+  const checkStarted = Date.now() - 5000;
+  await save(Date.now()); await store.expire('cinex', checkStarted);
+  assert.equal((await store.status('cinex')).status, 'configured');
 });

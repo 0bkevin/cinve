@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CinemaService } from '../../src/service.js';
 import { HttpClient } from '../../src/http/client.js';
-import { cpBuy, cpSessions, mockFetch, page, EmptySessionStore } from '../helpers/fixtures.js';
+import { cpBuy, cpSessions, mockFetch, page, EmptySessionStore, concessions } from '../helpers/fixtures.js';
 
 const service = () => new CinemaService(new HttpClient(mockFetch, 15000, new EmptySessionStore()));
 
@@ -154,4 +154,11 @@ test('Cinepic keeps explicitly unverified known sites if both sites fail, withou
   assert.equal(r.total, 2); assert.equal(r.partial, true); assert.equal(r.sources.length, 0);
   assert.ok(r.items.every(i => i.code_status === 'unverified' && i.cinema_id === undefined));
   assert.ok(r.warnings.some(w => w.includes('no hay descubrimiento automático')));
+});
+
+test('explicit Cinepic provider failure is distinct from an unrecognized page schema', async () => {
+  const html = page({ shell: true }) + '<div>No pudimos mostrar la función. (Ref: AC-001)</div>';
+  const service = new CinemaService(new HttpClient(async () => new Response(html)));
+  const r = await service.query('prices', { provider: 'cinepic', cinema_id: '123300', movie_id: 'p1', session_id: 'f1' });
+  assert.equal(r.status, 'unavailable'); assert.match(r.warnings[0], /AC-001/); assert.equal(r.sources.length, 1);
 });

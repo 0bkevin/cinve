@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { CinemaService } from '../src/service.js';
 import { HttpClient } from '../src/http/client.js';
 import { inputSchema } from '../src/mcp/server.js';
-import { mockFetch, EmptySessionStore } from './helpers/fixtures.js';
+import { mockFetch, EmptySessionStore, cpBuy, concessions, page } from './helpers/fixtures.js';
 
 const service = () => new CinemaService(new HttpClient(mockFetch, 15000, new EmptySessionStore()));
 
@@ -57,4 +57,21 @@ test('all providers block nonqueryable directory identifiers before network or a
     }
   }
   assert.equal(calls, 0);
+});
+
+test('malformed conversion cannot escape the structured result handler, even off the requested page', async () => {
+  const data = structuredClone(cpBuy); data.configData.tasaConversion = '1e-320';
+  const service = new CinemaService(new HttpClient(async () => new Response(page(data))));
+  const r = await service.query('prices', { provider: 'cinepic', cinema_id: '123300', movie_id: 'p1', session_id: 'f1', offset: 100 });
+  assert.equal(r.status, 'error'); assert.deepEqual(r.items, []); assert.equal(r.total, 0);
+});
+
+test('unsafe upstream links are omitted without losing useful product data', async () => {
+  for (const url of ['javascript:alert(1)', 'data:text/html,hello', 'https://secret@example.test/image', 'file:///etc/passwd']) {
+    const data = structuredClone(concessions).map(r => ({ ...r, itemImageUrl: url }));
+    const service = new CinemaService(new HttpClient(async () => new Response(JSON.stringify(data))));
+    const r = await service.query('concessions', { provider: 'cinesunidos', cinema_id: '1002' });
+    assert.equal(r.status, 'available'); assert.ok(r.items.every(i => i.image_url === undefined));
+    assert.equal(JSON.stringify(r).includes(url), false); assert.ok(r.warnings.some(w => w.includes('HTTPS')));
+  }
 });

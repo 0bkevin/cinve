@@ -59,3 +59,18 @@ test('HTTP Keycloak flow keeps state cookies and stores only the bearer and its 
   assert.equal((await store.read('cinesunidos'))?.expires_at, exp * 1000);
   assert.ok(!/SYNTHETIC_PASSWORD|PRIVATE_PROFILE|PRIVATE_ID_TOKEN|auth_session|csrf/.test(saved));
 });
+
+test('upstream exceptions cannot masquerade as safe login messages', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'cinev-error-auth-')); t.after(() => rm(dir, { recursive: true, force: true }));
+  await assert.rejects(login('cinex', 'person@example.test', 'SYNTHETIC_PASSWORD', new SessionStore(dir), async () => { throw new Error('Cinex SYNTHETIC_PASSWORD PRIVATE_PROFILE'); }), e => e instanceof Error && !/SYNTHETIC_PASSWORD|PRIVATE_PROFILE/.test(e.message));
+});
+test('login redirects share one deadline signal and cannot propagate caller-supplied auth headers', async () => {
+  const signals: unknown[] = []; let calls = 0;
+  const http = new LoginHttp('cinesunidos', async (_, init) => {
+    signals.push(init?.signal); const h = new Headers(init?.headers);
+    assert.equal(h.get('Authorization'), null); assert.equal(h.get('Cookie'), null);
+    return ++calls === 1 ? new Response(null, { status: 302, headers: { Location: 'https://www.cinesunidos.com/' } }) : new Response('ok');
+  });
+  await http.read('https://keycloak.cinesunidos.com/', { headers: { Authorization: 'SECRET', Cookie: 'secret=SECRET' } });
+  assert.equal(calls, 2); assert.equal(signals[0], signals[1]);
+});

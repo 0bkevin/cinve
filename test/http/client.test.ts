@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { decodeBody } from '../../src/http/response.js';
 import { SessionStore } from '../../src/auth/sessions.js';
 import { EmptySessionStore } from '../helpers/fixtures.js';
+import { setTimeout as delay, setImmediate as tick } from 'node:timers/promises';
 
 const origin = 'https://gateway.cinesunidos.com';
 
@@ -123,3 +124,31 @@ async function store(t: { after(fn: () => Promise<void>): void }) {
   t.after(() => rm(dir, { recursive: true, force: true }));
   return new SessionStore(join(dir, 'sessions'));
 }
+
+test('queues reject overload instead of growing without a limit', async () => {
+  let release!: () => void; const gate = new Promise<void>(r => { release = r; }); let count = 0;
+  const http = new HttpClient(async () => { count++; await gate; return new Response('[]'); });
+  const pending = Array.from({ length: 40 }, (_, i) => http.get(`https://gateway.cinesunidos.com/load/${i}`).then(() => 'ok', e => e.status));
+  await tick(); release(); const results = await Promise.all(pending);
+  assert.equal(results.filter(r => r === 'rate_limited').length, 6); assert.equal(count, 34);
+});
+test('queue wait consumes the deadline and expired queued work never reaches fetch', async () => {
+  let release!: () => void; const gate = new Promise<void>(r => { release = r; }); let count = 0;
+  const http = new HttpClient(async () => { count++; await gate; return new Response('[]'); }, 25);
+  const active = [http.get('https://gateway.cinesunidos.com/hold/1'), http.get('https://gateway.cinesunidos.com/hold/2')].map(p => p.catch(() => null));
+  const queued = http.get('https://gateway.cinesunidos.com/hold/3');
+  await Promise.all([assert.rejects(queued, /cola/), delay(50)]);
+  release(); await Promise.all(active); assert.equal(count, 2);
+});
+
+test('queued authenticated work rechecks logout before sending credentials', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'cinev-queued-auth-')); t.after(() => rm(dir, { recursive: true, force: true }));
+  const store = new SessionStore(join(dir, 'sessions'));
+  await store.save({ version: 1, provider: 'cinesunidos', expires_at: Date.now() + 60000, access_token: 'SYNTHETIC_TOKEN' });
+  let release!: () => void; const gate = new Promise<void>(r => { release = r; }); let count = 0;
+  const http = new HttpClient(async () => { count++; await gate; return new Response('[]'); }, 1000, store);
+  const active = [http.get('https://gateway.cinesunidos.com/hold/1'), http.get('https://gateway.cinesunidos.com/hold/2')];
+  const queued = http.getAuthenticated('cinesunidos', 'https://gateway.cinesunidos.com/tickets/www/theaters/1002/sessions/s1/');
+  const rejected = assert.rejects(queued, e => e instanceof DataError && e.status === 'auth_required');
+  await tick(); await store.remove('cinesunidos'); release(); await Promise.all([...active, rejected]); assert.equal(count, 2);
+});

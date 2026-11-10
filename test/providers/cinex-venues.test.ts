@@ -4,6 +4,7 @@ import { CinemaService } from '../../src/service.js';
 import { CinexCinemaCatalog } from '../../src/providers/cinex/venues.js';
 import { HttpClient } from '../../src/http/client.js';
 import { outputSchema } from '../../src/core.js';
+import { concessions, page } from '../helpers/fixtures.js';
 
 const base = 'https://www.cinex.com.ve';
 const card = (slug: string, name: string, image: string, city = 'Caracas') => `<a href="cinex-${slug}.html" title="Cinex ${name}, ${city}"><img src="${base}/assets/images/cinemas/${image}"><h3>${name}</h3></a>`;
@@ -344,4 +345,11 @@ test('Cinex areas from list_cities include the venues the directory labels with 
   assert.deepEqual(await names('Punto Fijo'), [['SAMBIL PARAGUANA', 'Punto Fijo']], 'the town itself still works');
   const none = await s.query('cinemas', { provider: 'cinex', city: 'Atlantis' });
   assert.equal(none.total, 0); assert.ok(none.warnings.some(w => /Ninguna sede del directorio Cinex corresponde/.test(w)), none.warnings.join(' | '));
+});
+
+test('untrusted cinema detail href cannot change the requested route', async () => {
+  let calls = 0;
+  const service = new CinemaService(new HttpClient(async () => { calls++; return new Response('<a href="cinex-x/../../assets/php/action.php" title="Sede, Caracas"><h3>Sede</h3></a>'); }));
+  const r = await service.query('cinemas', { provider: 'cinex' });
+  assert.equal(calls, 1); assert.equal(r.partial, true); assert.equal(r.items.length, 0);
 });

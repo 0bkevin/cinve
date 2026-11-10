@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { parseCinesUnidosPrices } from '../../src/providers/cinesunidos/prices.js';
 import { CinemaService } from '../../src/service.js';
 import { HttpClient } from '../../src/http/client.js';
-import { mockFetch, page, EmptySessionStore } from '../helpers/fixtures.js';
+import { mockFetch, page, EmptySessionStore, cuMovies, concessions } from '../helpers/fixtures.js';
+import { inputSchema } from '../../src/mcp/server.js';
 
 const url = 'https://www.cinex.com.ve/boletos.php?cinemaid=TLN&sessionid=s1';
 
@@ -101,4 +102,14 @@ test('CU movie catalogs also combine component blocks rather than accepting the 
   const html = page({ movies: [] }) + page({ movies: [{ vistaId: 'M', title: 'Movie', theaters: [{ id: '1002', showTimes: [{ id: 'S', date: '2026-09-18T18:00:00' }] }] }] });
   const r = await cu(html).query('movies', { ...cq, date: '2026-09-18' });
   assert.equal(r.total, 1); assert.equal(r.items[0].id, 'M');
+});
+
+test('invalid dates and unusable upstream IDs fail visibly instead of returning bad showtimes', async () => {
+  for (const patch of [{ date: '2026-09-11T29:99:99' }, { id: '../../unsafe' }]) {
+    const data = structuredClone(cuMovies); Object.assign(data.movies[0].theaters[0].showTimes[0], patch);
+    const service = new CinemaService(new HttpClient(async () => new Response(page(data))));
+    const r = await service.query('showtimes', { provider: 'cinesunidos', city: 'Caracas', date: '2026-09-11' });
+    assert.equal(r.status, 'error'); assert.deepEqual(r.items, []);
+  }
+  assert.equal(inputSchema('prices').safeParse({ provider: 'cinex', cinema_id: 'TLN', session_id: 's1', movie_id: 'ignored' }).success, false);
 });

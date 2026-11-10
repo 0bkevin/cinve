@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { HttpClient } from '../../src/http/client.js';
 import { ReadContext } from '../../src/http/read-context.js';
 import { DataError } from '../../src/core.js';
+import { SessionStore } from '../../src/auth/sessions.js';
+import { page } from '../helpers/fixtures.js';
 
 const origin = 'https://gateway.cinesunidos.com';
 
@@ -90,4 +92,11 @@ test('public Cinex redirect handling cannot escape or broaden beyond cinema deta
     await assert.rejects(http.get('https://www.cinex.com.ve/cinex-sambil.html'), e => e instanceof DataError && e.status === 'unavailable');
     assert.equal(calls, 1);
   }
+});
+
+test('Cinex expiry redirect becomes auth_required and redirects are never followed', async () => {
+  let calls = 0; class Store extends SessionStore { override async headers() { return { Cookie: 'PHPSESSID=SYNTHETIC' }; } }
+  const http = new HttpClient(async () => { calls++; return new Response(null, { status: 302, headers: { Location: '/clearsession.html' } }); }, 1000, new Store());
+  await assert.rejects(http.getAuthenticated('cinex', 'https://www.cinex.com.ve/concesiones.php?cinemaid=TLN'), e => e instanceof DataError && e.status === 'auth_required');
+  assert.equal(calls, 1);
 });
