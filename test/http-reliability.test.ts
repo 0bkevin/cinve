@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { HttpClient, ReadContext, decodeBody } from '../src/http.js';
+import { SessionStore } from '../src/auth.js';
 import { CinemaService } from '../src/service.js';
 import { DataError } from '../src/core.js';
 import { EmptySessionStore } from './fixtures.js';
@@ -107,4 +111,29 @@ test('a failing session store is reported as Cinve failing, not the provider', a
   await assert.rejects(http.getAuthenticated('cinex', 'https://www.cinex.com.ve/checklogin.php'),
     e => e instanceof DataError && /Cinve no pudo leer la sesión guardada/.test(e.message) && !/conectar con el proveedor/.test(e.message));
   assert.equal(calls, 0);
+});
+
+const cinexJar = JSON.stringify({ version: 'tough-cookie@4.1.4', storeType: 'MemoryCookieStore', rejectPublicSuffixes: true, cookies: [{ key: 'PHPSESSID', value: 'x', domain: 'www.cinex.com.ve', path: '/', hostOnly: true, creation: new Date().toISOString(), lastAccessed: new Date().toISOString() }] });
+async function store(t: { after(fn: () => Promise<void>): void }) {
+  const dir = await mkdtemp(join(tmpdir(), 'cinev-http-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  return new SessionStore(join(dir, 'sessions'));
+}
+
+test('an unexpected Cinex login-check answer is not reported or recorded as an expired session', async t => {
+  const sessions = await store(t);
+  await sessions.save({ version: 1, provider: 'cinex', expires_at: Date.now() + 3600000, saved_at: Date.now() - 1000, cookie_jar: cinexJar });
+  const service = new CinemaService(new HttpClient(async () => new Response('<html>Error interno</html>'), 15000, sessions));
+  const r = await service.query('prices', { provider: 'cinex', cinema_id: 'SBC', session_id: 's1' });
+  assert.equal(r.status, 'error'); assert.match(r.warnings.join(' '), /de forma inesperada/);
+  assert.equal((await sessions.status('cinex')).status, 'configured');
+});
+
+test('a provider refusing the saved session (HTTP 401) marks it expired with a clear message', async t => {
+  const sessions = await store(t);
+  await sessions.save({ version: 1, provider: 'cinesunidos', expires_at: Date.now() + 3600000, saved_at: Date.now() - 1000, access_token: 'SYNTHETIC_TOKEN' });
+  const service = new CinemaService(new HttpClient(async () => new Response('', { status: 401 }), 15000, sessions));
+  const r = await service.query('prices', { provider: 'cinesunidos', cinema_id: '1002', session_id: 's1' });
+  assert.equal(r.status, 'auth_required'); assert.match(r.warnings.join(' '), /rechazó la sesión guardada/);
+  assert.equal((await sessions.status('cinesunidos')).status, 'expired');
 });

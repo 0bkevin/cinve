@@ -380,6 +380,7 @@ export class HttpClient {
       }
       if (!response.ok) {
         const status = response.status === 401 ? 'auth_required' : response.status === 403 ? 'blocked' : response.status === 429 ? 'rate_limited' : response.status === 404 ? 'unavailable' : 'error';
+        if (authorize && response.status === 401) { cancelBody(response.body); throw new DataError(status, 'El proveedor rechazó la sesión guardada de la cuenta (HTTP 401); conéctala de nuevo.'); }
         cancelBody(response.body);
         // An interactive anti-bot challenge is an explicit refusal of automated
         // clients. Report it as such; Cinve never tries to solve or evade it.
@@ -544,16 +545,33 @@ export class ReadContext {
   exclusive<T>(provider: AuthProviderId, fn: () => Promise<T>): Promise<T> {
     return exclusive(this.http.sessions.accountKey(provider), fn);
   }
-  /** Cinex's own login check. A refused session is recorded as expired, so get_auth_status tells the truth. */
+  /**
+   * Cinex's own login check: "on" or "off" (observed 2026-11-10). A refused
+   * session is recorded as expired, so get_auth_status tells the truth. Any
+   * other answer is Cinex failing, not the session: it is neither recorded
+   * nor reported as auth_required.
+   */
   async cinexSessionActive(): Promise<boolean> {
     const started = Date.now();
-    if ((await this.authenticated('cinex', 'https://www.cinex.com.ve/checklogin.php')).trim() === 'on') return true;
+    const answer = (await this.authenticated('cinex', 'https://www.cinex.com.ve/checklogin.php')).trim();
+    if (answer === 'on') return true;
+    if (answer !== 'off') throw new DataError('error', 'Cinex respondió de forma inesperada al comprobar la sesión, así que no se pudo confirmar si sigue activa; no se marcó como expirada. Inténtalo de nuevo más tarde.');
     try { await this.http.sessions.expire('cinex', started); } catch { /* the answer is auth_required either way */ }
     return false;
   }
   async authenticated(provider: AuthProviderId, url: string): Promise<string> {
     this.checkCanRead();
-    const page = await this.http.getAuthenticated(provider, url);
+    const started = Date.now();
+    let page: Page;
+    try { page = await this.http.getAuthenticated(provider, url); }
+    catch (error) {
+      // The provider refused the saved session (HTTP 401, a redirect to its
+      // login). Record that, so get_auth_status does not keep saying configured.
+      if (error instanceof DataError && error.status === 'auth_required') {
+        try { await this.http.sessions.expire(provider, started); } catch { /* the answer is auth_required either way */ }
+      }
+      throw error;
+    }
     if (!this.sources.some(s => s.url === page.source.url)) this.sources.push(page.source);
     return page.body;
   }
