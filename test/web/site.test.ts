@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fixture } from '../helpers/hosted.js';
 import { defined } from '../helpers/assert.js';
+import { fakeElements, runScript } from '../helpers/browser.js';
+import { installationPage, landingPage } from '../../src/web/site.js';
 
 test('the install guide carries the seat rules and no code download', async t => {
   const f = await fixture(t);
@@ -41,4 +43,23 @@ test('public pages use the configured origin and serve local fonts under the aut
   const error = await fetch(f.origin + '/oauth/authorize');
   assert.equal(error.status, 400);
   assert.ok((await error.text()).includes('No se pudo autorizar la conexión.'));
+});
+
+test('the served /site.js parses and copies the install message on the landing and install pages', async t => {
+  const f = await fixture(t), served = await fetch(f.origin + '/site.js');
+  assert.equal(served.headers.get('content-type'), 'text/javascript; charset=utf-8');
+  const script = await served.text();
+  for (const html of [landingPage('https://cinve.example'), installationPage('https://cinve.example')]) {
+    for (const fails of [false, true]) {
+      const elements = fakeElements(html), copied: string[] = [];
+      const clipboard = { writeText: async (text: string) => { if (fails) throw new Error('denied'); copied.push(text); } };
+      runScript(script, elements, { navigator: { clipboard } });
+      const button = defined(elements.get('copy-install'));
+      assert.equal(button.hidden, false, 'the copy button appears once the script runs');
+      await defined(button.onclick)();
+      assert.deepEqual(copied, fails ? [] : ['Instala Cinve siguiendo https://cinve.example/install']);
+      assert.equal(defined(elements.get('copy-feedback')).textContent, fails
+        ? 'Selecciona el mensaje y cópialo para enviarlo a tu asistente.' : 'Mensaje copiado. Pégalo en tu asistente.');
+    }
+  }
 });

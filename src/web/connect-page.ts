@@ -12,6 +12,10 @@ export function loginPage() {
 <button id="done" class="secondary">Cancelar conexión</button><p class="note">Cinepic funciona sin cuenta. Vuelve a tu asistente después de conectar. Este enlace caduca en 10 minutos.</p><noscript><p>Activa JavaScript para conectar tu cuenta.</p></noscript>`, { compact: true, script: '/app.js' });
 }
 
+// Served as /app.js. A plain string on purpose: serving a typed function's
+// toString() would ship whatever the running compiler emitted, and tsx (tests,
+// npm run dev) injects esbuild's __name() helper into it. test/web/connect-page
+// runs this exact text against the /connect page instead.
 export const loginScript = `
 const invitation = location.hash.slice(1);
 history.replaceState(null, '', '/connect');
