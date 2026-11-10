@@ -32,3 +32,17 @@ test('refresh survives tool validation and reaches every public source read', as
   assert.equal(first.items[0].name, 'City 1'); assert.equal(second.items[0].name, 'City 2');
   assert.equal(second.sources[0].cached, false);
 });
+
+test('service caps distinct and repeated provider warnings with an explicit aggregate', async () => {
+  const data = Array.from({ length: 200 }, (_, i) => ({ itemId: `item-${i}`, itemDescription: `Product ${i}` }));
+  const service = new CinemaService(new HttpClient(async input => {
+    if (new URL(String(input)).pathname.includes('/concessions/')) return Response.json(data);
+    return new Response('unexpected', { status: 404 });
+  }));
+  const result = await service.query('concessions', { provider: 'cinesunidos', cinema_id: '1002' });
+  assert.equal(result.status, 'available');
+  assert.equal(result.total, 200);
+  assert.ok(result.warnings.length <= 64);
+  assert.ok(result.warnings.join('').length <= 8192);
+  assert.ok(result.warnings.some(w => /Se omitieron/.test(w)));
+});

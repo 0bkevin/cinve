@@ -101,3 +101,18 @@ test('invalid ticket amount is an error rather than zero', async () => {
   const r = await s.query('prices', { provider: 'cinepic', cinema_id: '123300', movie_id: 'p1', session_id: 'f1' });
   assert.equal(r.status, 'error');
 });
+
+test('Cinepic omits unknown subtitle and overnight flags and marks the result partial', async () => {
+  const payload = { success: true, data: {
+    datos: [{ peliculas_codigo: 'p1', peliculas_nombre: 'Movie' }],
+    funciones: [{ _id: 'f1', codPelicula: 'p1', hora: '20:00', subtitulada: 'unknown', trasnoche: 'unknown' }],
+  } };
+  const service = new CinemaService(new HttpClient(async () => Response.json(payload)));
+  const result = await service.query('showtimes', { provider: 'cinepic', cinema_id: '123300', date: '2026-09-18' });
+  assert.equal(result.status, 'available');
+  assert.equal(result.partial, true);
+  assert.equal(result.items[0].language, undefined);
+  assert.equal(result.items[0].starts_at, undefined);
+  assert.ok(result.warnings.some(w => /subtítulos/.test(w)));
+  assert.ok(result.warnings.some(w => /trasnoche/.test(w)));
+});
