@@ -101,7 +101,7 @@ export class EncryptedSessionStore extends SessionStore {
     await transaction(this.pool, async client => {
       if (!await lockUser(client, this.user)) return;
       const s = await this.readWith(client, provider);
-      if (s && (s.saved_at ?? 0) <= notAfter && s.expires_at > Date.now()) await this.saveInTransaction(client, { ...s, expires_at: Date.now() });
+      if (this.refused(provider, s, notAfter)) await this.saveInTransaction(client, { ...s, expires_at: Date.now() });
     });
   }
   override async status(provider: AuthProviderId) { return { ...await super.status(provider), login_command: 'connect_account' }; }

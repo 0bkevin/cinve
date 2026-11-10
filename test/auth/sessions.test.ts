@@ -99,11 +99,28 @@ test('a session Cinex refuses is recorded as expired, but a newer login is kept'
   const seats = await service.seats({ provider: 'cinex', cinema_id: 'SBC', session_id: 's1' });
   assert.equal(seats.status, 'auth_required'); assert.equal(calls, 1);
   assert.equal((await store.status('cinex')).status, 'expired');
-  // Sessions saved before saved_at existed are treated as old.
-  await save(); await store.expire('cinex', Date.now());
+  // Sessions saved before saved_at existed are treated as old. As in a real
+  // refusal, a read hands the session out before it is expired.
+  await save(); await store.headers('cinex', 'https://www.cinex.com.ve/checklogin.php'); await store.expire('cinex', Date.now());
   assert.equal((await store.status('cinex')).status, 'expired');
   // A login saved after the refused check started is newer than the refusal.
   const checkStarted = Date.now() - 5000;
   await save(Date.now()); await store.expire('cinex', checkStarted);
   assert.equal((await store.status('cinex')).status, 'configured');
+});
+
+test('a refusal only expires the login the failed read actually sent', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'cinev-expire-')); t.after(() => rm(dir, { recursive: true, force: true }));
+  const store = new SessionStore(dir);
+  const started = Date.now();
+  await store.save({ ...cuSession('OLD_TOKEN'), saved_at: started - 5000 });
+  await store.headers('cinesunidos', 'https://gateway.cinesunidos.com/tickets/www/theaters/1002/sessions/s1/');
+  // A new connection is committed while that read is in flight, stamped just before the read began.
+  await store.save({ ...cuSession('NEW_TOKEN'), saved_at: started - 1 });
+  await store.expire('cinesunidos', started);
+  assert.equal((await store.status('cinesunidos')).status, 'configured', 'the new login was not the one refused');
+  // The login a read did send is still expired on refusal.
+  await store.headers('cinesunidos', 'https://gateway.cinesunidos.com/tickets/www/theaters/1002/sessions/s1/');
+  await store.expire('cinesunidos', Date.now());
+  assert.equal((await store.status('cinesunidos')).status, 'expired');
 });

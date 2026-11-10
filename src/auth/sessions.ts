@@ -25,6 +25,18 @@ export class SessionStore {
   private path(p: AuthProviderId) { return join(this.directory, `${AuthProvider.parse(p)}.json`); }
   /** Names the provider account whose server-side session these credentials share. */
   accountKey(p: AuthProviderId) { return `local:${this.directory}:${p}`; }
+  /** saved_at of the login whose credentials this store last handed to a read, per provider. */
+  private sent = new Map<AuthProviderId, number>();
+  /**
+   * Whether a refusal seen by a read that started at notAfter applies to the
+   * stored session `s`: it is not newer than the read, it is the login that
+   * read actually sent (a connection committed mid-read is not), and it has
+   * not already expired.
+   */
+  protected refused(p: AuthProviderId, s: AuthSession | undefined, notAfter: number): s is AuthSession {
+    const savedAt = s?.saved_at ?? 0, sent = this.sent.get(p);
+    return !!s && savedAt <= notAfter && (sent === undefined || sent === savedAt) && s.expires_at > Date.now();
+  }
   async read(p: AuthProviderId): Promise<AuthSession | undefined> {
     try {
       const dir = await lstat(this.directory);
@@ -70,7 +82,7 @@ export class SessionStore {
    */
   async expire(p: AuthProviderId, notAfter: number) {
     const s = await this.read(p);
-    if (s && (s.saved_at ?? 0) <= notAfter && s.expires_at > Date.now()) await this.save({ ...s, expires_at: Date.now() });
+    if (this.refused(p, s, notAfter)) await this.save({ ...s, expires_at: Date.now() });
   }
   async status(p: AuthProviderId) {
     try {
@@ -83,6 +95,7 @@ export class SessionStore {
     assertPrivateRead(p, url);
     const s = await this.read(p);
     if (!s || s.expires_at <= Date.now()) throw new DataError('auth_required', loginHint(p));
+    this.sent.set(p, s.saved_at ?? 0);
     if (p === 'cinesunidos') return { Authorization: `Bearer ${s.access_token}`, xChannel: 'www' };
     try {
       const cookie = await CookieJar.deserializeSync(s.cookie_jar!).getCookieString(url);
