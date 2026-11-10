@@ -20,6 +20,10 @@ const cacheEntries = 512, cacheBytesLimit = 64 * 1024 * 1024;
 const challengeMemoryMs = 10 * 60 * 1000;
 const hosts = new Set(['www.cinex.com.ve', 'www.cinesunidos.com', 'gateway.cinesunidos.com', 'cinepiccandelaria.com', 'cinepicvip.com', 'apifront.cinexo.com.ar', 'api.cinexo.com.ar']);
 
+/** Gateway errors from an edge proxy, and resets of reused connections, are worth one more try. */
+const transientStatus = (status: number) => status === 502 || status === 504;
+const retryPause = () => 200 + Math.floor(Math.random() * 300);
+
 /**
  * Decodes with the charset the response declares (UTF-8 when absent or
  * unknown). The observed providers all send UTF-8; a page declared as
@@ -325,7 +329,25 @@ export class HttpClient {
           signal, redirect: 'manual',
         }), signal, response => cancelBody(response.body));
       };
-      let response = await requestPage(url);
+      // Public reads are idempotent GETs: retry once, after a short pause, a
+      // connection that failed before any response (such as a reused
+      // keep-alive socket the server had just closed) or a 502/504 from an
+      // edge proxy, while at least half of this read's deadline remains. Never
+      // 4xx, 429, 503 (maintenance, often with Retry-After), timeouts, or
+      // authenticated reads, whose pages can act on the account's session.
+      const canRetry = () => !authorize && deadline - Date.now() > this.timeout / 2;
+      let response: Response;
+      try { response = await requestPage(url); }
+      catch (error) {
+        if (signal.aborted || error instanceof DataError || !canRetry()) throw error;
+        await withSignal(new Promise(resolve => setTimeout(resolve, retryPause())), signal);
+        response = await requestPage(url);
+      }
+      if (transientStatus(response.status) && canRetry()) {
+        cancelBody(response.body);
+        await withSignal(new Promise(resolve => setTimeout(resolve, retryPause())), signal);
+        response = await requestPage(url);
+      }
       // One observed migration of Cinex's ticket page, with identical cinema
       // and session IDs. Re-read credentials and retain the original deadline.
       const ticketRedirect = authorize && cinexTicketRedirect(url, response);

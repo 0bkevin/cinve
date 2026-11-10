@@ -64,6 +64,34 @@ test('bodies are decoded with their declared charset, and a UTF-8 byte-order mar
   assert.deepEqual(await new ReadContext(http).json(cities), ['Mérida']);
 });
 
+test('a public read retries once after a dropped connection or a 502/504, never after 4xx, 429 or 503', async () => {
+  for (const [first, retried] of [['reset', true], [502, true], [504, true], [503, false], [500, false], [429, false], [404, false], [403, false]] as const) {
+    let calls = 0;
+    const http = new HttpClient(async () => {
+      calls++;
+      if (calls === 1) { if (first === 'reset') throw new TypeError('fetch failed'); return new Response('', { status: first }); }
+      return new Response('["Caracas"]');
+    });
+    const read = http.get(cities);
+    if (retried) assert.equal((await read).body, '["Caracas"]', String(first));
+    else await assert.rejects(read, DataError);
+    assert.equal(calls, retried ? 2 : 1, String(first));
+  }
+  // A second failure is reported, not retried again.
+  let calls = 0;
+  const failing = new HttpClient(async () => { calls++; throw new TypeError('fetch failed'); });
+  await assert.rejects(failing.get(cities), e => e instanceof DataError && /No se pudo conectar con el proveedor/.test(e.message));
+  assert.equal(calls, 2);
+});
+
+test('authenticated reads are never retried', async () => {
+  let calls = 0;
+  const sessions = new class extends EmptySessionStore { override async headers() { return { Authorization: 'Bearer synthetic' }; } };
+  const http = new HttpClient(async () => { calls++; return new Response('', { status: 502 }); }, 15000, sessions);
+  await assert.rejects(http.getAuthenticated('cinesunidos', 'https://gateway.cinesunidos.com/tickets/www/theaters/1002/sessions/s1/'), DataError);
+  assert.equal(calls, 1);
+});
+
 test('a failing session store is reported as Cinve failing, not the provider', async () => {
   let calls = 0;
   const sessions = new class extends EmptySessionStore { override async headers(): Promise<never> { throw new Error('connection terminated'); } };
