@@ -129,6 +129,24 @@ test('an unexpected Cinex login-check answer is not reported or recorded as an e
   assert.equal((await sessions.status('cinex')).status, 'configured');
 });
 
+test('a passed Cinex login check is reused for a minute, and dropped after a failed read', async () => {
+  const requests: string[] = [];
+  const sessions = new class extends EmptySessionStore { override async headers() { return { Cookie: 'synthetic' }; } };
+  const http = new HttpClient(async input => {
+    const path = new URL(String(input)).pathname; requests.push(path);
+    if (path === '/checklogin.php') return new Response('on');
+    if (path === '/concesiones.php') return new Response('', { status: 500 });
+    return new Response('<form id="frmboletos"></form>');
+  }, 15000, sessions);
+  const s = new CinemaService(http);
+  await s.query('prices', { provider: 'cinex', cinema_id: 'SBC', session_id: 's1' });
+  await s.query('prices', { provider: 'cinex', cinema_id: 'SBC', session_id: 's2' });
+  assert.deepEqual(requests, ['/checklogin.php', '/boletos.php', '/boletos.php']);
+  await s.query('concessions', { provider: 'cinex', cinema_id: 'SBC' });
+  await s.query('prices', { provider: 'cinex', cinema_id: 'SBC', session_id: 's3' });
+  assert.deepEqual(requests.slice(3), ['/concesiones.php', '/checklogin.php', '/boletos.php']);
+});
+
 test('a provider refusing the saved session (HTTP 401) marks it expired with a clear message', async t => {
   const sessions = await store(t);
   await sessions.save({ version: 1, provider: 'cinesunidos', expires_at: Date.now() + 3600000, saved_at: Date.now() - 1000, access_token: 'SYNTHETIC_TOKEN' });

@@ -26,6 +26,10 @@ const hosts = new Set(['www.cinex.com.ve', 'www.cinesunidos.com', 'gateway.cines
 // reads, so it stays under the hosted 90 s limit.
 const slowHosts = new Set(['cinepiccandelaria.com', 'cinepicvip.com', 'apifront.cinexo.com.ar', 'api.cinexo.com.ar']);
 const slowHostFactor = 5 / 3;
+// A Cinex login check that answered "on" proves the session was in use just
+// now, and Cinex ends sessions only after many idle minutes. Within this
+// window the check is not repeated; any failed Cinex read drops it.
+const sessionCheckMs = 60000;
 
 /** Gateway errors from an edge proxy, and resets of reused connections, are worth one more try. */
 const transientStatus = (status: number) => status === 502 || status === 504;
@@ -44,6 +48,7 @@ export function decodeBody(bytes: Uint8Array, contentType: string | null): strin
   }
   return new TextDecoder('utf-8').decode(bytes);
 }
+
 function cancelBody(body: ReadableStream<Uint8Array> | null | undefined) {
   if (!body) return;
   try { void body.cancel().catch(() => {}); } catch { /* Best-effort cleanup must not mask the response error. */ }
@@ -133,7 +138,12 @@ export class HttpClient {
   private active = new Map<string, number>();
   private queues = new Map<string, Waiting[]>();
   private challenged = new Map<string, { until: number; error: DataError }>();
+  private sessionChecks = new Map<string, number>();
   constructor(private request: typeof fetch = fetch, private timeout = 15000, readonly sessions = new SessionStore()) {}
+  /** Whether this account's provider login check passed within the last minute. */
+  recentSessionCheck(account: string) { return (this.sessionChecks.get(account) ?? 0) > Date.now(); }
+  rememberSessionCheck(account: string) { this.sessionChecks.set(account, Date.now() + sessionCheckMs); }
+  forgetSessionCheck(account: string) { this.sessionChecks.delete(account); }
   private readTimeout(origin: string) { return slowHosts.has(new URL(origin).hostname) ? Math.round(this.timeout * slowHostFactor) : this.timeout; }
   async getAuthenticated(provider: AuthProviderId, url: string): Promise<Page> {
     assertPrivateRead(provider, url);
@@ -549,12 +559,14 @@ export class ReadContext {
    * Cinex's own login check: "on" or "off" (observed 2026-11-10). A refused
    * session is recorded as expired, so get_auth_status tells the truth. Any
    * other answer is Cinex failing, not the session: it is neither recorded
-   * nor reported as auth_required.
+   * nor reported as auth_required. A pass is reused for one minute.
    */
   async cinexSessionActive(): Promise<boolean> {
+    const account = this.http.sessions.accountKey('cinex');
+    if (this.http.recentSessionCheck(account)) return true;
     const started = Date.now();
     const answer = (await this.authenticated('cinex', 'https://www.cinex.com.ve/checklogin.php')).trim();
-    if (answer === 'on') return true;
+    if (answer === 'on') { this.http.rememberSessionCheck(account); return true; }
     if (answer !== 'off') throw new DataError('error', 'Cinex respondió de forma inesperada al comprobar la sesión, así que no se pudo confirmar si sigue activa; no se marcó como expirada. Inténtalo de nuevo más tarde.');
     try { await this.http.sessions.expire('cinex', started); } catch { /* the answer is auth_required either way */ }
     return false;
@@ -565,6 +577,8 @@ export class ReadContext {
     let page: Page;
     try { page = await this.http.getAuthenticated(provider, url); }
     catch (error) {
+      // A failed read may mean the session ended: check it again next time.
+      if (provider === 'cinex') this.http.forgetSessionCheck(this.http.sessions.accountKey('cinex'));
       // The provider refused the saved session (HTTP 401, a redirect to its
       // login). Record that, so get_auth_status does not keep saying configured.
       if (error instanceof DataError && error.status === 'auth_required') {

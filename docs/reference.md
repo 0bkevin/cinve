@@ -168,6 +168,8 @@ la fuente Inter incluida en `src/assets`, sin depender de fuentes del sistema.
 - Solo se guardan respuestas correctas: un error HTTP, un cuerpo vacío, un JSON
   inválido o una página sin la estructura esperada (por ejemplo, una página de
   mantenimiento) se informan y se vuelven a pedir en la siguiente consulta.
+- Una comprobación de sesión Cinex que responde `on` se reutiliza durante un
+  minuto en el mismo proceso; cualquier lectura Cinex fallida la descarta.
 - Si la comprobación de sesión Cinex responde algo distinto de `on` u `off`, se
   informa como un fallo de Cinex y la sesión no se marca expirada. Si un
   proveedor rechaza la sesión guardada (HTTP 401 o redirección a su login),
