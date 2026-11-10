@@ -11,6 +11,8 @@ User-facing text is Spanish; code and comments are English.
 ```
 server.ts            Vercel entry: the hosted HTTP handler (build:hosted -> .hosted/)
 migrations/          Postgres DDL for the hosted service, applied in order
+                     (only by npm run db:migrate, hosted:admin or scripts/migrate-neon.ts,
+                     never by the Vercel function, so build:hosted does not copy it)
 src/
   index.ts           entry: local stdio MCP server (package bin: dist/index.js)
   remote-main.ts     entry: stdio bridge to a hosted Cinve (npm run start:remote)
