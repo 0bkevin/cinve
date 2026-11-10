@@ -10,7 +10,7 @@ import { parseCinexMovies, parseCinexCinemaShowtimes } from '../src/providers/ci
 import { cuLanguage, cuSiteTitle } from '../src/providers/cinesunidos/adapter.js';
 import type { DataItem } from '../src/core.js';
 import { page } from './fixtures.js';
-import { inputSchema } from '../src/server.js';
+import { inputSchema } from '../src/mcp/server.js';
 
 const epoch = (date: string, time = '18:00') => String(Date.parse(`${date}T${time}:00-04:00`) / 1000);
 
@@ -257,7 +257,7 @@ test('Cinex venue discovery checks its budget before each follow-up read of an a
 test('null arguments from strict function-calling adapters are treated as absent', async () => {
   const { Client } = await import('@modelcontextprotocol/client');
   const { InMemoryTransport } = await import('@modelcontextprotocol/server');
-  const { createServer } = await import('../src/server.js');
+  const { createServer } = await import('../src/mcp/server.js');
   const server = createServer(new CinemaService(new HttpClient(async () => new Response('unexpected', { status: 500 }))));
   const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
@@ -286,7 +286,7 @@ test('null arguments from strict function-calling adapters are treated as absent
 test('server instructions fit client limits in every mode and lead with the core rules', async () => {
   const { Client } = await import('@modelcontextprotocol/client');
   const { InMemoryTransport } = await import('@modelcontextprotocol/server');
-  const { createServer } = await import('../src/server.js');
+  const { createServer } = await import('../src/mcp/server.js');
   const accounts = { connect: async () => ({ url: 'https://cinve.example/connect', expires_at: '' }), disconnect: async () => {} };
   for (const [mode, server] of [['local', createServer()], ['hosted', createServer(undefined, accounts)], ['public hosted', createServer(undefined, undefined, true)]] as const) {
     const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();

@@ -12,7 +12,7 @@ import { createHostedApp } from '../src/hosted/app.js';
 import { EncryptedSessionStore, HostedUsers } from '../src/hosted/store.js';
 import { Result } from '../src/core.js';
 import { ConnectionLinks } from '../src/hosted/connection-links.js';
-import { createRemoteServer } from '../src/remote.js';
+import { createRemoteServer } from '../src/mcp/bridge.js';
 import type { login } from '../src/auth/login.js';
 import type { ClientMetadataFetcher } from '../src/hosted/client-metadata.js';
 

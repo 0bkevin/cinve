@@ -129,7 +129,7 @@ resultados antes de entregarlos al asistente.
 Asistente MCP → servidor Cinve → adaptador del proveedor → sitio o API del cine
 ```
 
-- `src/server.ts`: contrato y herramientas MCP.
+- `src/mcp/`: contrato y herramientas MCP, y el puente `stdio` al servicio alojado.
 - `src/service.ts`: respuestas, filtros y paginación.
 - `src/providers/`: integración con los proveedores, una carpeta por cadena.
 - `src/http/`: acceso HTTP, rutas permitidas, límites y caché.

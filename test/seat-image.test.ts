@@ -10,7 +10,7 @@ import { crc32, inflateSync } from 'node:zlib';
 import { encodeIndexedPng, MapTooLarge, MAX_PNG_PIXELS, renderSeatMapPng, renderSeatMapSvg, seatNumber, textWidth } from '../src/seats/image.js';
 import { CinemaService } from '../src/service.js';
 import { HttpClient } from '../src/http/client.js';
-import { createServer } from '../src/server.js';
+import { createServer } from '../src/mcp/server.js';
 import { SeatResult } from '../src/seats/schema.js';
 import { cpBuy, EmptySessionStore, page } from './fixtures.js';
 

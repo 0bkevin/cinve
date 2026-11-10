@@ -8,9 +8,9 @@ import { toNodeHandler } from '@modelcontextprotocol/node';
 import * as z from 'zod';
 import { Result } from '../src/core.js';
 import { SeatResult } from '../src/seats/schema.js';
-import { createServer } from '../src/server.js';
+import { createServer } from '../src/mcp/server.js';
 import { CinemaService } from '../src/service.js';
-import { createRemoteServer, upstreamCallTimeoutMs } from '../src/remote.js';
+import { createRemoteServer, upstreamCallTimeoutMs } from '../src/mcp/bridge.js';
 
 test('official MCP client discovers tools, validates arguments and reads structured results over stdio', async () => {
   const client = new Client({ name: 'cinev-test', version: '1.0.0' });

@@ -12,7 +12,7 @@ import { assertPrivateRead } from '../src/http/allow-list.js';
 import { CinemaService } from '../src/service.js';
 import { DataError } from '../src/core.js';
 import { flight, findField } from '../src/providers/parsing.js';
-import { inputSchema } from '../src/server.js';
+import { inputSchema } from '../src/mcp/server.js';
 import { cpBuy, cuMovies, concessions, page } from './fixtures.js';
 
 test('real PTY: multiline paste, separate entry and cancellation never echo credentials and restore terminal', t => {

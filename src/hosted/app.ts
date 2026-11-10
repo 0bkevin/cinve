@@ -10,7 +10,7 @@ import type { Pool } from 'pg';
 import { timingSafeEqual } from 'node:crypto';
 import { createMcpHandler } from '@modelcontextprotocol/server';
 import { toNodeHandler } from '@modelcontextprotocol/node';
-import { createServer } from '../server.js';
+import { createServer } from '../mcp/server.js';
 import { CinemaService } from '../service.js';
 import { CinexCinemaCatalog } from '../providers/cinex/venues.js';
 import { HttpClient } from '../http/client.js';

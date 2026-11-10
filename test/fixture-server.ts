@@ -1,5 +1,5 @@
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
-import { createServer } from '../src/server.js';
+import { createServer } from '../src/mcp/server.js';
 import { CinemaService } from '../src/service.js';
 import { HttpClient } from '../src/http/client.js';
 import { mockFetch, EmptySessionStore } from './fixtures.js';

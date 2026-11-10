@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
-import { createRemoteServer, remoteConfig } from './remote.js';
+import { createRemoteServer, remoteConfig } from './mcp/bridge.js';
 async function main() {
   const [path, ...extra] = process.argv.slice(2);
   if (!path || extra.length) throw new Error('Uso: node dist/remote-main.js /ruta/privada/cinev.json');

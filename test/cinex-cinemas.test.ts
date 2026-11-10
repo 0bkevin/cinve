@@ -4,7 +4,7 @@ import { CinemaService } from '../src/service.js';
 import { CinexCinemaCatalog } from '../src/providers/cinex/venues.js';
 import { HttpClient } from '../src/http/client.js';
 import { outputSchema } from '../src/core.js';
-import { inputSchema } from '../src/server.js';
+import { inputSchema } from '../src/mcp/server.js';
 
 const base = 'https://www.cinex.com.ve';
 const card = (slug: string, name: string, image: string, city = 'Caracas') => `<a href="cinex-${slug}.html" title="Cinex ${name}, ${city}"><img src="${base}/assets/images/cinemas/${image}"><h3>${name}</h3></a>`;
@@ -497,7 +497,7 @@ test('Cinex city showtimes fail, rather than report an empty city, when no venue
 test('long fan-outs report increasing progress to clients that send a progress token', async () => {
   const { Client } = await import('@modelcontextprotocol/client');
   const { InMemoryTransport } = await import('@modelcontextprotocol/server');
-  const { createServer } = await import('../src/server.js');
+  const { createServer } = await import('../src/mcp/server.js');
   const epoch = String(Date.parse('2026-09-18T20:30:00-04:00') / 1000);
   const codes = ['AAA', 'BBB', 'CCC'];
   const http = new HttpClient(async input => {

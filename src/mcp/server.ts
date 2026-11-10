@@ -1,17 +1,17 @@
-import { SeatResult } from './seats/schema.js';
-import { seatInstructions } from './seats/guidance.js';
-import { MapTooLarge, renderSeatMapPng, renderSeatMapSvg } from './seats/image.js';
-import { cinepicVenueName } from './providers/cinepic/sites.js';
-import { hostedAuthInstructions } from './hosted/auth-guidance.js';
+import { SeatResult } from '../seats/schema.js';
+import { seatInstructions } from '../seats/guidance.js';
+import { MapTooLarge, renderSeatMapPng, renderSeatMapSvg } from '../seats/image.js';
+import { cinepicVenueName } from '../providers/cinepic/sites.js';
+import { hostedAuthInstructions } from '../hosted/auth-guidance.js';
 import { McpServer } from '@modelcontextprotocol/server';
 import type { ServerContext } from '@modelcontextprotocol/server';
-import type { CallOptions } from './http/read-context.js';
+import type { CallOptions } from '../http/read-context.js';
 import * as z from 'zod';
-import { DateInput, Id, Provider, idString, outputSchema } from './core.js';
-import type { Operation, Query } from './core.js';
-import { AuthProvider } from './auth/sessions.js';
-import type { AuthProviderId } from './auth/sessions.js';
-import { capabilities, CinemaService } from './service.js';
+import { DateInput, Id, Provider, idString, outputSchema } from '../core.js';
+import type { Operation, Query } from '../core.js';
+import { AuthProvider } from '../auth/sessions.js';
+import type { AuthProviderId } from '../auth/sessions.js';
+import { capabilities, CinemaService } from '../service.js';
 
 const paging = {
   refresh: z.boolean().optional().describe('true: consulta al proveedor sin usar caché local; solicita revalidación HTTP. No garantiza que el proveedor haya actualizado su contenido.'),
