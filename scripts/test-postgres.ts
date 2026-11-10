@@ -14,7 +14,8 @@ try {
     await exec('pg_ctl', ['-D', join(directory, 'data'), '-l', join(directory, 'postgres.log'), '-o', `-k ${directory} -h ''`, '-w', 'start']);
     url = `postgresql://${encodeURIComponent(userInfo().username)}@localhost/postgres?host=${encodeURIComponent(directory)}`;
   }
-  const files = (await readdir('test')).filter(f => f.endsWith('.test.ts')).map(f => `test/${f}`);
+  // Test files mirror src/ in subfolders, so discovery is recursive.
+  const files = (await readdir('test', { recursive: true })).filter(f => f.endsWith('.test.ts')).map(f => `test/${f}`);
   const child = spawn(process.execPath, ['--import', 'tsx', '--test', ...files], { stdio: 'inherit', env: { ...process.env, TEST_DATABASE_URL: url } });
   process.exitCode = await new Promise<number>(resolve => child.on('exit', code => resolve(code ?? 1)));
 } catch {
