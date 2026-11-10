@@ -2,7 +2,7 @@ import { SeatResult } from './seats/schema.js';
 import { seatInstructions } from './seats/guidance.js';
 import { MapTooLarge, renderSeatMapPng, renderSeatMapSvg } from './seats/image.js';
 import { cinepicVenueName } from './providers/cinepic/sites.js';
-import { hostedAuthInstructions } from './hosted-auth-guidance.js';
+import { hostedAuthInstructions } from './hosted/auth-guidance.js';
 import { McpServer } from '@modelcontextprotocol/server';
 import type { ServerContext } from '@modelcontextprotocol/server';
 import type { CallOptions } from './http/read-context.js';

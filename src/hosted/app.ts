@@ -1,28 +1,28 @@
-import { landingPage, servePublicAsset } from './public-web.js';
-import { hostedAuthInstructions } from './hosted-auth-guidance.js';
+import { landingPage, servePublicAsset } from '../public-web.js';
+import { hostedAuthInstructions } from './auth-guidance.js';
 import { HostedOAuth } from './oauth.js';
 import { ClientMetadataCache } from './client-metadata.js';
 import type { ClientMetadataFetcher } from './client-metadata.js';
-import { serveInstall } from './install.js';
+import { serveInstall } from '../install.js';
 import { createServer as nodeServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Pool } from 'pg';
 import { timingSafeEqual } from 'node:crypto';
 import { createMcpHandler } from '@modelcontextprotocol/server';
 import { toNodeHandler } from '@modelcontextprotocol/node';
-import { createServer } from './server.js';
-import { CinemaService } from './service.js';
-import { CinexCinemaCatalog } from './providers/cinex/venues.js';
-import { HttpClient } from './http/client.js';
-import { HostedHttpClient } from './hosted-http.js';
-import { SessionStore } from './auth/sessions.js';
-import { login } from './auth/login.js';
-import type { AuthSession, AuthProviderId } from './auth/sessions.js';
-import type { Operation, Query } from './core.js';
-import type { CallOptions } from './http/read-context.js';
-import { ConnectionLinks } from './hosted-links.js';
-import { EncryptedSessionStore, HostedUsers, digest } from './hosted-store.js';
-import { loginPage, loginScript } from './auth-web.js';
+import { createServer } from '../server.js';
+import { CinemaService } from '../service.js';
+import { CinexCinemaCatalog } from '../providers/cinex/venues.js';
+import { HttpClient } from '../http/client.js';
+import { HostedHttpClient } from './http-client.js';
+import { SessionStore } from '../auth/sessions.js';
+import { login } from '../auth/login.js';
+import type { AuthSession, AuthProviderId } from '../auth/sessions.js';
+import type { Operation, Query } from '../core.js';
+import type { CallOptions } from '../http/read-context.js';
+import { ConnectionLinks } from './connection-links.js';
+import { EncryptedSessionStore, HostedUsers, digest } from './store.js';
+import { loginPage, loginScript } from '../auth-web.js';
 
 class AnonymousSessions extends SessionStore {
   override async read(): Promise<AuthSession | undefined> { return undefined; }

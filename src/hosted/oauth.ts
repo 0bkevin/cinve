@@ -1,10 +1,10 @@
-import { authorizationPage, authorizationErrorPage } from './public-web.js';
+import { authorizationPage, authorizationErrorPage } from '../public-web.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Pool, PoolClient } from 'pg';
 import * as z from 'zod';
-import { digest, lockUser, transaction } from './hosted-store.js';
-import { ConnectionLinks } from './hosted-links.js';
+import { digest, lockUser, transaction } from './store.js';
+import { ConnectionLinks } from './connection-links.js';
 import { ClientMetadataCache, isClientIdUrl, redirectUri } from './client-metadata.js';
 
 const scope = 'cinve:accounts';

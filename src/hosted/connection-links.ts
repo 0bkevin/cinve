@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
-import { digest, EncryptedSessionStore, lockUser, transaction } from './hosted-store.js';
-import type { AuthProviderId, AuthSession } from './auth/sessions.js';
+import { digest, EncryptedSessionStore, lockUser, transaction } from './store.js';
+import type { AuthProviderId, AuthSession } from '../auth/sessions.js';
 
 type Connection = { user: string; tokenHash: string; provider: AuthProviderId; expires: number; attempts: number; busy: boolean };
 export class ConnectionLinks {

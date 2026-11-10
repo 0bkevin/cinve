@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { migrationSql } from '../src/migrations.js';
+import { migrationSql } from '../src/hosted/migrations.js';
 import { Pool } from 'pg';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,13 +8,13 @@ import { randomBytes } from 'node:crypto';
 import { request as httpRequest } from 'node:http';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
-import { createHostedApp } from '../src/hosted.js';
-import { EncryptedSessionStore, HostedUsers } from '../src/hosted-store.js';
+import { createHostedApp } from '../src/hosted/app.js';
+import { EncryptedSessionStore, HostedUsers } from '../src/hosted/store.js';
 import { Result } from '../src/core.js';
-import { ConnectionLinks } from '../src/hosted-links.js';
+import { ConnectionLinks } from '../src/hosted/connection-links.js';
 import { createRemoteServer } from '../src/remote.js';
 import type { login } from '../src/auth/login.js';
-import type { ClientMetadataFetcher } from '../src/client-metadata.js';
+import type { ClientMetadataFetcher } from '../src/hosted/client-metadata.js';
 
 async function fixture(t: { after(fn: () => Promise<void>): void }, authenticate?: typeof login,
   request: typeof fetch = async () => new Response('["Caracas"]'), extra: { bodyTimeoutMs?: number; clientMetadata?: ClientMetadataFetcher } = {}) {
@@ -546,7 +546,7 @@ test('public pages use the configured origin and serve local fonts under the aut
 
 test('one address exhausting its OAuth quota cannot consume the shared OAuth quota', async t => {
   const f = await fixture(t);
-  const { digest } = await import('../src/hosted-store.js');
+  const { digest } = await import('../src/hosted/store.js');
   await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 minute',61)", [digest('oauth:127.0.0.1')]);
   for (let i = 0; i < 20; i++) assert.equal((await form(f.origin, '/oauth/token', { grant_type: 'refresh_token' })).status, 429);
   const global = await f.pool.query('SELECT count FROM cinev_budgets WHERE key_hash=$1', [digest('oauth:global')]);
@@ -577,7 +577,7 @@ test('slow request bodies cannot bypass the per-client MCP concurrency limit', a
 
 test('refresh=true calls have their own small budget so the shared cache cannot be bypassed at volume', async t => {
   const f = await fixture(t);
-  const { digest } = await import('../src/hosted-store.js');
+  const { digest } = await import('../src/hosted/store.js');
   const anonymous = await f.client();
   await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 minute',10)", [digest('refresh:anonymous:127.0.0.1')]);
   await assert.rejects(anonymous.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos', refresh: true } }));

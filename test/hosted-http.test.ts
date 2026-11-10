@@ -4,7 +4,7 @@ import { DataError } from '../src/core.js';
 import { SessionStore } from '../src/auth/sessions.js';
 import type { AuthProviderId } from '../src/auth/sessions.js';
 import { HttpClient } from '../src/http/client.js';
-import { HostedHttpClient } from '../src/hosted-http.js';
+import { HostedHttpClient } from '../src/hosted/http-client.js';
 
 const publicUrl = 'https://gateway.cinesunidos.com/search/cities';
 const privateUrl = 'https://gateway.cinesunidos.com/tickets/www/theaters/1005/sessions/s1/';

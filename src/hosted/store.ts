@@ -1,8 +1,8 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { Pool, type PoolClient } from 'pg';
-import { Session, SessionStore } from './auth/sessions.js';
-import type { AuthProviderId, AuthSession } from './auth/sessions.js';
-import { DataError } from './core.js';
+import { Session, SessionStore } from '../auth/sessions.js';
+import type { AuthProviderId, AuthSession } from '../auth/sessions.js';
+import { DataError } from '../core.js';
 
 export const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 export function databasePool(url = process.env.DATABASE_URL) {

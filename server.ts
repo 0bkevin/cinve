@@ -1,7 +1,7 @@
 import { serveInstall } from './src/install.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { createHostedApp } from './src/hosted.js';
-import { databasePool } from './src/hosted-store.js';
+import { createHostedApp } from './src/hosted/app.js';
+import { databasePool } from './src/hosted/store.js';
 const apps = new Map<string, ReturnType<typeof createHostedApp>>();
 export default async function handler(req: IncomingMessage, res: ServerResponse) {
   const configuredOrigin = process.env.CINEV_PUBLIC_URL || 'https://cinve.kevinbravo.com';

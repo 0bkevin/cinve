@@ -1,5 +1,5 @@
-import { createHostedApp } from './hosted.js';
-import { databasePool } from './hosted-store.js';
+import { createHostedApp } from './hosted/app.js';
+import { databasePool } from './hosted/store.js';
 
 async function main() {
   const { CINEV_PUBLIC_URL, CINEV_ENCRYPTION_KEY } = process.env;
