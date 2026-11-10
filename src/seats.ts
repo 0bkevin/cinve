@@ -248,7 +248,9 @@ export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions)
       c.warnings.push('La disponibilidad de Cinepic depende también del tipo de entrada elegido. El campo seleccionada del proveedor no indica una reserva del usuario.');
     } else if (q.provider === 'cinesunidos') {
       const url = `https://www.cinesunidos.com/api/seats?${new URLSearchParams({ theaterId: result.cinema_id, showTimeId: result.session_id })}`;
-      const data = JSON.parse(await c.authenticated('cinesunidos', url));
+      let data: unknown;
+      try { data = JSON.parse(await c.authenticated('cinesunidos', url)); }
+      catch (e) { if (e instanceof DataError) throw e; throw new DataError('error', 'Cines Unidos no devolvió un mapa de asientos en JSON válido.'); }
       result.seats = parseCinesUnidosSeats(data);
       // Area descriptions read "SALA 8 - FULL"; only a room number shared by every area names the room.
       const rooms = new Set(rows(object(object(data).seats).areas, 'seats.areas').map(a => text(a.description).match(/^SALA\s+(\d{1,3})\b/i)?.[1]));

@@ -155,3 +155,9 @@ test('a provider refusing the saved session (HTTP 401) marks it expired with a c
   assert.equal(r.status, 'auth_required'); assert.match(r.warnings.join(' '), /rechazó la sesión guardada/);
   assert.equal((await sessions.status('cinesunidos')).status, 'expired');
 });
+
+test('a Cines Unidos seat answer that is not JSON names the provider response', async () => {
+  const sessions = new class extends EmptySessionStore { override async headers() { return { Authorization: 'Bearer synthetic' }; } };
+  const r = await new CinemaService(new HttpClient(async () => new Response('<html></html>'), 15000, sessions)).seats({ provider: 'cinesunidos', cinema_id: '1002', session_id: 's1' });
+  assert.equal(r.status, 'error'); assert.match(r.warnings.join(' '), /Cines Unidos no devolvió un mapa de asientos en JSON válido/);
+});
