@@ -37,11 +37,15 @@ src/
                      credentials-prompt.ts: hidden terminal input
   hosted/            app.ts: HTTP app; oauth, client-metadata, store (encrypted sessions),
                      connection-links, http-client, migrations, auth-guidance
-  web/               HTML for the hosted site: site (layout, assets), install, connect-page
+  web/               HTML for the hosted site: site (layout, assets), install, connect-page;
+                     /site.js and /app.js are plain strings that test/web runs in a fake DOM
   assets/            fonts, og.png, favicon; both builds copy them next to the output
 test/                mirrors src/: test/http/client.test.ts tests src/http/client.ts,
                      test/providers/cinex-venues.test.ts tests providers/cinex/venues.ts;
-                     test/helpers/ holds fixtures and subprocess helpers
+                     test/helpers/ holds fixtures and subprocess helpers; assert.ts has
+                     nth/defined/capture, which fail the test instead of reading undefined;
+                     terminal-probe.py stays Python: Node has no built-in pty or termios,
+                     and node-pty would be a native dependency
 scripts/             test-postgres.ts (npm test), smoke.ts (live), migrate-neon.ts
 docs/                reference.md (tools, statuses, limits), hosted.md (deployment)
 ```
@@ -68,7 +72,8 @@ reads.
 
 ```sh
 npm ci
-npm run check                 # typecheck src, test, scripts and server.ts
+npm run check                 # typecheck src, test, scripts and server.ts (strict, plus
+                              # noUncheckedIndexedAccess and exactOptionalPropertyTypes)
 npx tsc -p tsconfig.hosted.json --noEmit
 npm test                      # all test/**/*.test.ts; needs initdb/pg_ctl or TEST_DATABASE_URL
 npm run build                 # dist/ (+ dist/assets, resvg.wasm)
