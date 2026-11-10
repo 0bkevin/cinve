@@ -662,9 +662,14 @@ export async function cinex(op: Operation, q: Query, c: ReadContext, catalog = n
   }
   if (q.city && !q.cinema_id) return cinexCityShowtimes(q, c, catalog, date);
   const cinemaId = requireArg(q, 'cinema_id');
+  // The catalog read does not depend on the venue: run it beside the venue's
+  // chain (directory, page, metadata) instead of after it. It is cached and
+  // shared by every Cinex showtimes call, even when this venue fails.
+  const catalogPage = c.get(`${CX}/cartelera.html`, catalogTtl);
+  catalogPage.catch(() => { /* awaited below; a failed venue must not leave it unhandled */ });
   const venue = await catalog.resolve(cinemaId, c);
-  const page = venue.body === undefined ? await c.page(venue.url, 120000) : { body: venue.body };
-  const movies = parseCinexMovies(await c.get(`${CX}/cartelera.html`, 120000));
+  const page = venue.body === undefined ? await c.page(venue.url, catalogTtl) : { body: venue.body };
+  const movies = parseCinexMovies(await catalogPage);
   const items = parseCinexCinemaShowtimes(page.body, movies, cinemaId, date, c, venue.url, venue.name ? warningLabel(decodeLabel(venue.name), 200) || undefined : undefined);
   return q.movie_id ? items.filter(r => r.movie_id === q.movie_id) : items;
 }

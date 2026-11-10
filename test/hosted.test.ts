@@ -173,7 +173,7 @@ test('hosted requests retain verified unlisted Cinex IDs across request-scoped s
   const showtimes = await separateRequest.callTool({ name: 'get_showtimes', arguments: { provider: 'cinex', cinema_id: 'MTB', date: '2026-09-18', refresh: true } });
   assert.equal((showtimes.structuredContent as { status: string; total: number }).status, 'available');
   assert.equal((showtimes.structuredContent as { total: number }).total, 1);
-  assert.deepEqual(requests.slice(before), ['/cinex-metropolisbarquisimeto.html', '/cartelera.html']);
+  assert.deepEqual(requests.slice(before), ['/cartelera.html', '/cinex-metropolisbarquisimeto.html']);
 });
 
 test('disconnect during upstream login prevents a late session from being saved', async t => {

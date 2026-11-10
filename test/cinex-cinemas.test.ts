@@ -211,7 +211,8 @@ test('refresh adopts a new current URL and targeted rediscovery recovers a stale
   directory = card('recovery', 'Expected', 'xSBC.jpg');
   const recovered = await make().query('showtimes', { provider: 'cinex', cinema_id: 'SBC', date: '2026-09-18', refresh: true });
   assert.equal(recovered.status, 'available'); assert.equal(recovered.total, 1);
-  assert.deepEqual(requests.slice(-4), ['/cinex-new.html', '/cines.html', '/cinex-recovery.html', '/cartelera.html']);
+  // The catalog read starts beside the venue's own chain.
+  assert.deepEqual(requests.slice(-4), ['/cartelera.html', '/cinex-new.html', '/cines.html', '/cinex-recovery.html']);
 });
 
 test('large Cinex directories have bounded discovery work while name filtering remains effective', async () => {
@@ -262,7 +263,7 @@ test('Cinex cinema-wide showtimes use one cinema page plus one catalog, paginate
   assert.equal(first.items[0].movie_id, 'coyote'); assert.equal(first.partial, true);
   assert.equal(first.items[0].id, '23059'); assert.equal(first.items[0].screen, '1'); assert.equal(first.items[0].language, 'es');
   assert.ok(first.warnings.some(w => /catálogo|identificador/.test(w)));
-  assert.deepEqual(requests, ['/cines.html', '/cinex-sambil.html', '/cartelera.html']);
+  assert.deepEqual(requests, ['/cartelera.html', '/cines.html', '/cinex-sambil.html']);
 
   const cached = await s.query('showtimes', { provider: 'cinex', cinema_id: 'SBC', date: '2026-09-18', offset: 0, limit: 1 });
   assert.equal(cached.total, 2); assert.equal(requests.length, 3);
@@ -284,14 +285,14 @@ test('Cinex remembers the canonical cinema URL after a redirect without fetching
   const s = new CinemaService(http);
   const first = await s.query('showtimes', { provider: 'cinex', cinema_id: 'SBC', date: '2026-09-18' });
   assert.equal(first.status, 'available'); assert.equal(first.total, 1);
-  assert.deepEqual(requests, ['/cines.html', '/cinex-sambil.html', '/cinex-sambilchacao.html', '/cartelera.html']);
+  assert.deepEqual(requests, ['/cartelera.html', '/cines.html', '/cinex-sambil.html', '/cinex-sambilchacao.html']);
   assert.equal(first.sources.filter(source => source.url.endsWith('/cinex-sambilchacao.html')).length, 1);
   const beforeWarm = requests.length;
   await s.query('showtimes', { provider: 'cinex', cinema_id: 'SBC', date: '2026-09-18' });
   assert.deepEqual(requests.slice(beforeWarm), []);
   const beforeRefresh = requests.length;
   await s.query('showtimes', { provider: 'cinex', cinema_id: 'SBC', date: '2026-09-18', refresh: true });
-  assert.deepEqual(requests.slice(beforeRefresh), ['/cinex-sambilchacao.html', '/cartelera.html']);
+  assert.deepEqual(requests.slice(beforeRefresh), ['/cartelera.html', '/cinex-sambilchacao.html']);
 });
 
 test('Cinex cinema-wide title mapping is conservative for ambiguous catalog titles', async () => {
@@ -337,7 +338,7 @@ test('Cinex verified unlisted/detail codes survive a separate service through a 
   const before = requests.length;
   const showtimes = await make().query('showtimes', { provider: 'cinex', cinema_id: 'MTB', date: '2026-09-18' });
   assert.equal(showtimes.status, 'available'); assert.equal(showtimes.total, 1);
-  assert.deepEqual(requests.slice(before), ['/cinex-metropolisbarquisimeto.html', '/cartelera.html']);
+  assert.deepEqual(requests.slice(before), ['/cartelera.html', '/cinex-metropolisbarquisimeto.html']);
   assert.equal(requests.slice(before).includes('/cines.html'), false);
 });
 
@@ -353,7 +354,7 @@ test('Cinex cold resolution uses one requested metadata name when the image code
   });
   const result = await new CinemaService(http).query('showtimes', { provider: 'cinex', cinema_id: 'ACTUAL', date: '2026-09-18' });
   assert.equal(result.status, 'available'); assert.equal(result.total, 1);
-  assert.deepEqual(requests, ['/cines.html', '/assets/php/datasource.php', '/cinex-real.html', '/cartelera.html']);
+  assert.deepEqual(requests, ['/cartelera.html', '/cines.html', '/assets/php/datasource.php', '/cinex-real.html']);
 });
 
 test('Cinex marks an all-malformed epoch block partial instead of returning a complete empty result', async () => {
