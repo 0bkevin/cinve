@@ -40,6 +40,11 @@ Las pruebas crean y eliminan esquemas temporales. Nunca apuntes
 
 ## Hacer un cambio
 
+[`AGENTS.md`](AGENTS.md) describe dónde vive cada parte del código y las reglas
+que todo cambio debe respetar. `test/` sigue la estructura de `src/`: por
+ejemplo, `test/http/client.test.ts` prueba `src/http/client.ts`, y
+`test/providers/cinex-venues.test.ts` prueba `src/providers/cinex/venues.ts`.
+
 1. Crea una rama desde `main`.
 2. Mantén el cambio pequeño y enfocado en un solo problema.
 3. Añade o actualiza pruebas cuando cambie el comportamiento.

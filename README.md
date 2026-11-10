@@ -130,11 +130,16 @@ Asistente MCP → servidor Cinve → adaptador del proveedor → sitio o API del
 ```
 
 - `src/mcp/`: contrato y herramientas MCP, y el puente `stdio` al servicio alojado.
-- `src/service.ts`: respuestas, filtros y paginación.
-- `src/providers/`: integración con los proveedores, una carpeta por cadena.
+- `src/service.ts`: respuestas, filtros y paginación; `src/core.ts`: esquemas de resultados.
+- `src/providers/`: integración con los proveedores, una carpeta por cadena, y
+  lectura segura de JSON y HTML (`parsing.ts`).
 - `src/http/`: acceso HTTP, rutas permitidas, límites y caché.
-- `src/providers/parsing.ts`: lectura segura de JSON y HTML.
+- `src/seats/`: mapas de asientos, en ASCII y como imagen.
 - `src/auth/`: login y sesiones locales autorizadas.
+- `src/hosted/` y `src/web/`: el servicio alojado y sus páginas.
+
+Las pruebas en `test/` siguen la misma estructura. [`AGENTS.md`](AGENTS.md)
+resume la organización, el flujo de una consulta y las reglas del proyecto.
 
 Consulta la [referencia técnica](docs/reference.md) para herramientas, estados,
 límites y mapas de asientos, y la [guía de despliegue](docs/hosted.md) para el
