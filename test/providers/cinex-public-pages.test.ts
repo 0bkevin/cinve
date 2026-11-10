@@ -5,12 +5,13 @@ import { HttpClient } from '../../src/http/client.js';
 import { mockFetch, EmptySessionStore } from '../helpers/fixtures.js';
 import { ReadContext } from '../../src/http/read-context.js';
 import { cinexSessionDetails, parseCinexCinemaShowtimes, parseCinexShowtimes } from '../../src/providers/cinex/public-pages.js';
+import { nth } from '../helpers/assert.js';
 
 const service = () => new CinemaService(new HttpClient(mockFetch, 15000, new EmptySessionStore()));
 
 test('Cinex HTML separators do not merge screen number and showtime', async () => {
   const result = await service().query('showtimes', { provider: 'cinex', movie_id: 'pelicula', date: '2026-09-11' });
-  assert.equal(result.items[0].screen, '4'); assert.equal(result.items[0].time, '11:20');
+  assert.equal(nth(result.items, 0).screen, '4'); assert.equal(nth(result.items, 0).time, '11:20');
 });
 
 const epoch = (date: string, time = '20:00') => Math.floor((Date.parse(`${date}T${time}:00Z`) + 4 * 3600000) / 1000);
@@ -49,7 +50,7 @@ test('Cinex mixed valid and malformed cinema epochs preserve valid sessions and 
     [movie], 'C', '2026-09-18', c, 'https://www.cinex.com.ve/cinex-c.html',
   );
   assert.equal(items.length, 1);
-  assert.equal(items[0].id, 's1');
+  assert.equal(nth(items, 0).id, 's1');
   assert.equal(c.partial, true);
   assert.ok(c.warnings.some(w => /epoch|malformada/.test(w)));
 });
@@ -134,7 +135,7 @@ test('Cinex movie pages compare named rooms and full start times when suppressin
     assert.deepEqual(items, [], label); assert.equal(c.partial, true, label);
   }
   const c = context();
-  const [vip] = parseCinexShowtimes(`<h1>Film</h1><button onclick="checkLogin('v','SBC')" alt="${epoch('2026-11-04')}">Sala VIP</button>`, 'm', '2026-11-04', c);
+  const vip = nth(parseCinexShowtimes(`<h1>Film</h1><button onclick="checkLogin('v','SBC')" alt="${epoch('2026-11-04')}">Sala VIP</button>`, 'm', '2026-11-04', c), 0);
   assert.equal(vip.screen, 'VIP');
 });
 
@@ -155,5 +156,5 @@ test('Cinex showtimes carry the age rating the venue and synopsis pages show', (
     [{ kind: 'movie', id: 'clayface', name: 'CLAYFACE' }], 'TLN', '2026-11-04', context(), 'https://www.cinex.com.ve/cinex-tolon.html');
   assert.deepEqual(venue.map(i => [i.id, i.rating, i.screen, i.language]), [['7', 'C', '2', 'subtitulada']]);
   const synopsis = parseCinexShowtimes(`<h1>CLAYFACE</h1><ul><li><strong>Director: </strong>James Watkins</li><li><strong>Censura: </strong>C</li></ul>${session}`, 'clayface', '2026-11-04', context());
-  assert.equal(synopsis[0].rating, 'C');
+  assert.equal(nth(synopsis, 0).rating, 'C');
 });

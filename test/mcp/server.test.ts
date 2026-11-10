@@ -9,6 +9,7 @@ import { createServer, inputSchema } from '../../src/mcp/server.js';
 import { CinemaService } from '../../src/service.js';
 import { CinexCinemaCatalog } from '../../src/providers/cinex/venues.js';
 import { HttpClient } from '../../src/http/client.js';
+import { nth } from '../helpers/assert.js';
 
 test('official MCP client discovers tools, validates arguments and reads structured results over stdio', async () => {
   const client = new Client({ name: 'cinev-test', version: '1.0.0' });
@@ -99,7 +100,7 @@ test('long fan-outs report increasing progress to clients that send a progress t
     if (url.pathname === '/assets/php/datasource.php') return Response.json({ data: [{ siglas: url.searchParams.get('cinemaid'), name: url.searchParams.get('cinemaid') }] });
     if (url.pathname === '/cartelera.html') return new Response(`<div class="poster" onclick="x('sinopsis-film.html')" title="FILM"></div>`);
     const m = url.pathname.match(/^\/cinex-([a-z]+)\.html$/);
-    if (m) { const code = m[1].toUpperCase(); return new Response(`<h3 class="title">${code}</h3><div class="sessionslist"><h5 class="title">FILM</h5><button onclick="checkLogin('${code}1','${code}')" alt="${epoch}"></button></div>`); }
+    if (m) { const code = nth(m, 1).toUpperCase(); return new Response(`<h3 class="title">${code}</h3><div class="sessionslist"><h5 class="title">FILM</h5><button onclick="checkLogin('${code}1','${code}')" alt="${epoch}"></button></div>`); }
     return new Response('missing', { status: 404 });
   });
   const server = createServer(new CinemaService(http, new CinexCinemaCatalog()));
@@ -112,7 +113,7 @@ test('long fan-outs report increasing progress to clients that send a progress t
     const r = await client.callTool({ name: 'get_showtimes', arguments: { provider: 'cinex', city: 'Caracas', date: '2026-09-18' } }, { onprogress: p => updates.push(p) });
     assert.equal((r.structuredContent as { total: number }).total, 3);
     assert.ok(updates.length >= 4, JSON.stringify(updates)); // discovery batch + three venues
-    assert.ok(updates.every((u, i) => i === 0 || u.progress > updates[i - 1].progress), 'progress only increases');
+    assert.ok(updates.every((u, i) => i === 0 || u.progress > nth(updates, i - 1).progress), 'progress only increases');
     assert.ok(updates.some(u => u.message === 'Cinex: 3 de 3 sedes leídas.'), JSON.stringify(updates));
   } finally { await client.close(); }
 });
@@ -128,7 +129,7 @@ test('tool validation rejects missing provider context and arbitrary IDs', () =>
 test('Cinepic calls without a venue name the two valid IDs, avoiding a discovery call', () => {
   const r = inputSchema('showtimes').safeParse({ provider: 'cinepic' });
   assert.equal(r.success, false);
-  assert.match(r.error!.issues[0].message, /123300 \(Candelaria\) o 123301 \(VVIP Lido\)/);
+  assert.match(nth(r.error?.issues ?? [], 0).message, /123300 \(Candelaria\) o 123301 \(VVIP Lido\)/);
 });
 
 test('Cinex ticket prices require a function, since no public listing can supply them', () => {

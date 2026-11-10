@@ -4,6 +4,7 @@ import { HttpClient } from '../../src/http/client.js';
 import { ReadContext } from '../../src/http/read-context.js';
 import { DataError } from '../../src/core.js';
 import { SessionStore } from '../../src/auth/sessions.js';
+import { nth } from '../helpers/assert.js';
 
 test('Cinex ticket migration preserves IDs, credentials, deadline and final source without caching', async () => {
   const { SessionStore } = await import('../../src/auth/sessions.js');
@@ -39,7 +40,7 @@ test('authenticated provenance deduplicates by final canonical URL after migrati
   await context.authenticated('cinex', source);
   await context.authenticated('cinex', source);
   assert.equal(context.sources.length, 1);
-  assert.equal(context.sources[0].url, target);
+  assert.equal(nth(context.sources, 0).url, target);
 });
 
 test('Cinex ticket redirects cannot change identity, escape the route or loop', async () => {

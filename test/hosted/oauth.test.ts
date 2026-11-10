@@ -5,6 +5,7 @@ import { randomBytes } from 'node:crypto';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import type { ClientMetadataFetcher } from '../../src/hosted/client-metadata.js';
 import { fixture, link, successfulLogin } from '../helpers/hosted.js';
+import { capture, sessionCookie } from '../helpers/assert.js';
 
 const metadataUrl = 'https://assistant.example/oauth/client.json';
 const metadataDocuments: Record<string, unknown> = {
@@ -66,9 +67,9 @@ async function approve(origin: string, authorization: URL, decision = 'approve')
   assert.match(page.headers.get('content-security-policy')!, /form-action 'self'/);
   const html = await page.text();
   assert.ok(page.headers.get('content-security-policy')!.includes(`form-action 'self' ${new URL(authorization.searchParams.get('redirect_uri')!).origin};`));
-  const request_id = html.match(/name="request_id" value="([^"]+)"/)![1];
-  const csrf = html.match(/name="csrf" value="([^"]+)"/)![1];
-  const cookie = page.headers.get('set-cookie')!.split(';')[0];
+  const request_id = capture(html, /name="request_id" value="([^"]+)"/);
+  const csrf = capture(html, /name="csrf" value="([^"]+)"/);
+  const cookie = sessionCookie(page);
   const result = await fetch(origin + '/oauth/authorize', { method: 'POST', redirect: 'manual',
     headers: { Origin: origin, Cookie: cookie }, body: new URLSearchParams({ request_id, csrf, decision }) });
   assert.equal(result.status, 303);
@@ -108,13 +109,13 @@ test('OAuth rejects redirect injection, missing PKCE, wrong resource, CSRF, and 
     assert.equal(response.status, 400); assert.equal(response.headers.get('location'), null);
   }
   const page = await fetch(a.url), html = await page.text();
-  const request_id = html.match(/name="request_id" value="([^"]+)"/)![1], csrf = html.match(/name="csrf" value="([^"]+)"/)![1];
+  const request_id = capture(html, /name="request_id" value="([^"]+)"/), csrf = capture(html, /name="csrf" value="([^"]+)"/);
   const body = new URLSearchParams({ request_id, csrf, decision: 'approve' });
   assert.equal((await fetch(f.origin + '/oauth/authorize', { method: 'POST', headers: { Origin: f.origin }, body })).status, 403);
-  assert.equal((await fetch(f.origin + '/oauth/authorize', { method: 'POST', headers: { Origin: 'https://evil.example', Cookie: page.headers.get('set-cookie')!.split(';')[0] }, body })).status, 403);
+  assert.equal((await fetch(f.origin + '/oauth/authorize', { method: 'POST', headers: { Origin: 'https://evil.example', Cookie: sessionCookie(page) }, body })).status, 403);
   for (const origin of [undefined, 'null']) {
     assert.equal((await fetch(f.origin + '/oauth/authorize', { method: 'POST', headers: {
-      Cookie: page.headers.get('set-cookie')!.split(';')[0], ...(origin ? { Origin: origin } : {}),
+      Cookie: sessionCookie(page), ...(origin ? { Origin: origin } : {}),
     }, body })).status, 403);
   }
   const denied = await approve(f.origin, a.url, 'deny');

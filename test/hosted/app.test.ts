@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { request as httpRequest } from 'node:http';
 import { Result } from '../../src/core.js';
 import { fixture, link, successfulLogin } from '../helpers/hosted.js';
+import { nth } from '../helpers/assert.js';
 
 test('hosted MCP authenticates every request; account links are one-use and sessions stay per user', async t => {
   const f = await fixture(t, successfulLogin);
@@ -74,24 +75,24 @@ test('hosted app reuses public reads across users and honors explicit refresh', 
   release();
   const [first, second] = await concurrent;
   assert.equal(calls, 1);
-  const concurrentSources = [Result.parse(first.structuredContent).sources[0], Result.parse(second.structuredContent).sources[0]];
+  const concurrentSources = [nth(Result.parse(first.structuredContent).sources, 0), nth(Result.parse(second.structuredContent).sources, 0)];
   assert.ok(concurrentSources.every(source => typeof source.cached === 'boolean'));
   assert.ok(concurrentSources.some(source => source.cached === false), 'one request must receive the shared upstream result');
-  assert.equal(concurrentSources[0].fetched_at, concurrentSources[1].fetched_at);
+  assert.equal(nth(concurrentSources, 0).fetched_at, nth(concurrentSources, 1).fetched_at);
 
   const cached = await anonymous.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos' } });
   assert.equal(calls, 1);
-  assert.equal(Result.parse(cached.structuredContent).sources[0].cached, true);
+  assert.equal(nth(Result.parse(cached.structuredContent).sources, 0).cached, true);
 
   const refreshed = await alice.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos', refresh: true } });
   assert.equal(calls, 2);
-  assert.equal(Result.parse(refreshed.structuredContent).sources[0].cached, false);
+  assert.equal(nth(Result.parse(refreshed.structuredContent).sources, 0).cached, false);
   const failed = await anonymous.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos', refresh: true } });
   assert.equal(calls, 3);
   assert.equal(Result.parse(failed.structuredContent).status, 'error');
   const afterFailure = await alice.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos' } });
   assert.equal(calls, 4);
-  assert.equal(Result.parse(afterFailure.structuredContent).sources[0].cached, false);
+  assert.equal(nth(Result.parse(afterFailure.structuredContent).sources, 0).cached, false);
 });
 
 test('hosted requests retain verified unlisted Cinex IDs across request-scoped services', async t => {
@@ -105,7 +106,7 @@ test('hosted requests retain verified unlisted Cinex IDs across request-scoped s
   });
   const discover = await f.client();
   const cinemas = await discover.callTool({ name: 'list_cinemas', arguments: { provider: 'cinex', city: 'Barquisimeto' } });
-  const item = (cinemas.structuredContent as { items: Array<{ cinema_id?: string; directory_status?: string }> }).items[0];
+  const item = nth(Result.parse(cinemas.structuredContent).items, 0);
   assert.equal(item.cinema_id, 'MTB'); assert.equal(item.directory_status, 'not_listed');
   const before = requests.length;
   const separateRequest = await f.client();

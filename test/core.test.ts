@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DateInput, operationItemSchema, outputSchema, Id } from '../src/core.js';
+import { nth } from './helpers/assert.js';
 
 test('calendar validation rejects impossible dates and accepts leap day', () => {
   assert.equal(DateInput.safeParse('2026-02-30').success, false);
@@ -30,9 +31,9 @@ test('operation result schemas advertise their literal item kind and retain rele
     assert.equal(parsed.name, item.name);
   }
   const parsed = outputSchema('prices').parse(envelope([samples.prices]));
-  assert.deepEqual(parsed.items[0].prices, samples.prices.prices);
-  assert.equal(parsed.items[0].provider_conversion_rate, 0);
-  assert.equal(parsed.items[0].final_total_verified, false);
+  assert.deepEqual(nth(parsed.items, 0).prices, samples.prices.prices);
+  assert.equal(nth(parsed.items, 0).provider_conversion_rate, 0);
+  assert.equal(nth(parsed.items, 0).final_total_verified, false);
 });
 
 test('operation schemas reject a mismatched kind and missing required IDs', () => {

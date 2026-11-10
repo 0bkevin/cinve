@@ -6,6 +6,7 @@ import { HttpClient } from '../../src/http/client.js';
 import { inputSchema } from '../../src/mcp/server.js';
 import { ReadContext } from '../../src/http/read-context.js';
 import { parseCinexMovies, parseCinexCinemaShowtimes } from '../../src/providers/cinex/public-pages.js';
+import { nth } from '../helpers/assert.js';
 
 const base = 'https://www.cinex.com.ve';
 const card = (slug: string, name: string, image: string, city = 'Caracas') => `<a href="cinex-${slug}.html" title="Cinex ${name}, ${city}"><img src="${base}/assets/images/cinemas/${image}"><h3>${name}</h3></a>`;
@@ -44,8 +45,8 @@ test('Cinex cinema-wide showtimes use one cinema page plus one catalog, paginate
   const s = new CinemaService(http);
   const first = await s.query('showtimes', { provider: 'cinex', cinema_id: 'SBC', date: '2026-09-18', limit: 1 });
   assert.equal(first.status, 'available'); assert.equal(first.total, 2); assert.equal(first.next_offset, 1);
-  assert.equal(first.items[0].movie_id, 'coyote'); assert.equal(first.partial, true);
-  assert.equal(first.items[0].id, '23059'); assert.equal(first.items[0].screen, '1'); assert.equal(first.items[0].language, 'es');
+  assert.equal(nth(first.items, 0).movie_id, 'coyote'); assert.equal(first.partial, true);
+  assert.equal(nth(first.items, 0).id, '23059'); assert.equal(nth(first.items, 0).screen, '1'); assert.equal(nth(first.items, 0).language, 'es');
   assert.ok(first.warnings.some(w => /catálogo|identificador/.test(w)));
   assert.deepEqual(requests, ['/cartelera.html', '/cines.html', '/cinex-sambil.html']);
 
@@ -77,7 +78,7 @@ test('Cinex movie-specific showtimes still use the movie page and do not fetch a
     return new Response('missing', { status: 404 });
   });
   const result = await new CinemaService(http).query('showtimes', { provider: 'cinex', movie_id: 'm', date: '2026-09-18' });
-  assert.equal(result.status, 'available'); assert.equal(result.total, 1); assert.equal(result.items[0].language, 'es'); assert.deepEqual(requests, ['/sinopsis-m.html']);
+  assert.equal(result.status, 'available'); assert.equal(result.total, 1); assert.equal(nth(result.items, 0).language, 'es'); assert.deepEqual(requests, ['/sinopsis-m.html']);
 });
 
 test('Cinex marks an all-malformed epoch block partial instead of returning a complete empty result', async () => {
@@ -177,7 +178,7 @@ test('Cinex city showtimes keep reads within the per-origin limit, and a city wi
     if (url.pathname === '/assets/php/datasource.php') return Response.json({ data: [{ siglas: url.searchParams.get('cinemaid'), name: url.searchParams.get('cinemaid') }] });
     if (url.pathname === '/cartelera.html') return new Response(`<div class="poster" onclick="x('sinopsis-film.html')" title="FILM"></div>`);
     const m = url.pathname.match(/^\/cinex-([a-z]+)\.html$/);
-    return m ? venue(m[1].toUpperCase()) : new Response('missing', { status: 404 });
+    return m ? venue(nth(m, 1).toUpperCase()) : new Response('missing', { status: 404 });
   }, 300);
   // Each venue page takes 200 ms against a 300 ms per-read deadline that includes queue time:
   // four reads started together would leave two waiting 200 ms in the queue and time them out.
@@ -240,7 +241,7 @@ test('Cinex movie slugs with interior dots stay in the catalog and match cinema 
   const c = new ReadContext(new HttpClient(async () => new Response('unexpected')));
   const sessions = parseCinexCinemaShowtimes(`<div class="sessionslist"><h5 class="title">SERES. PARTE 1 LA INVASION</h5><button onclick="checkLogin('77','TLN')" alt="${epoch('2026-11-04')}"></button></div>`,
     catalog, 'TLN', '2026-11-04', c, 'https://www.cinex.com.ve/cinex-tolon.html');
-  assert.equal(sessions.length, 1); assert.equal(sessions[0].movie_id, 'seres.parte1lainvasion'); assert.equal(c.partial, false);
+  assert.equal(sessions.length, 1); assert.equal(nth(sessions, 0).movie_id, 'seres.parte1lainvasion'); assert.equal(c.partial, false);
 });
 
 test('a Cinex movie_id without a synopsis page is reported as a wrong ID, not as a film without functions', async () => {

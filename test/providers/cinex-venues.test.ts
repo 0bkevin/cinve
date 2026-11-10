@@ -4,6 +4,7 @@ import { CinemaService } from '../../src/service.js';
 import { CinexCinemaCatalog } from '../../src/providers/cinex/venues.js';
 import { HttpClient } from '../../src/http/client.js';
 import { outputSchema } from '../../src/core.js';
+import { nth } from '../helpers/assert.js';
 
 const base = 'https://www.cinex.com.ve';
 const card = (slug: string, name: string, image: string, city = 'Caracas') => `<a href="cinex-${slug}.html" title="Cinex ${name}, ${city}"><img src="${base}/assets/images/cinemas/${image}"><h3>${name}</h3></a>`;
@@ -43,7 +44,7 @@ test('missing, conflicting, and mismatched codes keep directory venues and canno
     const before = requests.length;
     for (const op of ['prices', 'concessions', 'showtimes'] as const) {
       const blocked = await s.query(op, { provider: 'cinex', cinema_id: item.id, movie_id: 'movie', session_id: 'session' });
-      assert.equal(blocked.status, 'unavailable'); assert.match(blocked.warnings[0], /enlace oficial/);
+      assert.equal(blocked.status, 'unavailable'); assert.match(nth(blocked.warnings, 0), /enlace oficial/);
     }
     assert.equal(requests.length, before);
   }
@@ -54,7 +55,7 @@ test('showtime fallback tolerates whitespace and double quotes while retaining e
     '/cinex-lagomall.html': `<h3 class="title">LAGO MALL</h3><button onclick='checkLogin( "123", "LGM" )'></button>`,
   });
   const result = await s.query('cinemas', { provider: 'cinex', city: 'Caracas' });
-  assert.equal(result.items[0].id, 'LGM'); assert.equal(result.partial, false);
+  assert.equal(nth(result.items, 0).id, 'LGM'); assert.equal(result.partial, false);
 });
 
 test('Metropolis is recovered from its official detail without inventing a code from its image', async () => {
@@ -62,9 +63,9 @@ test('Metropolis is recovered from its official detail without inventing a code 
     '/cinex-metropolisbarquisimeto.html': '<h3 class="title">METROPOLIS BARQUISIMETO</h3><img src="assets/images/cinemas/xmtb.jpg">',
   }, { TLN: [{ siglas: 'TLN', name: 'TOLON' }] });
   const result = await s.query('cinemas', { provider: 'cinex', city: 'Barquisimeto' });
-  assert.equal(result.total, 1); assert.equal(result.items[0].directory_status, 'not_listed');
-  assert.equal(result.items[0].code_status, 'unverified'); assert.equal(result.items[0].cinema_id, undefined);
-  assert.equal(result.items[0].url, `${base}/cinex-metropolisbarquisimeto.html`);
+  assert.equal(result.total, 1); assert.equal(nth(result.items, 0).directory_status, 'not_listed');
+  assert.equal(nth(result.items, 0).code_status, 'unverified'); assert.equal(nth(result.items, 0).cinema_id, undefined);
+  assert.equal(nth(result.items, 0).url, `${base}/cinex-metropolisbarquisimeto.html`);
 });
 
 test('discovery seed requires matching current page evidence and is deduplicated when listed', async () => {
@@ -74,7 +75,7 @@ test('discovery seed requires matching current page evidence and is deduplicated
   assert.equal((await s.query('cinemas', { provider: 'cinex', city: 'Barquisimeto' })).total, 0);
   const listed = service(() => card('metropolisbarquisimeto', 'METROPOLIS BARQUISIMETO', 'xmtb.jpg', 'Barquisimeto'), {});
   const result = await listed.s.query('cinemas', { provider: 'cinex' });
-  assert.equal(result.total, 1); assert.equal(result.items[0].directory_status, 'listed');
+  assert.equal(result.total, 1); assert.equal(nth(result.items, 0).directory_status, 'listed');
 });
 
 test('refresh retains previously observed venues with explicit status, filters and pagination', async () => {
@@ -84,10 +85,10 @@ test('refresh retains previously observed venues with explicit status, filters a
   directory = card('second', 'Segunda', '2.jpg');
   const result = await s.query('cinemas', { provider: 'cinex', city: 'Caracas', refresh: true, limit: 1 });
   assert.equal(result.total, 2); assert.equal(result.next_offset, 1);
-  assert.equal(result.items[0].name, 'Primera'); assert.equal(result.items[0].directory_status, 'not_listed');
+  assert.equal(nth(result.items, 0).name, 'Primera'); assert.equal(nth(result.items, 0).directory_status, 'not_listed');
   assert.equal(result.sources.find(s => s.url.endsWith('/cines.html'))?.cached, false);
   const filtered = await s.query('cinemas', { provider: 'cinex', city: 'Caracas', query: 'segunda' });
-  assert.equal(filtered.total, 1); assert.equal(filtered.items[0].directory_status, 'listed');
+  assert.equal(filtered.total, 1); assert.equal(nth(filtered.items, 0).directory_status, 'listed');
 });
 
 test('Cinex cinema query filters before detail and metadata resolution', async () => {
@@ -96,7 +97,7 @@ test('Cinex cinema query filters before detail and metadata resolution', async (
     { '/cinex-sambil.html': '<h3 class="title">SAMBIL CHACAO</h3><button onclick="checkLogin(\'s\',\'SAMBIL\')"></button>' },
   );
   const result = await s.query('cinemas', { provider: 'cinex', query: 'sambil' });
-  assert.equal(result.total, 1); assert.equal(result.items[0].name, 'Sambil Chacao');
+  assert.equal(result.total, 1); assert.equal(nth(result.items, 0).name, 'Sambil Chacao');
   assert.equal(requests.filter(url => /cinex-other/.test(url)).length, 0);
 });
 
@@ -105,8 +106,8 @@ test('a detail for a different cinema cannot assign its showtime code to a liste
     '/cinex-expected.html': `<h3 class="title">OTHER CINEMA</h3><button onclick="checkLogin('session','BAD')"></button>`,
   });
   const result = await s.query('cinemas', { provider: 'cinex', city: 'Caracas' });
-  assert.equal(result.total, 1); assert.equal(result.items[0].code_status, 'unverified');
-  assert.equal(result.items[0].cinema_id, undefined);
+  assert.equal(result.total, 1); assert.equal(nth(result.items, 0).code_status, 'unverified');
+  assert.equal(nth(result.items, 0).cinema_id, undefined);
 });
 
 test('a detail code without a matching identity title remains unverified', async () => {
@@ -115,7 +116,7 @@ test('a detail code without a matching identity title remains unverified', async
   });
   const result = await s.query('cinemas', { provider: 'cinex', city: 'Caracas' });
   assert.equal(result.total, 1); assert.equal(result.partial, true);
-  assert.equal(result.items[0].code_status, 'unverified'); assert.equal(result.items[0].cinema_id, undefined);
+  assert.equal(nth(result.items, 0).code_status, 'unverified'); assert.equal(nth(result.items, 0).cinema_id, undefined);
 });
 
 test('refresh never reuses a remembered code when current metadata fails and detail identity conflicts', async () => {
@@ -135,12 +136,12 @@ test('refresh never reuses a remembered code when current metadata fails and det
   const catalog = new CinexCinemaCatalog();
   const make = () => new CinemaService(http, catalog);
   const first = await make().query('cinemas', { provider: 'cinex', city: 'Caracas', refresh: true });
-  assert.equal(first.items[0].cinema_id, 'SBC');
+  assert.equal(nth(first.items, 0).cinema_id, 'SBC');
   phase = 1;
   const before = requests.length;
   const second = await make().query('cinemas', { provider: 'cinex', city: 'Caracas', refresh: true });
-  assert.equal(second.items[0].code_status, 'unverified');
-  assert.equal(second.items[0].cinema_id, undefined);
+  assert.equal(nth(second.items, 0).code_status, 'unverified');
+  assert.equal(nth(second.items, 0).cinema_id, undefined);
   assert.ok(requests.slice(before).includes('/cinex-expected.html'));
 });
 
@@ -178,7 +179,7 @@ test('remembered metadata proof cannot authorize an empty schedule after refresh
   const catalog = new CinexCinemaCatalog();
   const make = () => new CinemaService(http, catalog);
   const first = await make().query('cinemas', { provider: 'cinex', city: 'Caracas', refresh: true });
-  assert.equal(first.items[0].cinema_id, 'SBC');
+  assert.equal(nth(first.items, 0).cinema_id, 'SBC');
   phase = 1;
   const result = await make().query('showtimes', { provider: 'cinex', cinema_id: 'SBC', date: '2026-09-18', refresh: true });
   assert.equal(result.status, 'unavailable');
@@ -198,7 +199,7 @@ test('refresh adopts a new current URL and targeted rediscovery recovers a stale
   const catalog = new CinexCinemaCatalog();
   const make = () => new CinemaService(http, catalog);
   const first = await make().query('cinemas', { provider: 'cinex', city: 'Caracas', refresh: true });
-  assert.equal(first.items[0].cinema_id, 'SBC');
+  assert.equal(nth(first.items, 0).cinema_id, 'SBC');
 
   directory = card('new', 'Expected', 'xSBC.jpg');
   const beforeRefresh = requests.length;
@@ -232,7 +233,7 @@ test('large Cinex directories have bounded discovery work while name filtering r
 
   requests.length = 0;
   const searched = await serviceForTest.query('cinemas', { provider: 'cinex', city: 'Caracas', query: 'Venue 124', refresh: true });
-  assert.equal(searched.total, 1); assert.equal(searched.items[0].name, 'Venue 124'); assert.equal(searched.partial, false);
+  assert.equal(searched.total, 1); assert.equal(nth(searched.items, 0).name, 'Venue 124'); assert.equal(searched.partial, false);
   assert.deepEqual(requests.filter(path => path.startsWith('/cinex-')), ['/cinex-venue-124.html']);
 });
 
@@ -273,8 +274,8 @@ test('Cinex verified unlisted/detail codes survive a separate service through a 
     return new Response('missing', { status: 404 });
   }), catalog);
   const discovered = await make().query('cinemas', { provider: 'cinex', city: 'Barquisimeto' });
-  assert.equal(discovered.total, 1); assert.equal(discovered.items[0].cinema_id, 'MTB');
-  assert.equal(discovered.items[0].directory_status, 'not_listed');
+  assert.equal(discovered.total, 1); assert.equal(nth(discovered.items, 0).cinema_id, 'MTB');
+  assert.equal(nth(discovered.items, 0).directory_status, 'not_listed');
   const before = requests.length;
   const showtimes = await make().query('showtimes', { provider: 'cinex', cinema_id: 'MTB', date: '2026-09-18' });
   assert.equal(showtimes.status, 'available'); assert.equal(showtimes.total, 1);
@@ -399,6 +400,6 @@ test('Cinex venue discovery checks its budget before each follow-up read of an a
   });
   const r = await new CinemaService(http, new CinexCinemaCatalog(10)).query('cinemas', { provider: 'cinex', city: 'Caracas' });
   assert.deepEqual(reads, ['/cines.html', '/assets/php/datasource.php'], 'no detail read after the budget is spent');
-  assert.equal(r.partial, true); assert.equal(r.items[0].code_status, 'unverified');
+  assert.equal(r.partial, true); assert.equal(nth(r.items, 0).code_status, 'unverified');
   assert.ok(r.warnings.some(w => /tiempo de comprobación de A/.test(w)), r.warnings.join(' | '));
 });

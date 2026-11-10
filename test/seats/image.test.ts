@@ -13,6 +13,7 @@ import { HttpClient } from '../../src/http/client.js';
 import { createServer } from '../../src/mcp/server.js';
 import { SeatResult } from '../../src/seats/schema.js';
 import { cpBuy, EmptySessionStore, page } from '../helpers/fixtures.js';
+import { capture, nth } from '../helpers/assert.js';
 
 // Cinepic Candelaria's room on 2026-11-05: invertida "1", so its website draws
 // column 15 (seat A:5) left of column 23 (seat A:1).
@@ -33,7 +34,7 @@ test('seat maps follow each provider website: Cinepic screen on top, numbered ri
   // The ASCII map uses the same orientation.
   const ascii = renderSeats(seats, layout).split('\n');
   assert.equal(ascii[2], '[ PANTALLA ]');
-  assert.ok(ascii[4].indexOf('A:1O') < ascii[4].indexOf('A:5O'), ascii[4]);
+  assert.ok(nth(ascii, 4).indexOf('A:1O') < nth(ascii, 4).indexOf('A:5O'), ascii[4]);
   assert.deepEqual(seatLayout('cinepic', { butacas: [{ ...cp('1', 'A:1'), invertida: '0' }] }).column_order, 'ascending');
 });
 
@@ -134,7 +135,7 @@ test('Cinepic seats and ticket counters follow the purchase page', async t => {
   assert.equal(cinepicBookableTypes([]), 'all', 'an empty list keeps the map states');
   assert.deepEqual([...cinepicBookableTypes([{ id: '08' }, { id: 'vip' }]) as Set<string>], ['8', 'vip']);
   assert.equal(cinepicTicketsLeft({ tot: '9'.repeat(30), vend: '0', temp: '0' }), undefined, 'an unsafe integer is not a count');
-  assert.equal(cinepicTicketsLeft(tarifas[0]), 146); assert.equal(cinepicTicketsLeft({ tot: '5' }), undefined);
+  assert.equal(cinepicTicketsLeft(nth(tarifas, 0)), 146); assert.equal(cinepicTicketsLeft({ tot: '5' }), undefined);
   const body = page({ ...cpBuy, butacasData: butacas, functionData: { datos: [{ id: 'f1', codigo: 'p1' }], tarifas } });
   const server = createServer(new CinemaService(new HttpClient(async () => new Response(body), 15000, new EmptySessionStore())));
   const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
@@ -220,7 +221,7 @@ test('second review: raster budget, real glyph widths, and long tariff names', a
   assert.ok(png.readUInt32BE(16) * png.readUInt32BE(20) <= MAX_PNG_PIXELS, `${png.readUInt32BE(16)}x${png.readUInt32BE(20)}`);
   // Wide letters are measured, not counted: 42 W's do not fit a 560-wide header.
   const svg = renderSeatMapSvg([s('A', '1', 0, 0)], seatLayout('cinesunidos'), { ...header, movie: 'W'.repeat(42) });
-  const title = svg.match(/font-size="20" font-weight="700" fill="#202124">([^<]*)</)![1];
+  const title = capture(svg, /font-size="20" font-weight="700" fill="#202124">([^<]*)</);
   assert.ok(title.endsWith('…') && textWidth(title, 20, true) <= 560 - 56, title);
   assert.ok(textWidth('W', 20, true) > 2 * textWidth('i', 20, true));
   // A tariff name over 60 characters still reports its counter in the warning.
@@ -254,20 +255,21 @@ function decodePng(png: Uint8Array) {
     assert.equal(b.readUInt32BE(at + 8 + length), crc32(b.subarray(at + 4, at + 8 + length)), `CRC of ${type}`);
     (chunks[type] ??= []).push(b.subarray(at + 8, at + 8 + length)); at += 12 + length;
   }
-  assert.ok(chunks.IEND, 'IEND');
-  const ihdr = chunks.IHDR[0], width = ihdr.readUInt32BE(0), height = ihdr.readUInt32BE(4);
+  const { IHDR, PLTE, IDAT, IEND, tRNS } = chunks;
+  assert.ok(IHDR && PLTE && IDAT && IEND, 'IHDR, PLTE, IDAT and IEND');
+  const ihdr = nth(IHDR, 0), width = ihdr.readUInt32BE(0), height = ihdr.readUInt32BE(4);
   assert.deepEqual([ihdr[8], ihdr[9], ihdr[12]], [8, 3, 0], '8-bit indexed, not interlaced');
-  const plte = chunks.PLTE[0], trns = chunks.tRNS?.[0] ?? Buffer.alloc(0);
+  const plte = nth(PLTE, 0), trns = tRNS?.[0] ?? Buffer.alloc(0);
   assert.ok(plte.length % 3 === 0 && plte.length <= 768 && trns.length <= plte.length / 3);
-  const raw = inflateSync(Buffer.concat(chunks.IDAT));
+  const raw = inflateSync(Buffer.concat(IDAT));
   assert.equal(raw.length, (width + 1) * height);
   const rgba = new Uint8Array(width * height * 4);
   for (let y = 0; y < height; y++) {
     assert.equal(raw[y * (width + 1)], 0, 'filter None');
     for (let x = 0; x < width; x++) {
-      const k = raw[y * (width + 1) + 1 + x], o = (y * width + x) * 4;
+      const k = nth(raw, y * (width + 1) + 1 + x), o = (y * width + x) * 4;
       assert.ok(k * 3 < plte.length, 'index within the palette');
-      rgba.set([plte[k * 3], plte[k * 3 + 1], plte[k * 3 + 2], k < trns.length ? trns[k] : 255], o);
+      rgba.set([nth(plte, k * 3), nth(plte, k * 3 + 1), nth(plte, k * 3 + 2), k < trns.length ? nth(trns, k) : 255], o);
     }
   }
   const at = (x: number, y: number) => '#' + [...rgba.subarray((y * width + x) * 4, (y * width + x) * 4 + 3)].map(v => v.toString(16).padStart(2, '0')).join('') + (rgba[(y * width + x) * 4 + 3] === 255 ? '' : `/${rgba[(y * width + x) * 4 + 3]}`);
@@ -277,11 +279,14 @@ function decodePng(png: Uint8Array) {
 test('the PNG is an indexed image that keeps every seat colour exact and the card corners transparent', async () => {
   const s = (i: number, status: 'available' | 'occupied' | 'unavailable' | 'unknown') => ({ label: `R${Math.floor(i / 40)}:${i % 40 + 1}`, row: `R${Math.floor(i / 40)}`, area: '1', row_index: Math.floor(i / 40), column_index: i % 40, status });
   // A big room where one seat is unknown: its colour is rare next to thousands of anti-aliased edges, and still exact.
-  const seats = Array.from({ length: 2400 }, (_, i) => s(i, i === 1234 ? 'unknown' : (['available', 'occupied', 'unavailable'] as const)[i % 3]));
+  const seats = Array.from({ length: 2400 }, (_, i) => s(i, i === 1234 ? 'unknown' : nth(['available', 'occupied', 'unavailable'] as const, i % 3)));
   const svg = renderSeatMapSvg(seats, seatLayout('cinesunidos'), header);
   const png = decodePng(await renderSeatMapPng(svg));
-  const scale = png.width / Number(svg.match(/width="(\d+)"/)![1]);
-  const fillAt = (label: string) => { const [, x, y] = svg.match(new RegExp(`<title>${label}:[^<]*</title><rect x="([\\d.]+)" y="([\\d.]+)"`))!; return png.at(Math.round((+x + 3) * scale), Math.round((+y + 13) * scale)); };
+  const scale = png.width / Number(capture(svg, /width="(\d+)"/));
+  const fillAt = (label: string) => {
+    const seat = new RegExp(`<title>${label}:[^<]*</title><rect x="([\\d.]+)" y="([\\d.]+)"`), x = capture(svg, seat, 1), y = capture(svg, seat, 2);
+    return png.at(Math.round((+x + 3) * scale), Math.round((+y + 13) * scale));
+  };
   assert.equal(fillAt('R30:35'), '#f9ab00', 'the only unknown seat');
   assert.equal(fillAt('R0:1'), '#1e8e3e'); assert.equal(fillAt('R0:2'), '#80868b'); assert.equal(fillAt('R0:3'), '#eceff1');
   assert.equal(png.at(0, 0), '#000000/0', 'outside the rounded card');
@@ -294,7 +299,7 @@ test('the PNG encoder handles more than 256 colours, unaligned input and the ren
   for (let i = 0; i < width * height; i++) rgba.set([(i % 64) * 4, Math.floor(i / 64) * 4, 128, 255], i * 4);
   const png = decodePng(encodeIndexedPng(rgba, width, height));
   assert.deepEqual([png.width, png.height], [64, 64]);
-  for (const [x, y] of [[0, 0], [63, 0], [17, 40], [63, 63]]) {
+  for (const [x, y] of [[0, 0], [63, 0], [17, 40], [63, 63]] as const) {
     const [r, g] = [parseInt(png.at(x, y).slice(1, 3), 16), parseInt(png.at(x, y).slice(3, 5), 16)];
     assert.ok(Math.abs(r - x * 4) <= 24 && Math.abs(g - y * 4) <= 24, `${x},${y}: ${png.at(x, y)}`);
   }
@@ -309,6 +314,6 @@ test('the PNG encoder handles more than 256 colours, unaligned input and the ren
   // Concurrent calls share one initialization and each gets its own image.
   const svg = renderSeatMapSvg(parseCinepicSeats(map), seatLayout('cinepic', map), header);
   const images = await Promise.all(Array.from({ length: 8 }, () => renderSeatMapPng(svg)));
-  assert.ok(images.every(image => Buffer.from(image).equals(Buffer.from(images[0]))));
-  assert.ok(decodePng(images[0]).width > 500);
+  assert.ok(images.every(image => Buffer.from(image).equals(Buffer.from(nth(images, 0)))));
+  assert.ok(decodePng(nth(images, 0)).width > 500);
 });

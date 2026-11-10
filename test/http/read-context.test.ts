@@ -9,6 +9,7 @@ import { SessionStore } from '../../src/auth/sessions.js';
 import { CinemaService } from '../../src/service.js';
 import { EmptySessionStore } from '../helpers/fixtures.js';
 import { DataError } from '../../src/core.js';
+import { nth } from '../helpers/assert.js';
 
 test('ReadContext deduplicates provenance by the final canonical URL, not the requested alias', async () => {
   const source = 'https://www.cinex.com.ve/cinex-sambil.html';
@@ -18,7 +19,7 @@ test('ReadContext deduplicates provenance by the final canonical URL, not the re
     : new Response('canonical cinema page'));
   const context = new ReadContext(http);
   await context.get(source); await context.get(target);
-  assert.equal(context.sources.length, 1); assert.equal(context.sources[0].url, target);
+  assert.equal(context.sources.length, 1); assert.equal(nth(context.sources, 0).url, target);
 });
 
 const cinexJar = JSON.stringify({ version: 'tough-cookie@4.1.4', storeType: 'MemoryCookieStore', rejectPublicSuffixes: true, cookies: [{ key: 'PHPSESSID', value: 'x', domain: 'www.cinex.com.ve', path: '/', hostOnly: true, creation: new Date().toISOString(), lastAccessed: new Date().toISOString() }] });

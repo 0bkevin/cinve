@@ -3,13 +3,14 @@ import assert from 'node:assert/strict';
 import { CinemaService } from '../../src/service.js';
 import { HttpClient } from '../../src/http/client.js';
 import { cpBuy, cpSessions, mockFetch, page, EmptySessionStore } from '../helpers/fixtures.js';
+import { nth } from '../helpers/assert.js';
 
 const service = () => new CinemaService(new HttpClient(mockFetch, 15000, new EmptySessionStore()));
 
 test('Cinepic joins films to scheduled functions, excluding unscheduled releases', async () => {
   const result = await service().query('movies', { provider: 'cinepic', cinema_id: '123300', date: '2026-09-11' });
   assert.equal(result.status, 'available'); assert.equal(result.total, 1);
-  assert.equal(result.items[0].name, 'Película Uno');
+  assert.equal(nth(result.items, 0).name, 'Película Uno');
 });
 test('movie_id filters Cinepic movies and does not silently return another film', async () => {
   const result = await service().query('movies', { provider: 'cinepic', cinema_id: '123300', movie_id: 'p2', date: '2026-09-11' });
@@ -25,8 +26,8 @@ test('overnight times remain commercial dates and do not invent a calendar times
 test('Cinepic tariffs preserve VES and label the provider-derived USD without exposing configuration', async () => {
   const result = await service().query('prices', { provider: 'cinepic', cinema_id: '123300', session_id: 'f1', movie_id: 'p1' });
   assert.equal(result.status, 'available');
-  assert.deepEqual(result.items[0].prices, [{ currency: 'VES', amount: 4162.4, basis: 'provider' }, { currency: 'USD', amount: 5, basis: 'provider_conversion' }]);
-  assert.equal(result.items[0].final_total_verified, false);
+  assert.deepEqual(nth(result.items, 0).prices, [{ currency: 'VES', amount: 4162.4, basis: 'provider' }, { currency: 'USD', amount: 5, basis: 'provider_conversion' }]);
+  assert.equal(nth(result.items, 0).final_total_verified, false);
   assert.equal(JSON.stringify(result).includes('SHOULD_NOT_LEAVE_PARSER'), false);
 });
 test('mismatched function/movie cannot return another ticket price', async () => {
@@ -87,16 +88,16 @@ test('Cinepic does not invent a USD price if the provider rate is zero', async (
   const s = new CinemaService(new HttpClient(async () => new Response(page(props))));
   const result = await s.query('prices', { provider: 'cinepic', cinema_id: '123300', movie_id: 'p1', session_id: 'f1' });
   assert.equal(result.status, 'available');
-  assert.deepEqual(result.items[0].prices, [{ currency: 'VES', amount: 4162.4, basis: 'provider' }]);
+  assert.deepEqual(nth(result.items, 0).prices, [{ currency: 'VES', amount: 4162.4, basis: 'provider' }]);
 });
 
 test('schema drift fails visibly instead of reporting an empty catalog', async () => {
   const s = new CinemaService(new HttpClient(async () => new Response(JSON.stringify({ ...cpSessions, data: { datos: [] } }))));
   const r = await s.query('movies', { provider: 'cinepic', cinema_id: '123300' });
-  assert.equal(r.status, 'error'); assert.match(r.warnings[0], /estructura/);
+  assert.equal(r.status, 'error'); assert.match(nth(r.warnings, 0), /estructura/);
 });
 test('invalid ticket amount is an error rather than zero', async () => {
-  const props = structuredClone(cpBuy); props.functionData.tarifas[0].precio = 'no disponible';
+  const props = structuredClone(cpBuy); nth(props.functionData.tarifas, 0).precio = 'no disponible';
   const s = new CinemaService(new HttpClient(async () => new Response(page(props))));
   const r = await s.query('prices', { provider: 'cinepic', cinema_id: '123300', movie_id: 'p1', session_id: 'f1' });
   assert.equal(r.status, 'error');
@@ -111,8 +112,8 @@ test('Cinepic omits unknown subtitle and overnight flags and marks the result pa
   const result = await service.query('showtimes', { provider: 'cinepic', cinema_id: '123300', date: '2026-09-18' });
   assert.equal(result.status, 'available');
   assert.equal(result.partial, true);
-  assert.equal(result.items[0].language, undefined);
-  assert.equal(result.items[0].starts_at, undefined);
+  assert.equal(nth(result.items, 0).language, undefined);
+  assert.equal(nth(result.items, 0).starts_at, undefined);
   assert.ok(result.warnings.some(w => /subtítulos/.test(w)));
   assert.ok(result.warnings.some(w => /trasnoche/.test(w)));
 });
@@ -128,7 +129,7 @@ test('Cinepic retains both known venues when one site fails or changes its confi
     assert.equal(r.items.find(i => i.id === '123301')?.code_status, 'verified');
     assert.equal(r.items.find(i => i.name === 'Cinepic Candelaria')?.code_status, 'unverified');
     const cities = await s.query('cities', { provider: 'cinepic' });
-    assert.equal(cities.items[0].name, 'Caracas'); assert.equal(cities.partial, false);
+    assert.equal(nth(cities.items, 0).name, 'Caracas'); assert.equal(cities.partial, false);
   }
 });
 
@@ -144,7 +145,7 @@ test('Cinepic retains movie references when scheduled sessions lack movie metada
   const s = new CinemaService(new HttpClient(async () => Response.json(payload)));
   const q = { provider: 'cinepic' as const, cinema_id: '123300', date: '2026-09-18' };
   const r = await s.query('movies', q);
-  assert.equal(r.total, 1); assert.equal(r.items[0].id, 'p1'); assert.equal(r.partial, true);
+  assert.equal(r.total, 1); assert.equal(nth(r.items, 0).id, 'p1'); assert.equal(r.partial, true);
   assert.equal((await s.query('showtimes', q)).partial, true);
 });
 
@@ -160,5 +161,5 @@ test('explicit Cinepic provider failure is distinct from an unrecognized page sc
   const html = page({ shell: true }) + '<div>No pudimos mostrar la función. (Ref: AC-001)</div>';
   const service = new CinemaService(new HttpClient(async () => new Response(html)));
   const r = await service.query('prices', { provider: 'cinepic', cinema_id: '123300', movie_id: 'p1', session_id: 'f1' });
-  assert.equal(r.status, 'unavailable'); assert.match(r.warnings[0], /AC-001/); assert.equal(r.sources.length, 1);
+  assert.equal(r.status, 'unavailable'); assert.match(nth(r.warnings, 0), /AC-001/); assert.equal(r.sources.length, 1);
 });

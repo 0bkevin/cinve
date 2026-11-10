@@ -7,6 +7,7 @@ import { mockFetch, page, EmptySessionStore, cuMovies } from '../helpers/fixture
 import { inputSchema } from '../../src/mcp/server.js';
 import { cuLanguage, cuSiteTitle } from '../../src/providers/cinesunidos/adapter.js';
 import type { DataItem } from '../../src/core.js';
+import { nth } from '../helpers/assert.js';
 
 const url = 'https://www.cinex.com.ve/boletos.php?cinemaid=TLN&sessionid=s1';
 
@@ -14,8 +15,8 @@ test('CU uses UI price fields, preserves restrictions and checks cinema/session/
   const value = [{ cinemaId: '1002', sessionId: 's1', scheduledFilmId: 'm1', allowTicketSales: false, user: 'PRIVATE_PROFILE', tickets: [{ ticketTypeCode: 't1', areaCategoryCode: 'a1', description: 'Mayor', redemptionOnly: true, isChildOnlyTicket: false, priceInCents: 99999, price: { refPrice: 2, total: 1664.97, exchangeRate: 832.49, grossPrice: { total: 1664.98 } } }] }];
   const query = { provider: 'cinesunidos' as const, cinema_id: '1002', session_id: 's1', movie_id: 'm1' };
   const items = parseCinesUnidosPrices(value, query, 'https://gateway.cinesunidos.com/');
-  assert.deepEqual(items[0].prices?.map(p => p.amount), [2, 1664.97]);
-  assert.equal(items[0].redemption_only, true); assert.equal(items[0].sales_allowed, false);
+  assert.deepEqual(nth(items, 0).prices?.map(p => p.amount), [2, 1664.97]);
+  assert.equal(nth(items, 0).redemption_only, true); assert.equal(nth(items, 0).sales_allowed, false);
   assert.ok(!JSON.stringify(items).includes('PRIVATE_PROFILE'));
   for (const change of [{ cinema_id: '1005' }, { session_id: 'other' }, { movie_id: 'other' }]) assert.throws(() => parseCinesUnidosPrices(value, { ...query, ...change }, url));
 });
@@ -24,8 +25,8 @@ const service = () => new CinemaService(new HttpClient(mockFetch, 15000, new Emp
 
 test('Cines Unidos filters by day, cinema and movie; timezone has one offset', async () => {
   const result = await service().query('showtimes', { provider: 'cinesunidos', city: 'Caracas', date: '2026-09-11', cinema_id: '1005', movie_id: 'HO1' });
-  assert.equal(result.total, 1); assert.equal(result.items[0].id, 's3');
-  assert.equal(result.items[0].starts_at, '2026-09-11T21:00:00-04:00');
+  assert.equal(result.total, 1); assert.equal(nth(result.items, 0).id, 's3');
+  assert.equal(nth(result.items, 0).starts_at, '2026-09-11T21:00:00-04:00');
 });
 
 test('missing product prices never become free, and stock zero remains zero', async () => {
@@ -39,11 +40,11 @@ test('service preserves a named cinema with malformed code as a nonqueryable dir
   const result = await new CinemaService(http).query('cinemas', { provider: 'cinesunidos', city: 'Caracas' });
   assert.equal(result.status, 'available');
   assert.equal(result.partial, true);
-  assert.equal(result.items[0].code_status, 'unverified');
-  assert.equal(result.items[0].cinema_id, undefined);
-  assert.match(result.items[0].id, /^directory-/);
+  assert.equal(nth(result.items, 0).code_status, 'unverified');
+  assert.equal(nth(result.items, 0).cinema_id, undefined);
+  assert.match(nth(result.items, 0).id, /^directory-/);
   assert.equal(result.total, 1);
-  assert.match(result.warnings[0], /sede conservada/);
+  assert.match(nth(result.warnings, 0), /sede conservada/);
 });
 
 const cu = (html: string) => new CinemaService(new HttpClient(async () => new Response(html)));
@@ -77,7 +78,7 @@ test('CU retries unrecognized city spellings with the official canonical city an
     return new Response(url.searchParams.get('city') === 'Maturín' ? page({ theaters: [{ id: '1007', name: 'Petroriente' }] }) : page({ error: 'Unknown city' }));
   }));
   const r = await s.query('cinemas', { ...cq, city: 'Maturin' });
-  assert.equal(r.status, 'available'); assert.equal(r.items[0].city, 'Maturín');
+  assert.equal(r.status, 'available'); assert.equal(nth(r.items, 0).city, 'Maturín');
   assert.ok(requests.some(u => u.includes('Matur%C3%ADn')));
   const missing = await s.query('cinemas', { ...cq, city: 'Atlantis' });
   assert.equal(missing.status, 'unavailable'); assert.match(missing.warnings.join(' '), /ciudad/i);
@@ -97,18 +98,18 @@ test('CU directory identity and pagination remain stable when unknown-code rows 
   const next = await cu(page({ theaters: [...rows].reverse() })).query('cinemas', { ...cq, offset: 1, limit: 1 });
   const again = await cu(page({ theaters: [...rows].reverse() })).query('cinemas', { ...cq, limit: 1 });
   assert.equal(first.total, 2); assert.equal(first.next_offset, 1); assert.equal(next.next_offset, null);
-  assert.equal(first.items[0].id, again.items[0].id); assert.notEqual(first.items[0].id, next.items[0].id);
+  assert.equal(nth(first.items, 0).id, nth(again.items, 0).id); assert.notEqual(nth(first.items, 0).id, nth(next.items, 0).id);
 });
 
 test('CU movie catalogs also combine component blocks rather than accepting the first empty list', async () => {
   const html = page({ movies: [] }) + page({ movies: [{ vistaId: 'M', title: 'Movie', theaters: [{ id: '1002', showTimes: [{ id: 'S', date: '2026-09-18T18:00:00' }] }] }] });
   const r = await cu(html).query('movies', { ...cq, date: '2026-09-18' });
-  assert.equal(r.total, 1); assert.equal(r.items[0].id, 'M');
+  assert.equal(r.total, 1); assert.equal(nth(r.items, 0).id, 'M');
 });
 
 test('invalid dates and unusable upstream IDs fail visibly instead of returning bad showtimes', async () => {
   for (const patch of [{ date: '2026-09-11T29:99:99' }, { id: '../../unsafe' }]) {
-    const data = structuredClone(cuMovies); Object.assign(data.movies[0].theaters[0].showTimes[0], patch);
+    const data = structuredClone(cuMovies); Object.assign(nth(nth(nth(data.movies, 0).theaters, 0).showTimes, 0), patch);
     const service = new CinemaService(new HttpClient(async () => new Response(page(data))));
     const r = await service.query('showtimes', { provider: 'cinesunidos', city: 'Caracas', date: '2026-09-11' });
     assert.equal(r.status, 'error'); assert.deepEqual(r.items, []);
@@ -135,7 +136,7 @@ test('Cines Unidos falls back to its public search API when the website challeng
   });
   const s = new CinemaService(http);
   const cinemas = await s.query('cinemas', { provider: 'cinesunidos', city: 'merida' });
-  assert.equal(cinemas.status, 'available'); assert.equal(cinemas.items[0].cinema_id, '1012'); assert.equal(cinemas.items[0].city, 'Mérida');
+  assert.equal(cinemas.status, 'available'); assert.equal(nth(cinemas.items, 0).cinema_id, '1012'); assert.equal(nth(cinemas.items, 0).city, 'Mérida');
   assert.ok(cinemas.warnings.some(w => /API pública de búsqueda/.test(w)));
   const showtimes = await s.query('showtimes', { provider: 'cinesunidos', city: 'Mérida', cinema_id: '1012', date: '2026-11-04' });
   assert.deepEqual(showtimes.items.map(i => [i.id, i.movie_id, i.time, i.screen, i.starts_at]), [['44788', 'HO00006098', '18:15', '2', '2026-11-04T18:15:00-04:00']]);

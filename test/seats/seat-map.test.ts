@@ -7,6 +7,7 @@ import { CinemaService } from '../../src/service.js';
 import { HttpClient } from '../../src/http/client.js';
 import { assertPrivateRead } from '../../src/http/allow-list.js';
 import { EmptySessionStore, page } from '../helpers/fixtures.js';
+import { nth } from '../helpers/assert.js';
 
 const cp = (overrides = {}) => ({ butaca: 'A-1-1', nombre_butaca: 'A:1', fila: '1', columna: '1', libre: '1', seleccionada: '1', tipo_butaca_id: '1', ...overrides });
 test('Cinepic availability ignores seleccionada and preserves physical labels, gaps, and unknown states', () => {
@@ -20,7 +21,7 @@ test('Cinepic availability ignores seleccionada and preserves physical labels, g
 test('Cines Unidos keeps special and unknown states separate from free seats', () => {
   const data = { seats: { areas: [{ number: 1, areaCategoryCode: 'general', rows: [{ rowIndexZeroBased: 0, physicalName: 'P', seats: [0, 1, 2, 3, 4, 5, 6, 7, 99].map((status, columnIndex) => ({ id: String(columnIndex + 1), status, position: { areaNumber: 1, rowIndex: 0, columnIndex } })) }] }] } };
   assert.deepEqual(parseCinesUnidosSeats(data).map(s => s.status), ['available', 'occupied', 'occupied', 'unavailable', 'unavailable', 'unavailable', 'unavailable', 'available', 'unknown']);
-  data.seats.areas[0].rows[0].seats[0].position.areaNumber = 2;
+  nth(nth(nth(data.seats.areas, 0).rows, 0).seats, 0).position.areaNumber = 2;
   assert.throws(() => parseCinesUnidosSeats(data));
 });
 test('seat reads bypass cached price pages and retain function identity checks', async () => {
@@ -47,7 +48,7 @@ test('Cinex map verifies function identity, occupied states, gaps, and unknown c
   const q = { provider: 'cinex' as const, cinema_id: 'SBC', session_id: 's1' };
   const seats = parseCinexSeats(cinexMap, q);
   assert.deepEqual(seats.map(s => s.status), ['available', 'occupied', 'unknown']);
-  assert.equal(seats[1].column_index, 2);
+  assert.equal(nth(seats, 1).column_index, 2);
   assert.throws(() => parseCinexSeats(cinexMap, { ...q, session_id: 'other' }));
   assert.throws(() => parseCinexSeats(cinexMap, { ...q, cinema_id: 'TLN' }));
   assert.throws(() => parseCinexSeats(cinexMap.replace('B1\',', 'ZZ\','), q));
@@ -79,13 +80,13 @@ test('Cinex seat workflow uses only authenticated GETs and rejects an interleave
 test('Cinex VIP availability accepts empty selected-ticket count without relaxing seat state checks', () => {
   const q = { provider: 'cinex' as const, cinema_id: 'SBC', session_id: 's1' };
   const vip = cinexMap.replaceAll('seatestandar', 'seatvipplus').replace("'0001','0','N','N'", "'0001','','N','N'");
-  assert.equal(parseCinexSeats(vip, q)[0].status, 'available');
-  assert.equal(parseCinexSeats(vip, q)[0].category, '0001');
-  assert.equal(parseCinexSeats(vip.replace("'0001','','N','N'", "'0001','','S','N'"), q)[0].status, 'unavailable');
-  assert.equal(parseCinexSeats(vip.replace("'0001','','N','N'", "'0001','','N','S'"), q)[0].status, 'unavailable');
-  assert.equal(parseCinexSeats(vip.replace('alt="0"', 'alt="1"'), q)[0].status, 'unknown');
-  assert.equal(parseCinexSeats(vip.replace("'0001','','N','N'", "'0001','garbage','N','N'"), q)[0].status, 'unknown');
-  assert.equal(parseCinexSeats(vip.replace('decideAsientoNew', 'unrecognized'), q)[0].status, 'unknown');
+  assert.equal(nth(parseCinexSeats(vip, q), 0).status, 'available');
+  assert.equal(nth(parseCinexSeats(vip, q), 0).category, '0001');
+  assert.equal(nth(parseCinexSeats(vip.replace("'0001','','N','N'", "'0001','','S','N'"), q), 0).status, 'unavailable');
+  assert.equal(nth(parseCinexSeats(vip.replace("'0001','','N','N'", "'0001','','N','S'"), q), 0).status, 'unavailable');
+  assert.equal(nth(parseCinexSeats(vip.replace('alt="0"', 'alt="1"'), q), 0).status, 'unknown');
+  assert.equal(nth(parseCinexSeats(vip.replace("'0001','','N','N'", "'0001','garbage','N','N'"), q), 0).status, 'unknown');
+  assert.equal(nth(parseCinexSeats(vip.replace('decideAsientoNew', 'unrecognized'), q), 0).status, 'unknown');
   assert.throws(() => parseCinexSeats(vip.replace("('B1',", "('WRONG',"), q));
 });
 
@@ -127,7 +128,7 @@ test('the ASCII map is oriented as each provider website draws it', () => {
   const map = { butacas: [cp({ butaca: 'A-15-1', columna: '15', nombre_butaca: 'A:5', invertida: '1' }), cp({ butaca: 'A-23-1', columna: '23', nombre_butaca: 'A:1', invertida: '1' })] };
   const lines = renderSeats(parseCinepicSeats(map), seatLayout('cinepic', map)).split('\n');
   assert.equal(lines[1], 'Orientado como la web del proveedor: pantalla arriba.'); assert.equal(lines[2], '[ PANTALLA ]');
-  assert.ok(lines[4].indexOf('A:1O') < lines[4].indexOf('A:5O'), lines[4]);
+  assert.ok(nth(lines, 4).indexOf('A:1O') < nth(lines, 4).indexOf('A:5O'), lines[4]);
   assert.deepEqual(seatLayout('cinesunidos'), { screen: 'bottom', column_order: 'ascending' });
   assert.deepEqual(seatLayout('cinex'), { screen: 'bottom', column_order: 'ascending' });
   assert.match(renderSeats(parseCinepicSeats(map)), /que no indica el lado de la pantalla/, 'no layout claims nothing');
