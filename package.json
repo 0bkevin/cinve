@@ -34,8 +34,7 @@
     "start:remote": "node dist/remote-main.js",
     "db:migrate": "tsx src/hosted-admin.ts migrate",
     "db:cleanup": "tsx src/hosted-admin.ts cleanup",
-    "build:hosted": "tsc -p tsconfig.hosted.json && cp .hosted/server.js .hosted/index.js && mkdir -p .hosted/src/assets && cp src/assets/* .hosted/src/assets/ && cp node_modules/@resvg/resvg-wasm/index_bg.wasm .hosted/src/assets/resvg.wasm",
-    "test:codex-auth": "npm run build && node scripts/verify-codex-auth.mjs"
+    "build:hosted": "tsc -p tsconfig.hosted.json && cp .hosted/server.js .hosted/index.js && mkdir -p .hosted/src/assets && cp src/assets/* .hosted/src/assets/ && cp node_modules/@resvg/resvg-wasm/index_bg.wasm .hosted/src/assets/resvg.wasm"
   },
   "dependencies": {
     "@modelcontextprotocol/client": "^2.0.0",
