@@ -12,8 +12,8 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     let app = apps.get(publicOrigin);
     if (!app) {
       const { CINEV_PUBLIC_URL, CINEV_ENCRYPTION_KEY } = process.env;
-      if (!CINEV_PUBLIC_URL || !/^[a-f0-9]{64}$/.test(CINEV_ENCRYPTION_KEY ?? '')) throw new Error('Missing configuration');
-      app = createHostedApp({ publicUrl: publicOrigin, pool: databasePool(), key: Buffer.from(CINEV_ENCRYPTION_KEY!, 'hex'),
+      if (!CINEV_PUBLIC_URL || CINEV_ENCRYPTION_KEY === undefined || !/^[a-f0-9]{64}$/.test(CINEV_ENCRYPTION_KEY)) throw new Error('Missing configuration');
+      app = createHostedApp({ publicUrl: publicOrigin, pool: databasePool(), key: Buffer.from(CINEV_ENCRYPTION_KEY, 'hex'),
         trustedVercelProxy: true, cleanupSecret: process.env.CRON_SECRET });
       apps.set(publicOrigin, app);
     }

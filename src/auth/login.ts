@@ -2,6 +2,7 @@ import { CookieJar } from 'tough-cookie';
 import { load } from 'cheerio';
 import { AuthProvider, SessionStore } from './sessions.js';
 import type { AuthProviderId } from './sessions.js';
+import { isObj } from '../core.js';
 
 class LoginError extends Error {}
 
@@ -54,6 +55,16 @@ export class LoginHttp {
   }
 }
 
+/**
+ * `value[key]` on parsed JSON, read the way plain property access reads it:
+ * null and undefined throw a TypeError, and any other non-object has no such
+ * field. Typed access to the provider's answer, with the failures unchanged.
+ */
+function member(value: unknown, key: string): unknown {
+  if (value === null || value === undefined) throw new TypeError(`Cannot read ${key} of ${value}.`);
+  return isObj(value) ? value[key] : undefined;
+}
+
 export async function login(provider: AuthProviderId, username: string, password: string, store = new SessionStore(), request: typeof fetch = fetch) {
   AuthProvider.parse(provider);
   const http = new LoginHttp(provider, request);
@@ -64,36 +75,41 @@ export async function login(provider: AuthProviderId, username: string, password
       const form = new FormData(); form.set('username', username); form.set('password', password);
       const r = await http.read(`${base}/assets/php/validatelogin.php`, { method: 'POST', body: form,
         headers: { Origin: base, Referer: `${base}/`, 'X-Requested-With': 'XMLHttpRequest' } });
-      let data; try { data = JSON.parse(r.body); } catch { throw new LoginError('Cinex no aceptó la solicitud de login.'); }
-      if (data.result !== 'OK') throw new LoginError('Cinex no aceptó el login. Revisa las credenciales en su sitio.');
+      let data: unknown; try { data = JSON.parse(r.body); } catch { throw new LoginError('Cinex no aceptó la solicitud de login.'); }
+      if (member(data, 'result') !== 'OK') throw new LoginError('Cinex no aceptó el login. Revisa las credenciales en su sitio.');
       if ((await http.read(`${base}/checklogin.php`)).body.trim() !== 'on') throw new LoginError('Cinex no estableció una sesión válida.');
       // An upper bound: Cinex's PHP session can end much sooner when idle (seen under an hour).
       await store.save({ version: 1, provider, expires_at: Date.now() + 24 * 3600000, saved_at: Date.now(), cookie_jar: JSON.stringify(await http.jar.serialize()) });
-      return { provider, authenticated: true, profile_update_requested: data.usuario_dataupdate !== 'S' };
+      return { provider, authenticated: true, profile_update_requested: member(data, 'usuario_dataupdate') !== 'S' };
     }
     const base = 'https://www.cinesunidos.com';
-    const csrf = JSON.parse((await http.read(`${base}/api/auth/csrf`)).body).csrfToken;
+    const csrf = member(JSON.parse((await http.read(`${base}/api/auth/csrf`)).body), 'csrfToken');
     if (typeof csrf !== 'string' || !csrf) throw new LoginError('Cines Unidos no entregó CSRF de login.');
     const form = new URLSearchParams({ csrfToken: csrf, callbackUrl: `${base}/?city=Caracas`, json: 'true' });
-    const start = JSON.parse((await http.read(`${base}/api/auth/signin/keycloak`, { method: 'POST', body: form })).body);
-    const page = await http.read(start.url);
+    const start = member(JSON.parse((await http.read(`${base}/api/auth/signin/keycloak`, { method: 'POST', body: form })).body), 'url');
+    // String() is the conversion new URL() applies to a non-string anyway.
+    const page = await http.read(String(start));
     const $ = load(page.body), loginForm = $('form').filter((_, el) => $(el).find('input[type=password]').length > 0).first();
     const action = loginForm.attr('action');
     if (!action) throw new LoginError('El proveedor requiere un paso de login adicional que aún no se admite.');
     const target = new URL(action, page.url);
     if (target.origin !== 'https://keycloak.cinesunidos.com' || target.pathname !== '/realms/cinesunidos/login-actions/authenticate') throw new LoginError('Formulario de login no reconocido.');
     const fields = new URLSearchParams();
-    loginForm.find('input[type=hidden][name]').each((_, el) => { fields.set($(el).attr('name')!, $(el).attr('value') ?? ''); });
+    loginForm.find('input[type=hidden][name]').each((_, el) => {
+      const name = $(el).attr('name');
+      if (name !== undefined) fields.set(name, $(el).attr('value') ?? '');
+    });
     fields.set('username', username); fields.set('password', password); fields.set('login', 'Sign In');
     const callback = await http.read(target.href, { method: 'POST', body: fields });
     if (new URL(callback.url).origin !== base) throw new LoginError('Login incompleto: credenciales rechazadas o verificación adicional requerida.');
-    const data = JSON.parse((await http.read(`${base}/api/auth/session`)).body);
-    if (typeof data.access_token !== 'string') throw new LoginError('Cines Unidos no entregó una sesión autenticada.');
+    const token = member(JSON.parse((await http.read(`${base}/api/auth/session`)).body), 'access_token');
+    if (typeof token !== 'string') throw new LoginError('Cines Unidos no entregó una sesión autenticada.');
     // Only inspect expiry to bound local reuse; the upstream API validates the token itself.
-    const claims = JSON.parse(Buffer.from(data.access_token.split('.')[1], 'base64url').toString());
-    const expiry = Number(claims.exp) * 1000;
+    const payload = token.split('.')[1];
+    if (payload === undefined) throw new TypeError('The access token has no payload.');
+    const expiry = Number(member(JSON.parse(Buffer.from(payload, 'base64url').toString()), 'exp')) * 1000;
     if (!Number.isFinite(expiry) || expiry <= Date.now()) throw new LoginError('El token de Cines Unidos ya expiró.');
-    await store.save({ version: 1, provider, expires_at: expiry, saved_at: Date.now(), access_token: data.access_token });
+    await store.save({ version: 1, provider, expires_at: expiry, saved_at: Date.now(), access_token: token });
     return { provider, authenticated: true, profile_update_requested: false };
   } catch (e) {
     // Never surface provider HTML, personal data, request objects, or credential-bearing URLs.
