@@ -4,7 +4,7 @@ import { DataError, Id, Provider, Source, Status, requireArg, text } from './cor
 import type { Query } from './core.js';
 import { HttpClient, ReadContext } from './http.js';
 import type { CallOptions } from './http.js';
-import { cinepicTicketsLeft, cinepicVenueName, cpBuy } from './providers.js';
+import { cinepicTicketsLeft, cinepicVenueName, cpBuy } from './providers/cinepic/sites.js';
 import { findField, object, rows } from './providers/parsing.js';
 
 // Unicode property escapes (\p{L}) are invalid in Python's re and RE2, and

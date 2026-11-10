@@ -4,7 +4,8 @@ import { DataError, folded, operationItemSchema, PublicUrl, Result, today, Id } 
 import type { DataItem, Operation, Query, QueryResult } from './core.js';
 import { HttpClient, ReadContext } from './http.js';
 import type { CallOptions } from './http.js';
-import { cinepic, cinesunidos, cinex } from './providers.js';
+import { cinesunidos, cinex } from './providers.js';
+import { cinepic } from './providers/cinepic/adapter.js';
 
 const resultWarningLimit = 64;
 const resultWarningCharacters = 8192;

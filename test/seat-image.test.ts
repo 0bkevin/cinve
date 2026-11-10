@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
 import { Client } from '@modelcontextprotocol/client';
 import { cinepicBookableTypes, parseCinepicSeats, parseCinexShowing, renderSeats, seatLayout } from '../src/seats.js';
-import { cinepicTicketsLeft } from '../src/providers.js';
+import { cinepicTicketsLeft } from '../src/providers/cinepic/sites.js';
 import { crc32, inflateSync } from 'node:zlib';
 import { encodeIndexedPng, MapTooLarge, MAX_PNG_PIXELS, renderSeatMapPng, renderSeatMapSvg, seatNumber, textWidth } from '../src/seat-image.js';
 import { CinemaService } from '../src/service.js';
