@@ -280,16 +280,19 @@ export class HttpClient {
       // edge proxy, while at least half of this read's deadline remains. Never
       // 4xx, 429, 503 (maintenance, often with Retry-After), timeouts, or
       // authenticated reads, whose pages can act on the account's session.
-      const canRetry = () => !authorize && deadline - Date.now() > timeout / 2;
+      let retried = false;
+      const canRetry = () => !retried && !authorize && deadline - Date.now() > timeout / 2;
       let response: Response;
       try { response = await requestPage(url); }
       catch (error) {
         if (signal.aborted || error instanceof DataError || !canRetry()) throw error;
+        retried = true;
         await withSignal(new Promise(resolve => setTimeout(resolve, retryPause())), signal);
         response = await requestPage(url);
       }
       if (transientStatus(response.status) && canRetry()) {
         cancelBody(response.body);
+        retried = true;
         await withSignal(new Promise(resolve => setTimeout(resolve, retryPause())), signal);
         response = await requestPage(url);
       }

@@ -95,6 +95,17 @@ test('a public read retries once after a dropped connection or a 502/504, never 
   assert.equal(calls, 2);
 });
 
+test('a read retries at most once, even when the retry itself hits a 502', async () => {
+  let calls = 0;
+  const http = new HttpClient(async () => {
+    calls++;
+    if (calls === 1) throw new TypeError('fetch failed');
+    return calls === 2 ? new Response('', { status: 502 }) : new Response('["Caracas"]');
+  });
+  await assert.rejects(http.get('https://gateway.cinesunidos.com/search/cities'), DataError);
+  assert.equal(calls, 2);
+});
+
 test('authenticated reads are never retried', async () => {
   let calls = 0;
   const sessions = new class extends EmptySessionStore { override async headers() { return { Authorization: 'Bearer synthetic' }; } };
