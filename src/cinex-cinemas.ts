@@ -8,6 +8,9 @@ const detailPath = /^cinex-[A-Za-z0-9_-]{1,80}\.html$/;
 type Venue = { href: string; name: string; city: string; image?: string };
 const normalizedName = (name: string) => folded(name).replace(/^cinex\s+/, '').replace(/[^a-z0-9]/g, '');
 const cinemaPageTtl = 120000;
+// Venue identity (code and name) changes about as often as the directory, so
+// metadata lives as long: a warm list_cinemas then needs no read per venue.
+const metadataTtl = 3600000, directoryTtl = 3600000;
 /** A directory page that lists venues; an error or maintenance page is not cached. */
 const directoryPage = (body: string) => /href=["']?cinex-/.test(body);
 const maxDiscoveryVenues = 100;
@@ -104,7 +107,7 @@ export class CinexCinemaCatalog {
     const candidate = imageCode(image);
     if (!candidate || !Id.safeParse(candidate).success) return undefined;
     try {
-      const data = await c.json(metadataUrl(candidate)) as { data?: unknown };
+      const data = await c.json(metadataUrl(candidate), metadataTtl) as { data?: unknown };
       if (!Array.isArray(data?.data)) return undefined;
       const match = data.data.find(r => r && typeof r.name === 'string' && typeof r.siglas === 'string'
         && r.siglas.toUpperCase() === candidate && normalizedName(r.name) === normalizedName(venueName));
@@ -120,7 +123,7 @@ export class CinexCinemaCatalog {
     const finishWarnings = () => {
       if (suppressedWarnings) c.warnings.push(`Se omitieron ${suppressedWarnings} advertencias adicionales de descubrimiento de sedes.`);
     };
-    const $ = load(await c.get(`${base}/cines.html`, 3600000, directoryPage));
+    const $ = load(await c.get(`${base}/cines.html`, directoryTtl, directoryPage));
     const links = $('a[href^="cinex-"]');
     if (!links.length) throw new DataError('error', 'No se reconoció el listado de cines Cinex.');
     const listed = new Map<string, Venue>();
@@ -313,7 +316,7 @@ export class CinexCinemaCatalog {
   }
 
   private async locate(cinemaId: string, c: ReadContext): Promise<Located> {
-    const $ = load(await c.get(`${base}/cines.html`, 3600000, directoryPage));
+    const $ = load(await c.get(`${base}/cines.html`, directoryTtl, directoryPage));
     const matches: Venue[] = [];
     $('a[href^="cinex-"]').each((_, e) => {
       const href = $(e).attr('href') ?? '';
@@ -365,7 +368,7 @@ export class CinexCinemaCatalog {
     // Verify the requested code against Cinex metadata instead of trusting the
     // directory image filename alone.
     let data: unknown;
-    try { data = await c.json(metadataUrl(cinemaId)); } catch (error) {
+    try { data = await c.json(metadataUrl(cinemaId), metadataTtl); } catch (error) {
       // As 'unavailable', a stopped call would make resolve() forget a verified URL.
       if (error instanceof CallStopped) throw error;
       throw new DataError('unavailable', 'Cinex no confirmó el código de la sede sin funciones visibles.');
@@ -383,7 +386,7 @@ export class CinexCinemaCatalog {
 
   private async metadataName(cinemaId: string, c: ReadContext): Promise<string | undefined> {
     try {
-      const data = await c.json(metadataUrl(cinemaId));
+      const data = await c.json(metadataUrl(cinemaId), metadataTtl);
       const rows = Array.isArray(data) ? data : data && typeof data === 'object' && Array.isArray((data as { data?: unknown }).data) ? (data as { data: unknown[] }).data : [];
       const match = rows.find(row => row && typeof row === 'object' && typeof (row as { siglas?: unknown }).siglas === 'string' &&
         typeof (row as { name?: unknown }).name === 'string' && (row as { siglas: string }).siglas.toUpperCase() === cinemaId);

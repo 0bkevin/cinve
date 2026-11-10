@@ -515,8 +515,8 @@ export class ReadContext {
     return page;
   }
   /** Only a body that parses is cached; an HTML error page in its place is reported and asked for again. */
-  async json(url: string): Promise<unknown> {
-    try { return JSON.parse(await this.get(url, undefined, isJson)); }
+  async json(url: string, ttl?: number): Promise<unknown> {
+    try { return JSON.parse(await this.get(url, ttl, isJson)); }
     catch (e) { if (e instanceof DataError) throw e; throw new DataError('error', 'El proveedor no devolvió JSON válido.'); }
   }
 }

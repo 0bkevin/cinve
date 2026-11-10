@@ -154,6 +154,10 @@ la fuente Inter incluida en `src/assets`, sin depender de fuentes del sistema.
   entrada usada hace más tiempo. Las páginas HTML de Cinex se guardan con los
   espacios en blanco compactados. Las sesiones y los mapas
   de asientos no usan caché.
+- Duración en caché: una hora para ciudades, directorios de sedes y datos de
+  identidad de sede de Cinex; 10 minutos para la tasa de Cinepic y 5 para su
+  caramelería; 2 minutos para carteleras, funciones y la caramelería de Cines
+  Unidos (que publica stock); 1 minuto para la página de compra de Cinepic.
 - Solo se guardan respuestas correctas: un error HTTP, un cuerpo vacío, un JSON
   inválido o una página sin la estructura esperada (por ejemplo, una página de
   mantenimiento) se informan y se vuelven a pedir en la siguiente consulta.

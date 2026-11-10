@@ -51,6 +51,8 @@ function providerWarningSummary(c: ReadContext) {
   if (state.aggregateIndex !== undefined && state.suppressed > 1) c.warnings[state.aggregateIndex] = `Se omitieron ${state.suppressed} diagnósticos repetidos o excedentes del proveedor; la respuesta puede ser parcial.`;
 }
 
+// Cache lifetimes by how fast the data changes. Seats are never cached.
+const hourTtl = 3600000, catalogTtl = 120000;
 /** A Next.js page that still carries its data stream; anything else is not cached. */
 const flightPage = (body: string) => body.includes('self.__next_f.push(');
 
@@ -118,7 +120,7 @@ export async function cinepic(op: Operation, q: Query, c: ReadContext): Promise<
     return Promise.all(Object.entries(CP).map(async ([id, site]) => {
       const url = `${site.host}/es-AR`;
       try {
-        const records = flight(await c.get(url, 3600000, flightPage));
+        const records = flight(await c.get(url, hourTtl, flightPage));
         const configs = [...objects(records)].filter(r => text(r.idUltracine) === id && text(r.nombre));
         const config = configs[0];
         if (!config || text(config.nombre).length > 512 || configs.some(r => text(r.nombre) !== text(config.nombre))) {
@@ -137,13 +139,15 @@ export async function cinepic(op: Operation, q: Query, c: ReadContext): Promise<
       const site = cpSite(q), api = `https://api.cinexo.com.ar/api/complejo/${encodeURIComponent(q.cinema_id!)}`;
       // The purchase page embeds this same catalog as candyData, so an empty one
       // means Cinepic's own checkout offers no products either (seen 2026-11-05).
-      const units = rows(object(await c.json(`${api}/candy`)).unidades_negocios, 'candy.unidades_negocios');
+      // Cinepic publishes no stock; the catalog and its rate change slowly, and
+      // its backend can take ~19 s to answer, so both are kept a few minutes.
+      const units = rows(object(await c.json(`${api}/candy`, 5 * 60000)).unidades_negocios, 'candy.unidades_negocios');
       if (!units.length) {
         c.warnings.push('El catálogo de caramelería que Cinepic publica para esta sede está vacío; su web de compra usa ese mismo catálogo y tampoco ofrece productos. No implica que no venda en taquilla.');
         return [];
       }
       let rate: number | undefined;
-      try { rate = number(object(object(await c.json(`${api}/configuration`)).datos).tasaConversion); } catch (e) { if (e instanceof CallStopped) throw e; }
+      try { rate = number(object(object(await c.json(`${api}/configuration`, 10 * 60000)).datos).tasaConversion); } catch (e) { if (e instanceof CallStopped) throw e; }
       if (rate === undefined || rate <= 0) rate = undefined;
       c.warnings.push(`Precios en VES del catálogo en línea de Cinepic (su web los muestra en Bs.); ${rate ? 'USD con su tasa de conversión, no una tasa BCV verificada' : 'sin tasa de conversión de Cinepic, se omite la equivalencia USD'}. Cinepic no publica stock; cargos finales no verificados.`);
       // JSON API strings are literal: a leading "$" is a name, not a Next.js reference as text() assumes.
@@ -254,7 +258,7 @@ export async function cinepic(op: Operation, q: Query, c: ReadContext): Promise<
 const CU = 'https://www.cinesunidos.com';
 export async function cinesunidos(op: Operation, q: Query, c: ReadContext): Promise<DataItem[]> {
   if (op === 'cities') {
-    const data = await c.json('https://gateway.cinesunidos.com/search/cities');
+    const data = await c.json('https://gateway.cinesunidos.com/search/cities', hourTtl);
     if (!Array.isArray(data) || data.some(r => typeof r !== 'string')) throw new DataError('error', 'Lista de ciudades no reconocida.');
     return data.map(r => ({ kind: 'city', id: r, name: r }));
   }
@@ -284,7 +288,7 @@ export async function cinesunidos(op: Operation, q: Query, c: ReadContext): Prom
   let url = `${CU}/${op === 'cinemas' ? 'cines' : 'cartelera'}?${new URLSearchParams({ city })}`;
   let fields: unknown[];
   try {
-    fields = pageFields(flight(await c.get(url, op === 'cinemas' ? 3600000 : 120000, flightPage)), key);
+    fields = pageFields(flight(await c.get(url, op === 'cinemas' ? hourTtl : catalogTtl, flightPage)), key);
     if (!fields.length) {
       // The provider's city filter is accent-sensitive. Retry only with a name
       // actually returned by its official city registry, never guess a city.
@@ -292,7 +296,7 @@ export async function cinesunidos(op: Operation, q: Query, c: ReadContext): Prom
       if (canonical !== city) {
         city = canonical;
         url = `${CU}/${op === 'cinemas' ? 'cines' : 'cartelera'}?${new URLSearchParams({ city })}`;
-        fields = pageFields(flight(await c.get(url, op === 'cinemas' ? 3600000 : 120000, flightPage)), key);
+        fields = pageFields(flight(await c.get(url, op === 'cinemas' ? hourTtl : catalogTtl, flightPage)), key);
       }
     }
   } catch (error) {
@@ -378,7 +382,7 @@ async function cinesUnidosGateway(op: Operation, q: Query, c: ReadContext, reque
   const base = `https://gateway.cinesunidos.com/search/cities/${encodeURIComponent(city)}`;
   const pageUrl = (path: string) => `${CU}/${path}?${new URLSearchParams({ city })}`;
   c.warnings.push('La web de Cines Unidos rechazó la consulta automatizada; los datos provienen de su API pública de búsqueda.');
-  if (op === 'cinemas') return parseCinemaDirectory([rows(await c.json(`${base}/theaters`), 'gateway theaters')], city, pageUrl('cines'), c);
+  if (op === 'cinemas') return parseCinemaDirectory([rows(await c.json(`${base}/theaters`, hourTtl), 'gateway theaters')], city, pageUrl('cines'), c);
   const films = await c.json(`${base}/films`);
   if (!Array.isArray(films) || films.some(t => typeof t !== 'string')) throw new DataError('error', 'Lista de películas de Cines Unidos no reconocida.');
   // The service filters results by name; the session title is the searched
@@ -614,7 +618,7 @@ export function parseCinexCinemaShowtimes(html: string, movies: DataItem[], cine
 }
 export async function cinex(op: Operation, q: Query, c: ReadContext, catalog = new CinexCinemaCatalog()): Promise<DataItem[]> {
   if (op === 'cities') {
-    const data = object(await c.json(cxSource('getcinemacitieslist')));
+    const data = object(await c.json(cxSource('getcinemacitieslist'), hourTtl));
     return rows(data.data, 'cities.data').map(r => ({ kind: 'city', id: decodeLabel(r.cinema_city), name: decodeLabel(r.cinema_city) }));
   }
   if (op === 'cinemas') return catalog.list(q, c);
