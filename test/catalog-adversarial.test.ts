@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CinemaService } from '../src/service.js';
-import { HttpClient } from '../src/http.js';
+import { HttpClient } from '../src/http/client.js';
 import { page, cpSessions } from './fixtures.js';
 
 const cu = (html: string) => new CinemaService(new HttpClient(async () => new Response(html)));

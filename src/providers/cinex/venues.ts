@@ -1,7 +1,7 @@
 import { load } from 'cheerio';
 import { DataError, folded, Id } from '../../core.js';
 import type { DataItem, Query } from '../../core.js';
-import { CallStopped, type ReadContext } from '../../http.js';
+import { CallStopped, type ReadContext } from '../../http/client.js';
 
 const base = 'https://www.cinex.com.ve';
 const detailPath = /^cinex-[A-Za-z0-9_-]{1,80}\.html$/;

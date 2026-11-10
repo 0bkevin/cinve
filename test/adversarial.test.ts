@@ -5,7 +5,7 @@ import { mkdtemp, mkdir, rm, symlink, writeFile, readFile } from 'node:fs/promis
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { setTimeout as delay, setImmediate as tick } from 'node:timers/promises';
-import { HttpClient } from '../src/http.js';
+import { HttpClient } from '../src/http/client.js';
 import { SessionStore, LoginHttp, login, assertPrivateRead } from '../src/auth.js';
 import { CinemaService } from '../src/service.js';
 import { DataError } from '../src/core.js';

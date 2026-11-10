@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { HttpClient, ReadContext, decodeBody } from '../src/http.js';
+import { HttpClient, ReadContext, decodeBody } from '../src/http/client.js';
 import { SessionStore } from '../src/auth.js';
 import { CinemaService } from '../src/service.js';
 import { DataError } from '../src/core.js';

@@ -2,8 +2,8 @@ import { load } from 'cheerio';
 import * as z from 'zod';
 import { DataError, Id, Provider, Source, Status, requireArg, text } from './core.js';
 import type { Query } from './core.js';
-import { HttpClient, ReadContext } from './http.js';
-import type { CallOptions } from './http.js';
+import { HttpClient, ReadContext } from './http/client.js';
+import type { CallOptions } from './http/client.js';
 import { cinepicTicketsLeft, cinepicVenueName, cpBuy } from './providers/cinepic/sites.js';
 import { findField, object, rows } from './providers/parsing.js';
 

@@ -7,7 +7,7 @@ import { cinepicTicketsLeft } from '../src/providers/cinepic/sites.js';
 import { crc32, inflateSync } from 'node:zlib';
 import { encodeIndexedPng, MapTooLarge, MAX_PNG_PIXELS, renderSeatMapPng, renderSeatMapSvg, seatNumber, textWidth } from '../src/seat-image.js';
 import { CinemaService } from '../src/service.js';
-import { HttpClient } from '../src/http.js';
+import { HttpClient } from '../src/http/client.js';
 import { createServer } from '../src/server.js';
 import { SeatResult } from '../src/seats.js';
 import { cpBuy, EmptySessionStore, page } from './fixtures.js';

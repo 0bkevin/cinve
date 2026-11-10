@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CookieJar } from 'tough-cookie';
 import { SessionStore, LoginHttp, login } from '../src/auth.js';
-import { HttpClient } from '../src/http.js';
+import { HttpClient } from '../src/http/client.js';
 import { CinemaService } from '../src/service.js';
 import { DataError } from '../src/core.js';
 

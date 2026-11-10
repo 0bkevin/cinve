@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseCinepicSeats, parseCinesUnidosSeats, parseCinexSeats, renderSeats, seatLayout } from '../src/seats.js';
 import { CinemaService } from '../src/service.js';
-import { HttpClient } from '../src/http.js';
+import { HttpClient } from '../src/http/client.js';
 import { assertPrivateRead } from '../src/auth.js';
 import { EmptySessionStore, page } from './fixtures.js';
 const cp = (overrides = {}) => ({ butaca: 'A-1-1', nombre_butaca: 'A:1', fila: '1', columna: '1', libre: '1', seleccionada: '1', tipo_butaca_id: '1', ...overrides });

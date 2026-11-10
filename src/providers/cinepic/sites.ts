@@ -4,7 +4,7 @@
 import { load } from 'cheerio';
 import { DataError, Id, requireArg, text } from '../../core.js';
 import type { Query } from '../../core.js';
-import type { ReadContext } from '../../http.js';
+import type { ReadContext } from '../../http/client.js';
 import { findField, flight, object, rows } from '../parsing.js';
 import { flightPage } from '../read-policy.js';
 

@@ -3,7 +3,7 @@
 import { load } from 'cheerio';
 import { DataError, folded, Id, number } from '../../core.js';
 import type { DataItem } from '../../core.js';
-import { ReadContext } from '../../http.js';
+import { ReadContext } from '../../http/client.js';
 import { decodeLabel } from '../parsing.js';
 import { providerWarning, providerWarningSummary, warningLabel } from '../diagnostics.js';
 

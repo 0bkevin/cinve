@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { HttpClient, ReadContext } from '../src/http.js';
+import { HttpClient, ReadContext } from '../src/http/client.js';
 import { DataError } from '../src/core.js';
 
 const origin = 'https://gateway.cinesunidos.com';

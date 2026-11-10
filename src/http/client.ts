@@ -1,8 +1,8 @@
-import { DataError, Id } from './core.js';
+import { DataError, Id } from '../core.js';
 import type { z } from 'zod';
-import type { Source } from './core.js';
-import { SessionStore, assertPrivateRead } from './auth.js';
-import type { AuthProviderId } from './auth.js';
+import type { Source } from '../core.js';
+import { SessionStore, assertPrivateRead } from '../auth.js';
+import type { AuthProviderId } from '../auth.js';
 
 export type EvidenceSource = z.infer<typeof Source>;
 type Page = { body: string; source: EvidenceSource };

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CinemaService } from '../src/service.js';
-import { HttpClient } from '../src/http.js';
+import { HttpClient } from '../src/http/client.js';
 import { DateInput } from '../src/core.js';
 import { findField, flight } from '../src/providers/parsing.js';
 import { inputSchema } from '../src/server.js';
