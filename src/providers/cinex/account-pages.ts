@@ -1,6 +1,8 @@
+// Pages Cinex serves only to a logged-in account: a function's ticket prices
+// (boletos.php) and a venue's concessions (concesiones.php).
 import { load } from 'cheerio';
-import { DataError, number, text } from './core.js';
-import type { DataItem, Query } from './core.js';
+import { DataError, number, text } from '../../core.js';
+import type { DataItem, Query } from '../../core.js';
 
 /** "Bs. 21.477,36", and whole amounts such as the "Bs. 0" of a membership ticket. */
 function bolivars(raw: string) {

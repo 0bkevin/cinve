@@ -12,7 +12,7 @@ import { createMcpHandler } from '@modelcontextprotocol/server';
 import { toNodeHandler } from '@modelcontextprotocol/node';
 import { createServer } from './server.js';
 import { CinemaService } from './service.js';
-import { CinexCinemaCatalog } from './cinex-cinemas.js';
+import { CinexCinemaCatalog } from './providers/cinex/venues.js';
 import { HttpClient } from './http.js';
 import { HostedHttpClient } from './hosted-http.js';
 import { SessionStore, login } from './auth.js';

@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CinemaService } from '../src/service.js';
-import { CinexCinemaCatalog } from '../src/cinex-cinemas.js';
+import { CinexCinemaCatalog } from '../src/providers/cinex/venues.js';
 import { HttpClient, ReadContext, assertPublicRead } from '../src/http.js';
 import { DataError, Id } from '../src/core.js';
-import { parseCinexMovies, parseCinexCinemaShowtimes } from '../src/providers.js';
+import { parseCinexMovies, parseCinexCinemaShowtimes } from '../src/providers/cinex/adapter.js';
 import { cuLanguage, cuSiteTitle } from '../src/providers/cinesunidos/adapter.js';
 import type { DataItem } from '../src/core.js';
 import { page } from './fixtures.js';

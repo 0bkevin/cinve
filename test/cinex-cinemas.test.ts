@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CinemaService } from '../src/service.js';
-import { CinexCinemaCatalog } from '../src/cinex-cinemas.js';
+import { CinexCinemaCatalog } from '../src/providers/cinex/venues.js';
 import { HttpClient } from '../src/http.js';
 import { outputSchema } from '../src/core.js';
 import { inputSchema } from '../src/server.js';

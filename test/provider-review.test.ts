@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CinemaService } from '../src/service.js';
 import { HttpClient, ReadContext } from '../src/http.js';
-import { cinexSessionDetails, parseCinexCinemaShowtimes, parseCinexShowtimes } from '../src/providers.js';
+import { cinexSessionDetails, parseCinexCinemaShowtimes, parseCinexShowtimes } from '../src/providers/cinex/adapter.js';
 
 const epoch = (date: string, time = '20:00') => Math.floor((Date.parse(`${date}T${time}:00Z`) + 4 * 3600000) / 1000);
 const movie = { kind: 'movie' as const, id: 'm', name: 'KNOWN' };

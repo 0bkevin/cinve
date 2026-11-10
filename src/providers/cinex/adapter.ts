@@ -1,12 +1,12 @@
-import { CinexCinemaCatalog } from './cinex-cinemas.js';
+import { CinexCinemaCatalog } from './venues.js';
 import { load } from 'cheerio';
-import { DataError, folded, Id, isoDate, number, requireArg, text } from './core.js';
-import type { DataItem, Operation, Query } from './core.js';
-import { ReadContext } from './http.js';
-import { checkedShowtime, decodeLabel, object, rows } from './providers/parsing.js';
-import { providerWarning, providerWarningSummary, warningLabel } from './providers/diagnostics.js';
-import { catalogTtl, hourTtl } from './providers/read-policy.js';
-import { parseCinexPrices, parseCinexConcessions } from './authenticated-parsers.js';
+import { DataError, folded, Id, isoDate, number, requireArg, text } from '../../core.js';
+import type { DataItem, Operation, Query } from '../../core.js';
+import { ReadContext } from '../../http.js';
+import { checkedShowtime, decodeLabel, object, rows } from '../parsing.js';
+import { providerWarning, providerWarningSummary, warningLabel } from '../diagnostics.js';
+import { catalogTtl, hourTtl } from '../read-policy.js';
+import { parseCinexPrices, parseCinexConcessions } from './account-pages.js';
 
 const CX = 'https://www.cinex.com.ve';
 const cxSource = (method: string, id?: string) => `${CX}/assets/php/datasource.php?${new URLSearchParams({ method, ...(id ? { cinemaid: id } : {}) })}`;

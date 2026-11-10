@@ -131,7 +131,7 @@ Asistente MCP → servidor Cinve → adaptador del proveedor → sitio o API del
 
 - `src/server.ts`: contrato y herramientas MCP.
 - `src/service.ts`: respuestas, filtros y paginación.
-- `src/providers.ts`: integración con los proveedores.
+- `src/providers/`: integración con los proveedores, una carpeta por cadena.
 - `src/http.ts`: acceso HTTP, límites y caché.
 - `src/providers/parsing.ts`: lectura segura de JSON y HTML.
 - `src/auth.ts`: sesiones locales autorizadas.

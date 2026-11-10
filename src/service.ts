@@ -1,10 +1,10 @@
 import { getSeatMap } from './seats.js';
-import { CinexCinemaCatalog } from './cinex-cinemas.js';
+import { CinexCinemaCatalog } from './providers/cinex/venues.js';
 import { DataError, folded, operationItemSchema, PublicUrl, Result, today, Id } from './core.js';
 import type { DataItem, Operation, Query, QueryResult } from './core.js';
 import { HttpClient, ReadContext } from './http.js';
 import type { CallOptions } from './http.js';
-import { cinex } from './providers.js';
+import { cinex } from './providers/cinex/adapter.js';
 import { cinesunidos } from './providers/cinesunidos/adapter.js';
 import { cinepic } from './providers/cinepic/adapter.js';
 
