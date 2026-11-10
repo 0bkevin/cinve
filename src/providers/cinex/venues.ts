@@ -40,7 +40,7 @@ const cityAreas: Readonly<Record<string, string>> = {
   cabimas: 'maracaibo',
 };
 /** Whether a venue labelled with `town` belongs to the requested city or area. */
-export function inCinexCity(town: string, city: string): boolean {
+function inCinexCity(town: string, city: string): boolean {
   const venue = folded(town), wanted = folded(city);
   return venue === wanted || cityAreas[venue] === wanted;
 }

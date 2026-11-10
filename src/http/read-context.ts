@@ -22,7 +22,7 @@ export class CallStopped extends DataError {
  * backend), so a call stays near 75 s (85 s at worst),
  * under the hosted 90 s limit, however its reads are chained or fanned out.
  */
-export const operationBudgetMs = 60000;
+const operationBudgetMs = 60000;
 export class ReadContext {
   sources: EvidenceSource[] = [];
   warnings: string[] = [];

@@ -25,7 +25,7 @@ const escape = (value: string) => value.replace(invalidXml, '').replace(/[&<>"']
 /** Thrown before drawing a map whose image would exceed MAX_MAP_HEIGHT; the data answer is unaffected. */
 export class MapTooLarge extends Error {}
 /** In SVG units: about 90 rows of seats, far above any room seen (13-16 rows). */
-export const MAX_MAP_HEIGHT = 3000;
+const MAX_MAP_HEIGHT = 3000;
 /** Output pixels per PNG: about 12 MB of RGBA. Taller maps are scaled down instead of refused. */
 export const MAX_PNG_PIXELS = 3_000_000;
 // Advance widths of the bundled Inter (per mille of an em) for ASCII 32-126,

@@ -23,7 +23,7 @@ import * as z from 'zod';
  *   and gives up after 5 s.
  */
 
-export const metadataDocumentLimitBytes = 16 * 1024;
+const metadataDocumentLimitBytes = 16 * 1024;
 const metadataTimeoutMs = 5000;
 
 /**

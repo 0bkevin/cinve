@@ -22,7 +22,7 @@ export const PublicUrl = z.string().max(4096).refine(value => {
 }, 'URL HTTPS sin credenciales');
 export const Source = z.object({ url: PublicUrl, fetched_at: z.string(), cached: z.boolean() });
 export type Operation = 'cities' | 'cinemas' | 'movies' | 'showtimes' | 'prices' | 'concessions';
-export const Item = z.object({
+const Item = z.object({
   kind: z.enum(['provider', 'city', 'cinema', 'movie', 'showtime', 'ticket_price', 'concession']),
   id: z.string().min(1).max(200), name: z.string().min(1).max(512),
   cinema_id: Id.optional(), cinema_name: z.string().min(1).max(200).optional(), movie_id: Id.optional(), session_id: Id.optional(),

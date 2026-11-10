@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
-export const escapeHtml = (value: string) => value.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+const escapeHtml = (value: string) => value.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
 // Palette, typography and spacing follow portfoliov2's global.css and Tailwind theme.
 const styles = `
@@ -30,7 +30,7 @@ export function installationPage(origin: string) {
   return publicPage('Cómo usar Cinve', `<p class="eyebrow">Cómo usarlo</p><h1>Cinve en tu asistente.</h1><p>Envía este mensaje a tu asistente para que te ayude a añadir Cinve:</p><div class="instruction"><p id="install-message">Instala Cinve siguiendo ${escapeHtml(origin)}/install</p></div><div class="actions"><button id="copy-install" type="button" hidden>Copiar mensaje</button></div><p id="copy-feedback" class="note" role="status" aria-live="polite"></p><div class="card"><h2>Si lo añades a mano</h2><p>En las conexiones de tu asistente, añade un servidor MCP llamado <strong>Cinve</strong> con esta dirección:</p><small><strong>${escapeHtml(origin)}/mcp</strong></small><p class="note">Elige HTTP si te pide el tipo de conexión. Tu asistente debe admitir servidores MCP remotos.</p></div><p>Después, pregunta qué películas hay en tu ciudad. Para consultar la cartelera no necesitas una cuenta. Si una consulta requiere conectarte al cine, tu asistente te dará un enlace privado.</p><a href="/install?format=text">Ver las instrucciones completas para el asistente</a>`, { compact: true, script: '/site.js' });
 }
 
-export const siteScript = `const button=document.getElementById('copy-install');button.hidden=false;button.onclick=async()=>{try{await navigator.clipboard.writeText(document.getElementById('install-message').textContent);document.getElementById('copy-feedback').textContent='Mensaje copiado. Pégalo en tu asistente.';}catch{document.getElementById('copy-feedback').textContent='Selecciona el mensaje y cópialo para enviarlo a tu asistente.';}};`;
+const siteScript = `const button=document.getElementById('copy-install');button.hidden=false;button.onclick=async()=>{try{await navigator.clipboard.writeText(document.getElementById('install-message').textContent);document.getElementById('copy-feedback').textContent='Mensaje copiado. Pégalo en tu asistente.';}catch{document.getElementById('copy-feedback').textContent='Selecciona el mensaje y cópialo para enviarlo a tu asistente.';}};`;
 
 export function authorizationPage(app: string, destination: string, id: string, csrf: string, publisher?: string) {
   // A metadata-document client is identified by the site that publishes it;
