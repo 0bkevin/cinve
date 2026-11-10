@@ -1,6 +1,7 @@
 import { DataError } from '../core.js';
 import type { AuthProviderId } from '../auth.js';
-import { assertPublicRead, HttpClient } from './client.js';
+import { HttpClient } from './client.js';
+import { assertPublicRead } from './allow-list.js';
 import type { EvidenceSource, Page } from './client.js';
 import { exclusive } from './account-lock.js';
 

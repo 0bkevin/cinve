@@ -1,7 +1,8 @@
-import { DataError, Id } from '../core.js';
+import { DataError } from '../core.js';
 import type { z } from 'zod';
 import type { Source } from '../core.js';
-import { SessionStore, assertPrivateRead } from '../auth.js';
+import { SessionStore } from '../auth.js';
+import { assertPrivateRead, publicHosts } from './allow-list.js';
 import type { AuthProviderId } from '../auth.js';
 
 export type EvidenceSource = z.infer<typeof Source>;
@@ -18,7 +19,6 @@ const cacheEntries = 512, cacheBytesLimit = 64 * 1024 * 1024;
 // within seconds. Remember it per origin so later public reads fail fast (or
 // take an adapter's documented fallback) instead of being refused again.
 const challengeMemoryMs = 10 * 60 * 1000;
-const hosts = new Set(['www.cinex.com.ve', 'www.cinesunidos.com', 'gateway.cinesunidos.com', 'cinepiccandelaria.com', 'cinepicvip.com', 'apifront.cinexo.com.ar', 'api.cinexo.com.ar']);
 // Cinepic's backend (api.cinexo.com.ar) has been seen taking ~19 s on its own
 // side, even to plain curl, and its sites render from it. These origins get a
 // longer read deadline (25 s at the default 15 s) so a slow-but-working
@@ -157,7 +157,7 @@ export class HttpClient {
    */
   async get(url: string, ttl = 120000, refresh = false, accept?: (body: string) => boolean): Promise<Page> {
     const parsed = new URL(url);
-    if (parsed.protocol !== 'https:' || !hosts.has(parsed.hostname) || parsed.port || parsed.username || parsed.password || parsed.hash) throw new DataError('error', 'Origen de consulta no permitido.');
+    if (parsed.protocol !== 'https:' || !publicHosts.has(parsed.hostname) || parsed.port || parsed.username || parsed.password || parsed.hash) throw new DataError('error', 'Origen de consulta no permitido.');
     // Fresh reads never consume a cached response or an older in-flight read.
     // Invalidate the old entry, but do not let overlapping requests overwrite
     // each other's cache with responses obtained in an indeterminate order.
@@ -430,63 +430,4 @@ export class HttpClient {
       release();
     }
   }
-}
-
-const ids = (value: string | null) => value !== null && Id.safeParse(value).success;
-/** Each listed query key appears exactly once, and no other key appears. */
-function exactQuery(u: URL, rules: Record<string, (value: string | null) => boolean>) {
-  const keys = [...u.searchParams.keys()];
-  return keys.length === Object.keys(rules).length &&
-    Object.entries(rules).every(([key, valid]) => u.searchParams.getAll(key).length === 1 && valid(u.searchParams.get(key)));
-}
-const cinexDatasource: Record<string, Record<string, (value: string | null) => boolean>> = {
-  getcinemacitieslist: { method: () => true },
-  getcinemadatafromcinemaid: { method: () => true, cinemaid: ids },
-};
-/**
- * Public GET routes the provider adapters are allowed to read. The host
- * allowlist in HttpClient bounds egress; this bounds it to the read-only pages
- * and APIs Cinve actually parses, so a future adapter bug cannot turn a
- * permitted host into a request for a purchase or account endpoint.
- */
-export function assertPublicRead(value: string) {
-  const u = new URL(value), path = u.pathname, none = !u.search;
-  const allowed = (() => {
-    switch (u.hostname) {
-      case 'www.cinex.com.ve':
-        if (['/cines.html', '/cartelera.html'].includes(path)) return none;
-        if (/^\/cinex-[A-Za-z0-9_-]{1,80}\.html$/.test(path)) return none;
-        if (path.startsWith('/sinopsis-') && path.endsWith('.html')) return none && Id.safeParse(path.slice(10, -5)).success;
-        if (path === '/assets/php/datasource.php') {
-          const rules = cinexDatasource[u.searchParams.get('method') ?? ''];
-          return !!rules && exactQuery(u, rules);
-        }
-        return false;
-      case 'www.cinesunidos.com':
-        return ['/cines', '/cartelera'].includes(path) && exactQuery(u, { city: v => !!v && v.length <= 80 });
-      case 'gateway.cinesunidos.com':
-        if (path === '/search/cities') return none;
-        {
-          const m = path.match(/^\/search\/cities\/([^/]+)\/(theaters|films|sessions)$/);
-          if (m) {
-            let city = '';
-            try { city = decodeURIComponent(m[1]); } catch { return false; }
-            if (!city || city.length > 80 || /[\u0000-\u001f/\\]/.test(city)) return false;
-            return m[2] === 'sessions' ? exactQuery(u, { Title: v => !!v && v.length <= 200 }) : none;
-          }
-        }
-        { const m = path.match(/^\/concessions\/www\/cinemas\/([^/]+)\/concessions$/); return !!m && none && Id.safeParse(m[1]).success; }
-      case 'cinepiccandelaria.com': case 'cinepicvip.com':
-        if (path === '/es-AR') return none;
-        return path === '/es-AR/compra' && exactQuery(u, { cid: ids, fid: ids, pid: ids });
-      case 'apifront.cinexo.com.ar':
-        return path === '/mobile/consultas/peliculas/PeliculasConFuncionesYHorarios' &&
-          exactQuery(u, { idComplejo: ids, fecha: v => !!v && /^\d{2}\/\d{2}\/\d{4}$/.test(v) });
-      case 'api.cinexo.com.ar':
-        { const m = path.match(/^\/api\/complejo\/([^/]+)\/(?:candy|configuration)$/); return !!m && none && Id.safeParse(m[1]).success; }
-      default:
-        return false;
-    }
-  })();
-  if (!allowed) throw new DataError('error', 'Ruta de consulta pública no permitida.');
 }

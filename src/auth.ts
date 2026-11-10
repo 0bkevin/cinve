@@ -7,6 +7,7 @@ import { CookieJar } from 'tough-cookie';
 import { load } from 'cheerio';
 import * as z from 'zod';
 import { DataError } from './core.js';
+import { assertPrivateRead } from './http/allow-list.js';
 
 class LoginError extends Error {}
 
@@ -92,18 +93,6 @@ export class SessionStore {
       return { Cookie: cookie, Referer: 'https://www.cinex.com.ve/', 'X-Requested-With': 'XMLHttpRequest' };
     } catch { throw new DataError('auth_required', loginHint(p)); }
   }
-}
-
-export function assertPrivateRead(p: AuthProviderId, value: string) {
-  const u = new URL(value);
-  const safe = u.protocol === 'https:' && !u.port && !u.username && !u.password && !u.hash;
-  const expected = ['/boletos.php', '/boletosdev.php'].includes(u.pathname) ? ['cinemaid', 'sessionid'] : u.pathname === '/concesiones.php' ? ['cinemaid'] : [];
-  const params = [...u.searchParams];
-  const cinexParams = params.length === expected.length && expected.every(key => u.searchParams.getAll(key).length === 1 && /^[A-Za-z0-9_-]{1,100}$/.test(u.searchParams.get(key) ?? ''));
-  const route = p === 'cinesunidos'
-    ? (u.hostname === 'www.cinesunidos.com' && u.pathname === '/api/seats' && params.length === 2 && ['theaterId', 'showTimeId'].every(key => u.searchParams.getAll(key).length === 1 && /^[A-Za-z0-9_-]{1,100}$/.test(u.searchParams.get(key) ?? ''))) || (u.hostname === 'gateway.cinesunidos.com' && /^\/tickets\/www\/theaters\/[\w-]+\/sessions\/[\w-]+\/$/.test(u.pathname) && !u.search)
-    : u.hostname === 'www.cinex.com.ve' && ['/checklogin.php', '/boletos.php', '/boletosdev.php', '/asientosdev.php', '/concesiones.php'].includes(u.pathname) && cinexParams;
-  if (!safe || !route) throw new DataError('error', 'Ruta autenticada no permitida.');
 }
 
 /** Normal website login over HTTPS; redirects cannot forward the password to another origin. */
