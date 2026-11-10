@@ -3,16 +3,19 @@ import assert from 'node:assert/strict';
 import { fixture } from '../helpers/hosted.js';
 import { defined } from '../helpers/assert.js';
 import { fakeElements, runScript, settle } from '../helpers/browser.js';
+import type { Obj } from '../../src/core.js';
+import { object } from '../../src/providers/parsing.js';
 
-type Call = { path: string; credential: string | null; body: unknown; init: RequestInit | undefined };
+// The script passes fetch a plain init object, with browser-only fields such as cache.
+type Call = { path: string; credential: unknown; body: unknown; init: Obj };
 /** Runs the served /app.js against the served /connect page, with scripted answers per path. */
 async function connectPage(t: { after(fn: () => Promise<void>): void }, answers: Record<string, [number, unknown]>, hash = '#INVITE') {
   const f = await fixture(t);
   const html = await (await fetch(f.origin + '/connect')).text(), served = await fetch(f.origin + '/app.js');
   assert.equal(served.headers.get('content-type'), 'text/javascript; charset=utf-8');
   const elements = fakeElements(html), calls: Call[] = [], replaced: unknown[][] = [];
-  const request = async (input: string, init?: RequestInit) => {
-    calls.push({ path: input, credential: new Headers(init?.headers).get('X-Cinev-Connection'), body: JSON.parse(String(init?.body)), init });
+  const request = async (input: string, init: Obj = {}) => {
+    calls.push({ path: input, credential: object(init.headers)['X-Cinev-Connection'], body: JSON.parse(String(init.body)), init });
     const [status, body] = defined(answers[input], `an answer for ${input}`);
     return Response.json(body, { status });
   };
@@ -30,7 +33,7 @@ test('the connect page exchanges its invitation, then sends the login with the b
   assert.deepEqual(page.replaced, [[null, '', '/connect']], 'the invitation leaves the address bar');
   const [exchange] = page.calls;
   assert.deepEqual([exchange?.path, exchange?.credential, exchange?.body], ['/connect/exchange', 'INVITE', {}]);
-  assert.deepEqual([exchange?.init?.method, exchange?.init?.cache, exchange?.init?.credentials], ['POST', 'no-store', 'omit']);
+  assert.deepEqual([exchange?.init.method, exchange?.init.cache, exchange?.init.credentials], ['POST', 'no-store', 'omit']);
   assert.equal(page.element('accounts').textContent, 'Conectar Cines Unidos a tu acceso Cinve (abcd1234).');
   assert.equal(page.element('provider').value, 'cinesunidos');
   assert.equal(page.element('connect').disabled, false);
