@@ -5,7 +5,7 @@ import type { Query } from './core.js';
 import { HttpClient, ReadContext } from './http.js';
 import type { CallOptions } from './http.js';
 import { cinepicTicketsLeft, cinepicVenueName, cpBuy } from './providers.js';
-import { findField, object, rows } from './parsers.js';
+import { findField, object, rows } from './providers/parsing.js';
 
 // Unicode property escapes (\p{L}) are invalid in Python's re and RE2, and
 // MCP clients such as the Python SDK validate structuredContent against the

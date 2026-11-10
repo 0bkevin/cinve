@@ -1,5 +1,5 @@
 import { load } from 'cheerio';
-import { DataError, text } from './core.js';
+import { DataError, text } from '../core.js';
 
 export type Obj = Record<string, unknown>;
 export const object = (v: unknown): Obj => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Obj : {};

@@ -4,8 +4,8 @@ import { load } from 'cheerio';
 import { DataError, DateInput, folded, Id, number, operationItemSchema, requireArg, text, today } from './core.js';
 import type { DataItem, Operation, Query } from './core.js';
 import { CallStopped, ReadContext } from './http.js';
-import { decodeLabel, findField, pageFields, flight, object, objects, requiredText, rows } from './parsers.js';
-import type { Obj } from './parsers.js';
+import { decodeLabel, findField, pageFields, flight, object, objects, requiredText, rows } from './providers/parsing.js';
+import type { Obj } from './providers/parsing.js';
 import { parseCinesUnidosPrices, parseCinexPrices, parseCinexConcessions } from './authenticated-parsers.js';
 
 const providerWarningKinds = 32;

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { CinemaService } from '../src/service.js';
 import { HttpClient } from '../src/http.js';
 import { DateInput } from '../src/core.js';
-import { findField, flight } from '../src/parsers.js';
+import { findField, flight } from '../src/providers/parsing.js';
 import { inputSchema } from '../src/server.js';
 import { cpBuy, cpSessions, mockFetch, page, EmptySessionStore } from './fixtures.js';
 

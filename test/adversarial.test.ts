@@ -9,7 +9,7 @@ import { HttpClient } from '../src/http.js';
 import { SessionStore, LoginHttp, login, assertPrivateRead } from '../src/auth.js';
 import { CinemaService } from '../src/service.js';
 import { DataError } from '../src/core.js';
-import { flight, findField } from '../src/parsers.js';
+import { flight, findField } from '../src/providers/parsing.js';
 import { inputSchema } from '../src/server.js';
 import { cpBuy, cuMovies, concessions, page } from './fixtures.js';
 

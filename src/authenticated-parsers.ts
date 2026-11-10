@@ -1,7 +1,7 @@
 import { load } from 'cheerio';
 import { DataError, number, text } from './core.js';
 import type { DataItem, Query } from './core.js';
-import { object, requiredText, rows } from './parsers.js';
+import { object, requiredText, rows } from './providers/parsing.js';
 
 export function parseCinesUnidosPrices(value: unknown, q: Query, url: string): DataItem[] {
   return rows(value, 'ticket sessions').flatMap(s => {

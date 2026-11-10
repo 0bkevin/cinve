@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { DataError, folded, Id, text } from './core.js';
 import type { DataItem } from './core.js';
-import { object } from './parsers.js';
+import { object } from './providers/parsing.js';
 import type { ReadContext } from './http.js';
 
 /** Preserve named directory entries independently of code availability. */
