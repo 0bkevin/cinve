@@ -141,6 +141,9 @@ export type Query = {
 export class DataError extends Error {
   constructor(public status: StatusId, message: string) { super(message); }
 }
+export type Obj = Record<string, unknown>;
+/** A JSON object: not null, not an array. Its keys are unchecked, so each value is unknown. */
+export const isObj = (v: unknown): v is Obj => v !== null && typeof v === 'object' && !Array.isArray(v);
 export const text = (v: unknown): string => typeof v === 'string' && !v.startsWith('$') ? v.trim() : typeof v === 'number' ? String(v) : '';
 export const number = (v: unknown): number | undefined => (typeof v === 'number' || (typeof v === 'string' && /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(v.trim()))) && Number.isFinite(Number(v)) ? Number(v) : undefined;
 export const folded = (s: string) => s.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();

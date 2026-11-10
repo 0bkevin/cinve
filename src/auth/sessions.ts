@@ -5,7 +5,7 @@ import { join, isAbsolute } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { CookieJar } from 'tough-cookie';
 import * as z from 'zod';
-import { DataError } from '../core.js';
+import { DataError, isObj } from '../core.js';
 import { assertPrivateRead } from '../http/allow-list.js';
 
 export const AuthProvider = z.enum(['cinex', 'cinesunidos']);
@@ -17,6 +17,11 @@ export const Session = z.object({
   cookie_jar: z.string().max(100000).optional(), access_token: z.string().min(1).max(16000).regex(/^[A-Za-z0-9._~+\/-]+=*$/).optional(),
 }).strict().refine(s => s.provider === 'cinex' ? !!s.cookie_jar && !s.access_token : !!s.access_token && !s.cookie_jar);
 export type AuthSession = z.infer<typeof Session>;
+/** The Cinex cookie jar a session carries; the schema's refinement requires one for Cinex. */
+function cinexJar(s: AuthSession): CookieJar {
+  if (s.cookie_jar === undefined) throw new Error('A Cinex session carries a cookie jar.');
+  return CookieJar.deserializeSync(s.cookie_jar);
+}
 const loginHint = (p: AuthProviderId) => `Ejecuta npm run login -- ${p} en una terminal local. No envíes contraseñas al agente.`;
 
 /** One OS user per MCP process. No passwords, profile data, or shared session cache. */
@@ -47,11 +52,11 @@ export class SessionStore {
         if (!stat.isFile() || stat.size > 128 * 1024 || (stat.mode & 0o077) || (process.getuid && stat.uid !== process.getuid())) throw new Error();
         const session = Session.parse(JSON.parse(await handle.readFile('utf8')));
         if (session.provider !== p) throw new Error();
-        if (p === 'cinex') CookieJar.deserializeSync(session.cookie_jar!);
+        if (p === 'cinex') cinexJar(session);
         return session;
       } finally { await handle.close(); }
     } catch (e) {
-      if ((e as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+      if (isObj(e) && e.code === 'ENOENT') return undefined;
       throw new DataError('auth_required', `La sesión local de ${p} no es válida o tiene permisos inseguros. ${loginHint(p)}`);
     }
   }
@@ -73,7 +78,7 @@ export class SessionStore {
       const dir = await lstat(this.directory);
       if (!dir.isDirectory() || (process.getuid && dir.uid !== process.getuid())) throw new Error('Directorio de sesiones no válido.');
       await unlink(this.path(p));
-    } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
+    } catch (e) { if (!isObj(e) || e.code !== 'ENOENT') throw e; }
   }
   /**
    * Records that the provider refused a session read before notAfter (epoch ms),
@@ -98,7 +103,7 @@ export class SessionStore {
     this.sent.set(p, s.saved_at ?? 0);
     if (p === 'cinesunidos') return { Authorization: `Bearer ${s.access_token}`, xChannel: 'www' };
     try {
-      const cookie = await CookieJar.deserializeSync(s.cookie_jar!).getCookieString(url);
+      const cookie = await cinexJar(s).getCookieString(url);
       if (!cookie) throw new Error();
       return { Cookie: cookie, Referer: 'https://www.cinex.com.ve/', 'X-Requested-With': 'XMLHttpRequest' };
     } catch { throw new DataError('auth_required', loginHint(p)); }

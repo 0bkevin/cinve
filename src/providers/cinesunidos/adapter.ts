@@ -2,7 +2,7 @@ import { DataError, DateInput, folded, isoDate, number, requireArg, text } from 
 import type { DataItem, Operation, Query } from '../../core.js';
 import { ReadContext } from '../../http/read-context.js';
 import { checkedShowtime, flight, object, pageFields, requiredText, rows } from '../parsing.js';
-import type { Obj } from '../parsing.js';
+import type { Obj } from '../../core.js';
 import { warningLabel } from '../diagnostics.js';
 import { catalogTtl, flightPage, hourTtl } from '../read-policy.js';
 import { parseCinemaDirectory } from './directory.js';

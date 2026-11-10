@@ -1,10 +1,6 @@
 import { load } from 'cheerio';
-import { DataError, Id, operationItemSchema, text } from '../core.js';
-import type { DataItem } from '../core.js';
-
-export type Obj = Record<string, unknown>;
-/** A JSON object: not null, not an array. Its keys are unchecked, so each value is unknown. */
-export const isObj = (v: unknown): v is Obj => v !== null && typeof v === 'object' && !Array.isArray(v);
+import { DataError, Id, isObj, operationItemSchema, text } from '../core.js';
+import type { DataItem, Obj } from '../core.js';
 export const object = (v: unknown): Obj => isObj(v) ? v : {};
 export function rows(v: unknown, name: string): Obj[] {
   if (!Array.isArray(v) || !v.every(isObj)) throw new DataError('error', `Cambió la estructura del proveedor: ${name}.`);
@@ -53,8 +49,8 @@ export function findField(roots: unknown[], key: string): unknown {
 /** Bounded, iterative traversal: untrusted JSON cannot exhaust the JavaScript stack. */
 function* nodes(root: unknown): Generator<unknown> {
   const stack = [{ value: root, depth: 0 }]; let visited = 0;
-  while (stack.length) {
-    const { value, depth } = stack.pop()!;
+  for (let entry = stack.pop(); entry; entry = stack.pop()) {
+    const { value, depth } = entry;
     if (++visited > 100000 || depth > 64) throw new DataError('error', 'Los datos del proveedor exceden los límites de estructura.');
     if (!value || typeof value !== 'object') continue;
     yield value;

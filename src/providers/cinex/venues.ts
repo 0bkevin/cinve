@@ -1,8 +1,7 @@
 import { load } from 'cheerio';
-import { DataError, folded, Id } from '../../core.js';
+import { DataError, folded, Id, isObj } from '../../core.js';
 import type { DataItem, Query } from '../../core.js';
 import { CallStopped, type ReadContext } from '../../http/read-context.js';
-import { isObj } from '../parsing.js';
 
 const base = 'https://www.cinex.com.ve';
 const detailPath = /^cinex-[A-Za-z0-9_-]{1,80}\.html$/;
@@ -70,7 +69,8 @@ export class CinexCinemaCatalog {
   /** Verified associations are cheap discovery state, not a schedule cache. */
   private verifiedUrls = new Map<string, Verified>();
   private rememberVerified(code: string, url: string, name: string, alias?: string, metadataConfirmed = false) {
-    if (!this.verifiedUrls.has(code) && this.verifiedUrls.size >= 100) this.verifiedUrls.delete(this.verifiedUrls.keys().next().value!);
+    const oldest = this.verifiedUrls.keys().next();
+    if (!this.verifiedUrls.has(code) && this.verifiedUrls.size >= 100 && !oldest.done) this.verifiedUrls.delete(oldest.value);
     const previous = this.verifiedUrls.get(code);
     const aliases = [...new Set([...(previous?.aliases ?? []), ...(alias && alias !== url ? [alias] : []), ...(previous && previous.url !== url ? [previous.url] : [])])].slice(-4);
     // This flag describes only the evidence from this observation. A prior

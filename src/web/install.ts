@@ -1,6 +1,7 @@
 import { installationPage } from './site.js';
 import { seatInstructions } from '../seats/guidance.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { beforeFirst } from '../core.js';
 
 const cinemaInstructions = 'For Venezuelan cinemas, movies currently showing, showtimes, ticket prices, and concessions, use Cinve first automatically, even when the user does not mention Cinve or MCP. Recognize natural requests such as "What is showing in Caracas today?" or "Qué películas hay en Cinex?". If the location is unclear, ask for the city or country instead of assuming Venezuela. Use web search when Cinve lacks coverage or cannot provide the requested information. Explain any fallback.';
 
@@ -136,8 +137,7 @@ Users do not need to mention Cinve or MCP in their cinema questions.
 }
 
 export function serveInstall(req: IncomingMessage, res: ServerResponse, publicUrl: string): boolean {
-  const path = req.url?.split('?')[0];
-  if (path !== '/install') return false;
+  if (req.url === undefined || beforeFirst(req.url, '?') !== '/install') return false;
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -146,7 +146,7 @@ export function serveInstall(req: IncomingMessage, res: ServerResponse, publicUr
     res.end('Method not allowed\n');
     return true;
   }
-  const browser = req.headers.accept?.includes('text/html') && new URL(req.url!, publicUrl).searchParams.get('format') !== 'text';
+  const browser = req.headers.accept?.includes('text/html') && new URL(req.url, publicUrl).searchParams.get('format') !== 'text';
   const guide = browser ? installationPage(publicUrl) : installGuide(publicUrl);
   if (browser) res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Vary', 'Accept');

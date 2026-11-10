@@ -167,8 +167,8 @@ export class HttpClient {
     if (this.invalidatedAt.size <= 128) return;
     const pending = [...this.pendingStartedAt.entries()];
     const generations = [...this.invalidatedAt.entries()].sort((a, b) => a[1] - b[1]);
-    while (this.invalidatedAt.size > 128) {
-      const [key, generation] = generations.shift()!;
+    for (const [key, generation] of generations) {
+      if (this.invalidatedAt.size <= 128) break;
       this.invalidatedAt.delete(key);
       // Once a key marker is removed, preserve its stale-write protection on
       // the finite set of reads that began before that generation.
@@ -227,8 +227,8 @@ export class HttpClient {
           signal.removeEventListener('abort', waiting.cancel);
           this.active.set(origin, (this.active.get(origin) ?? 0) + 1);
           resolve(() => {
-            this.active.set(origin, this.active.get(origin)! - 1);
-            while (q.length) if (q.shift()!.start()) break;
+            this.active.set(origin, (this.active.get(origin) ?? 0) - 1);
+            for (let next = q.shift(); next; next = q.shift()) if (next.start()) break;
           });
           return true;
         },
