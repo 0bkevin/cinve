@@ -175,7 +175,7 @@ test('old-alias refresh invalidates a canonical read begun before delayed redire
     const refresh = http.get(oldAlias, 120000, true);
     await redirectReady;
     const normal = http.get(canonical);
-    await normalStarted;
+    await normalReady;
     releaseRedirect();
     releaseNormal();
     assert.equal((await normal).body, 'canonical overlap');
