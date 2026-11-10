@@ -1,4 +1,4 @@
-import { SeatResult } from './seats/seat-map.js';
+import { SeatResult } from './seats/schema.js';
 import { seatInstructions } from './seats/guidance.js';
 import { MapTooLarge, renderSeatMapPng, renderSeatMapSvg } from './seats/image.js';
 import { cinepicVenueName } from './providers/cinepic/sites.js';

@@ -7,7 +7,7 @@ import { createMcpHandler, InMemoryTransport, McpServer } from '@modelcontextpro
 import { toNodeHandler } from '@modelcontextprotocol/node';
 import * as z from 'zod';
 import { Result } from '../src/core.js';
-import { SeatResult } from '../src/seats/seat-map.js';
+import { SeatResult } from '../src/seats/schema.js';
 import { createServer } from '../src/server.js';
 import { CinemaService } from '../src/service.js';
 import { createRemoteServer, upstreamCallTimeoutMs } from '../src/remote.js';

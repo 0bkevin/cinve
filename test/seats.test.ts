@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseCinepicSeats, parseCinesUnidosSeats, parseCinexSeats, renderSeats, seatLayout } from '../src/seats/seat-map.js';
+import { renderSeats } from '../src/seats/ascii.js';
+import { parseCinepicSeats, parseCinesUnidosSeats, parseCinexSeats } from '../src/seats/parsers.js';
+import { seatLayout } from '../src/seats/schema.js';
 import { CinemaService } from '../src/service.js';
 import { HttpClient } from '../src/http/client.js';
 import { assertPrivateRead } from '../src/http/allow-list.js';

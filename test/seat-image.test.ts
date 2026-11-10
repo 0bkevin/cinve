@@ -2,14 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
 import { Client } from '@modelcontextprotocol/client';
-import { cinepicBookableTypes, parseCinepicSeats, parseCinexShowing, renderSeats, seatLayout } from '../src/seats/seat-map.js';
+import { renderSeats } from '../src/seats/ascii.js';
+import { cinepicBookableTypes, parseCinepicSeats, parseCinexShowing } from '../src/seats/parsers.js';
+import { seatLayout } from '../src/seats/schema.js';
 import { cinepicTicketsLeft } from '../src/providers/cinepic/sites.js';
 import { crc32, inflateSync } from 'node:zlib';
 import { encodeIndexedPng, MapTooLarge, MAX_PNG_PIXELS, renderSeatMapPng, renderSeatMapSvg, seatNumber, textWidth } from '../src/seats/image.js';
 import { CinemaService } from '../src/service.js';
 import { HttpClient } from '../src/http/client.js';
 import { createServer } from '../src/server.js';
-import { SeatResult } from '../src/seats/seat-map.js';
+import { SeatResult } from '../src/seats/schema.js';
 import { cpBuy, EmptySessionStore, page } from './fixtures.js';
 
 // Cinepic Candelaria's room on 2026-11-05: invertida "1", so its website draws

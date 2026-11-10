@@ -1,0 +1,30 @@
+import { DataError } from '../core.js';
+import type { Layout, SeatData } from './schema.js';
+
+export function renderSeats(seats: SeatData[], layout: Layout = { screen: 'unverified', column_order: 'ascending' }): string {
+  const symbols = { available: 'O', occupied: 'X', unavailable: '-', unknown: '?' };
+  const lines = ['O libre | X ocupado | - restringido/no disponible | ? desconocido',
+    layout.screen === 'unverified' ? 'Filas y columnas como la web del proveedor, que no indica el lado de la pantalla.' : `Orientado como la web del proveedor: pantalla ${layout.screen === 'top' ? 'arriba' : 'abajo'}.`];
+  const screen = '[ PANTALLA ]';
+  if (layout.screen === 'top') lines.push(screen);
+  let cells = 0;
+  for (const area of [...new Set(seats.map(s => s.area))]) {
+    const group = seats.filter(s => s.area === area);
+    const width = Math.max(...group.map(s => s.label.length)) + 2;
+    const maxColumn = Math.max(...group.map(s => s.column_index));
+    cells += (maxColumn + 1) * (Math.max(...group.map(s => s.row_index)) + 1);
+    if (cells > 40000) throw new DataError('unavailable', 'El mapa excede el tamaño máximo de representación ASCII.');
+    lines.push(`Area ${area}`);
+    for (let row = 0; row <= Math.max(...group.map(s => s.row_index)); row++) {
+      const rowSeats = group.filter(s => s.row_index === row);
+      if (!rowSeats.length) { lines.push(''); continue; }
+      lines.push(Array.from({ length: maxColumn + 1 }, (_, shown) => {
+        const col = layout.column_order === 'descending' ? maxColumn - shown : shown;
+        const s = rowSeats.find(s => s.column_index === col);
+        return (s ? `${s.label}${symbols[s.status]}` : '').padEnd(width);
+      }).join('').trimEnd());
+    }
+  }
+  if (layout.screen === 'bottom') lines.push(screen);
+  return lines.join('\n');
+}
