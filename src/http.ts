@@ -19,6 +19,13 @@ const cacheEntries = 512, cacheBytesLimit = 64 * 1024 * 1024;
 // take an adapter's documented fallback) instead of being refused again.
 const challengeMemoryMs = 10 * 60 * 1000;
 const hosts = new Set(['www.cinex.com.ve', 'www.cinesunidos.com', 'gateway.cinesunidos.com', 'cinepiccandelaria.com', 'cinepicvip.com', 'apifront.cinexo.com.ar', 'api.cinexo.com.ar']);
+// Cinepic's backend (api.cinexo.com.ar) has been seen taking ~19 s on its own
+// side, even to plain curl, and its sites render from it. These origins get a
+// longer read deadline (25 s at the default 15 s) so a slow-but-working
+// response is not reported as a failure. A Cinepic call chains at most two
+// reads, so it stays under the hosted 90 s limit.
+const slowHosts = new Set(['cinepiccandelaria.com', 'cinepicvip.com', 'apifront.cinexo.com.ar', 'api.cinexo.com.ar']);
+const slowHostFactor = 5 / 3;
 
 /** Gateway errors from an edge proxy, and resets of reused connections, are worth one more try. */
 const transientStatus = (status: number) => status === 502 || status === 504;
@@ -127,6 +134,7 @@ export class HttpClient {
   private queues = new Map<string, Waiting[]>();
   private challenged = new Map<string, { until: number; error: DataError }>();
   constructor(private request: typeof fetch = fetch, private timeout = 15000, readonly sessions = new SessionStore()) {}
+  private readTimeout(origin: string) { return slowHosts.has(new URL(origin).hostname) ? Math.round(this.timeout * slowHostFactor) : this.timeout; }
   async getAuthenticated(provider: AuthProviderId, url: string): Promise<Page> {
     assertPrivateRead(provider, url);
     return this.read(url, new URL(url).origin, target => this.sessions.headers(provider, target));
@@ -270,7 +278,7 @@ export class HttpClient {
     for (const key of entry.keys) if (this.cache.get(key) === entry) this.cache.delete(key);
     this.cacheBytes -= entry.bytes;
   }
-  private acquire(origin: string, signal: AbortSignal, deadline: number): Promise<() => void> {
+  private acquire(origin: string, signal: AbortSignal, deadline: number, timeout: number): Promise<() => void> {
     return new Promise((resolve, reject) => {
       const q = this.queues.get(origin) ?? []; this.queues.set(origin, q);
       const waiting: Waiting = {
@@ -278,7 +286,7 @@ export class HttpClient {
           // Admit queued work only while a meaningful part of its deadline
           // remains (1 s, or half of a shorter timeout). A request admitted
           // with almost no time left cannot finish; it would only add load.
-          if (signal.aborted || deadline - Date.now() <= Math.min(1000, this.timeout / 2)) { waiting.cancel(); return false; }
+          if (signal.aborted || deadline - Date.now() <= Math.min(1000, timeout / 2)) { waiting.cancel(); return false; }
           signal.removeEventListener('abort', waiting.cancel);
           this.active.set(origin, (this.active.get(origin) ?? 0) + 1);
           resolve(() => {
@@ -305,16 +313,16 @@ export class HttpClient {
     // work is a stalled promise (a hung transport, session store or body
     // reader), Node may exit or drop the task before the deadline fires. A
     // referenced timer, always cleared, makes the deadline deterministic.
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(new DOMException('The operation timed out.', 'TimeoutError')), this.timeout);
-    try { return await this.readUntil(controller.signal, url, origin, authorize, refresh, onPublicRedirect); }
+    const controller = new AbortController(), timeout = this.readTimeout(origin);
+    const timer = setTimeout(() => controller.abort(new DOMException('The operation timed out.', 'TimeoutError')), timeout);
+    try { return await this.readUntil(controller.signal, timeout, url, origin, authorize, refresh, onPublicRedirect); }
     finally { clearTimeout(timer); }
   }
-  private async readUntil(signal: AbortSignal, url: string, origin: string, authorize?: (target: string) => Promise<Record<string, string>>, refresh = false,
+  private async readUntil(signal: AbortSignal, timeout: number, url: string, origin: string, authorize?: (target: string) => Promise<Record<string, string>>, refresh = false,
     onPublicRedirect?: (alias: string, canonical: string) => void): Promise<Page> {
     const requested = url;
-    const deadline = Date.now() + this.timeout;
-    const release = await this.acquire(origin, signal, deadline);
+    const deadline = Date.now() + timeout;
+    const release = await this.acquire(origin, signal, deadline, timeout);
     // Which side a failure belongs to: Cinve's own session store, or the provider.
     const at: { phase: 'session' | 'provider' } = { phase: 'provider' };
     try {
@@ -335,7 +343,7 @@ export class HttpClient {
       // edge proxy, while at least half of this read's deadline remains. Never
       // 4xx, 429, 503 (maintenance, often with Retry-After), timeouts, or
       // authenticated reads, whose pages can act on the account's session.
-      const canRetry = () => !authorize && deadline - Date.now() > this.timeout / 2;
+      const canRetry = () => !authorize && deadline - Date.now() > timeout / 2;
       let response: Response;
       try { response = await requestPage(url); }
       catch (error) {
@@ -406,7 +414,7 @@ export class HttpClient {
       if (at.phase === 'session') throw new DataError('error', signal.aborted
         ? `Se agotó el plazo total de la consulta a ${url} mientras Cinve leía la sesión guardada; no llegó a consultarse al proveedor. Inténtalo de nuevo.`
         : 'Cinve no pudo leer la sesión guardada de la cuenta; no llegó a consultarse al proveedor. Inténtalo de nuevo más tarde.');
-      if (signal.aborted) throw new DataError('error', `Se agotó el plazo total de la consulta a ${url}: el proveedor no terminó de responder en ${Math.round(this.timeout / 1000)} s.`);
+      if (signal.aborted) throw new DataError('error', `Se agotó el plazo total de la consulta a ${url}: el proveedor no terminó de responder en ${Math.round(timeout / 1000)} s.`);
       throw new DataError('error', `No se pudo conectar con el proveedor ni leer su respuesta en ${url} (conexión rechazada, cortada o con un error de red).`);
     } finally {
       release();
@@ -486,7 +494,8 @@ export class CallStopped extends DataError {
 }
 /**
  * No provider read starts once this much of one tool call has elapsed. A read
- * already in flight may still take its own 15 s, so a call stays near 75 s,
+ * already in flight may still take its own 15 s (25 s for Cinepic's slow
+ * backend), so a call stays near 75 s (85 s at worst),
  * under the hosted 90 s limit, however its reads are chained or fanned out.
  */
 export const operationBudgetMs = 60000;

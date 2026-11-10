@@ -92,6 +92,14 @@ test('authenticated reads are never retried', async () => {
   assert.equal(calls, 1);
 });
 
+test('Cinepic origins get a longer read deadline than the others', async () => {
+  const slow = async () => { await new Promise(r => setTimeout(r, 60)); return new Response('{"success":true}'); };
+  const http = new HttpClient(slow, 45);
+  // 45 ms scales to 75 ms for Cinepic's slow backend.
+  await http.get('https://api.cinexo.com.ar/api/complejo/123300/configuration');
+  await assert.rejects(http.get(cities), e => e instanceof DataError && /el proveedor no terminó de responder/.test(e.message));
+});
+
 test('a failing session store is reported as Cinve failing, not the provider', async () => {
   let calls = 0;
   const sessions = new class extends EmptySessionStore { override async headers(): Promise<never> { throw new Error('connection terminated'); } };

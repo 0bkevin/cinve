@@ -133,14 +133,15 @@ la fuente Inter incluida en `src/assets`, sin depender de fuentes del sistema.
 
 ## Caché, red y seguridad
 
-- Las lecturas HTTP tienen un plazo de 15 segundos y un cuerpo máximo de 4 MiB. El
+- Las lecturas HTTP tienen un plazo de 15 segundos (25 s para Cinepic, cuyo
+  servidor a veces tarda unos 19 s en responder) y un cuerpo máximo de 4 MiB. El
   cuerpo se decodifica con el `charset` que declara la respuesta (UTF-8 si no
   declara ninguno).
 - Una lectura pública se repite una sola vez, tras una pausa breve, si la
   conexión falla antes de recibir respuesta o el proveedor responde 502 o 504, y
   solo si queda al menos la mitad de su plazo. No se repiten respuestas 4xx, 429
   ni 503, los vencimientos de plazo ni las lecturas autenticadas.
-- Una llamada de herramienta no inicia lecturas del proveedor después de 60 s; con la lectura en curso termina en unos 75 s, por debajo del límite de 90 s del servicio alojado. Los plazos de 40 y 45 s de los recorridos por sedes o títulos cuentan dentro de ese límite.
+- Una llamada de herramienta no inicia lecturas del proveedor después de 60 s; con la lectura en curso termina en unos 75 s (85 s en el peor caso de Cinepic), por debajo del límite de 90 s del servicio alojado. Los plazos de 40 y 45 s de los recorridos por sedes o títulos cuentan dentro de ese límite.
 - Hay como máximo dos consultas activas y 32 en cola por origen.
 - Si el cliente cancela una llamada, Cinve no inicia más lecturas para ella; las
   que ya están en curso terminan, porque otras consultas pueden compartirlas.
