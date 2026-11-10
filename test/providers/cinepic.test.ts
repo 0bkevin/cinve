@@ -5,7 +5,7 @@ import { HttpClient } from '../../src/http/client.js';
 import { cpBuy, cpSessions, mockFetch, page, EmptySessionStore } from '../helpers/fixtures.js';
 import { cinepicVenueName, cpSite } from '../../src/providers/cinepic/sites.js';
 import { DataError } from '../../src/core.js';
-import { nth } from '../helpers/assert.js';
+import { defined, nth } from '../helpers/assert.js';
 
 const service = () => new CinemaService(new HttpClient(mockFetch, 15000, new EmptySessionStore()));
 
@@ -75,7 +75,7 @@ test('one odd Cinepic snack item or group is skipped, not the whole catalog', as
   assert.equal(r.status, 'available'); assert.equal(r.partial, true);
   assert.deepEqual(r.items.map(i => i.id).sort(), ['1', '2']);
   assert.equal(r.items.find(i => i.id === '1')?.name, '$Refresco', 'a leading $ is part of the name');
-  assert.ok(r.items.find(i => i.id === '2')!.name.length <= 512);
+  assert.ok(defined(r.items.find(i => i.id === '2')).name.length <= 512);
   assert.match(r.warnings.join(' '), /3 productos o grupos del catálogo .* se omitieron/);
   assert.equal(r.warnings.filter(w => /USD/.test(w)).length, 1, 'one consistent USD note when the rate is missing');
   assert.match(r.warnings.join(' '), /se omite la equivalencia USD/);

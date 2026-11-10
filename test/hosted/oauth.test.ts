@@ -4,8 +4,11 @@ import { migrationSql } from '../../src/hosted/migrations.js';
 import { randomBytes } from 'node:crypto';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import type { ClientMetadataFetcher } from '../../src/hosted/client-metadata.js';
-import { fixture, link, successfulLogin } from '../helpers/hosted.js';
-import { capture, sessionCookie } from '../helpers/assert.js';
+import { BrowserToken, fixture, link, OAuthTokens, successfulLogin } from '../helpers/hosted.js';
+import { AuthStatusResult } from '../../src/mcp/server.js';
+import { object } from '../../src/providers/parsing.js';
+import * as z from 'zod';
+import { capture, defined, sessionCookie } from '../helpers/assert.js';
 
 const metadataUrl = 'https://assistant.example/oauth/client.json';
 const metadataDocuments: Record<string, unknown> = {
@@ -47,7 +50,7 @@ test('anonymous MCP client authorizes in the browser, connects a cinema, refresh
   await transport.finishAuth(callback.searchParams);
   assert.ok(tokens?.access_token);
   const invitation = await link(client);
-  const { browser_token } = await (await f.post('/connect/exchange', invitation)).json() as { browser_token: string };
+  const { browser_token } = BrowserToken.parse(await (await f.post('/connect/exchange', invitation)).json());
   assert.equal((await f.post('/connect/login', browser_token, { username: 'person@example.test', password: 'SYNTHETIC_PASSWORD' })).status, 200);
   assert.match(JSON.stringify((await client.callTool({ name: 'get_auth_status' })).structuredContent), /configured/);
   const before = tokens.access_token;
@@ -55,7 +58,7 @@ test('anonymous MCP client authorizes in the browser, connects a cinema, refresh
   assert.match(JSON.stringify((await client.callTool({ name: 'get_auth_status' })).structuredContent), /configured/);
   assert.notEqual(tokens.access_token, before, 'SDK automatically refreshes without losing cinema ownership');
   const dump = JSON.stringify((await f.pool.query('SELECT * FROM cinev_oauth_tokens')).rows);
-  assert.ok(!dump.includes(tokens.access_token)); assert.ok(!dump.includes(tokens.refresh_token!));
+  assert.ok(!dump.includes(tokens.access_token)); assert.ok(!dump.includes(defined(tokens.refresh_token)));
   await client.callTool({ name: 'disconnect_account', arguments: { provider: 'cinesunidos' } });
   assert.ok(!JSON.stringify((await client.callTool({ name: 'get_auth_status' })).structuredContent).includes('configured'));
 });
@@ -64,9 +67,9 @@ async function approve(origin: string, authorization: URL, decision = 'approve')
   const page = await fetch(authorization);
   assert.equal(page.status, 200);
   assert.equal(page.headers.get('referrer-policy'), 'same-origin');
-  assert.match(page.headers.get('content-security-policy')!, /form-action 'self'/);
+  assert.match(defined(page.headers.get('content-security-policy')), /form-action 'self'/);
   const html = await page.text();
-  assert.ok(page.headers.get('content-security-policy')!.includes(`form-action 'self' ${new URL(authorization.searchParams.get('redirect_uri')!).origin};`));
+  assert.ok(defined(page.headers.get('content-security-policy')).includes(`form-action 'self' ${new URL(defined(authorization.searchParams.get('redirect_uri'))).origin};`));
   const request_id = capture(html, /name="request_id" value="([^"]+)"/);
   const csrf = capture(html, /name="csrf" value="([^"]+)"/);
   const cookie = sessionCookie(page);
@@ -74,13 +77,14 @@ async function approve(origin: string, authorization: URL, decision = 'approve')
     headers: { Origin: origin, Cookie: cookie }, body: new URLSearchParams({ request_id, csrf, decision }) });
   assert.equal(result.status, 303);
   assert.equal(result.headers.get('referrer-policy'), 'no-referrer');
-  return new URL(result.headers.get('location')!);
+  return new URL(defined(result.headers.get('location')));
 }
+const Registered = z.object({ client_id: z.string() });
 async function register(origin: string) {
   const response = await fetch(origin + '/oauth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ client_name: 'Test assistant', redirect_uris: ['https://assistant.example/callback'], token_endpoint_auth_method: 'none' }) });
   assert.equal(response.status, 201);
-  return (await response.json() as { client_id: string }).client_id;
+  return Registered.parse(await response.json()).client_id;
 }
 async function authorizationRequest(origin: string, client_id: string) {
   const { createHash } = await import('node:crypto');
@@ -95,10 +99,10 @@ function form(origin: string, path: string, data: Record<string, string>) {
 async function enrolled(origin: string) {
   const client_id = await register(origin), request = await authorizationRequest(origin, client_id);
   const callback = await approve(origin, request.url);
-  const exchange = { grant_type: 'authorization_code', client_id, code: callback.searchParams.get('code')!,
+  const exchange = { grant_type: 'authorization_code', client_id, code: defined(callback.searchParams.get('code')),
     code_verifier: request.verifier, resource: origin + '/mcp', redirect_uri: request.params.redirect_uri };
   const response = await form(origin, '/oauth/token', exchange); assert.equal(response.status, 200);
-  return { client_id, exchange, tokens: await response.json() as { access_token: string; refresh_token: string } };
+  return { client_id, exchange, tokens: OAuthTokens.parse(await response.json()) };
 }
 
 test('OAuth rejects redirect injection, missing PKCE, wrong resource, CSRF, and cancellation', async t => {
@@ -122,7 +126,7 @@ test('OAuth rejects redirect injection, missing PKCE, wrong resource, CSRF, and 
   assert.equal(denied.searchParams.get('error'), 'access_denied'); assert.equal(denied.searchParams.get('state'), 'state123');
   assert.equal(denied.searchParams.get('code'), null);
   const approval = await approve(f.origin, a.url);
-  const data = { grant_type: 'authorization_code', client_id, code: approval.searchParams.get('code')!, code_verifier: a.verifier,
+  const data = { grant_type: 'authorization_code', client_id, code: defined(approval.searchParams.get('code')), code_verifier: a.verifier,
     resource: f.origin + '/mcp', redirect_uri: a.params.redirect_uri };
   for (const change of [{ code_verifier: 'a'.repeat(43) }, { resource: 'https://evil.example/mcp' }, { client_id: 'another-app' }, { redirect_uri: 'https://evil.example' }]) {
     assert.equal((await form(f.origin, '/oauth/token', { ...data, ...change })).status, 400);
@@ -143,7 +147,7 @@ test('OAuth refresh rotation detects replay, revocation removes sessions, and co
   const data = { grant_type: 'refresh_token', client_id: a.client_id, refresh_token: a.tokens.refresh_token, resource: f.origin + '/mcp' };
   assert.equal((await form(f.origin, '/oauth/token', { ...data, client_id: b.client_id })).status, 400);
   const rotated = await form(f.origin, '/oauth/token', data); assert.equal(rotated.status, 200);
-  const next = await rotated.json() as { access_token: string; refresh_token: string };
+  const next = OAuthTokens.parse(await rotated.json());
   assert.equal((await form(f.origin, '/oauth/token', data)).status, 400);
   assert.equal((await fetch(f.origin + '/mcp', { headers: { Authorization: `Bearer ${next.access_token}` } })).status, 401);
   assert.equal(await f.storeFor(user).read('cinesunidos'), undefined);
@@ -159,12 +163,12 @@ test('OAuth expiry, concurrent redemption, malformed registration and cleanup', 
     assert.equal((await fetch(f.origin + '/oauth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ redirect_uris: [uri] }) })).status, 400);
   }
-  const code = (await approve(f.origin, a.url)).searchParams.get('code')!;
+  const code = defined((await approve(f.origin, a.url)).searchParams.get('code'));
   const data = { grant_type: 'authorization_code', client_id, code, code_verifier: a.verifier, resource: f.origin + '/mcp', redirect_uri: a.params.redirect_uri };
   const results = await Promise.all([form(f.origin, '/oauth/token', data), form(f.origin, '/oauth/token', data)]);
   assert.deepEqual(results.map(r => r.status).sort(), [200, 400]);
   const expired = await authorizationRequest(f.origin, client_id);
-  const expiredCode = (await approve(f.origin, expired.url)).searchParams.get('code')!;
+  const expiredCode = defined((await approve(f.origin, expired.url)).searchParams.get('code'));
   await f.pool.query("UPDATE cinev_oauth_requests SET expires_at=now()-interval '1 second'");
   assert.equal((await form(f.origin, '/oauth/token', { ...data, code: expiredCode, code_verifier: expired.verifier })).status, 400);
   const active = await enrolled(f.origin);
@@ -185,9 +189,9 @@ test('browser MCP clients discover OAuth without cookies; approval names are esc
   assert.equal(preflight.headers.get('access-control-allow-credentials'), null);
   // Required request headers of protocol 2026-07-28 must pass a browser preflight.
   for (const header of ['mcp-method', 'mcp-name', 'mcp-protocol-version', 'authorization'])
-    assert.ok(preflight.headers.get('access-control-allow-headers')!.toLowerCase().split(/,\s*/).includes(header), header);
+    assert.ok(defined(preflight.headers.get('access-control-allow-headers')).toLowerCase().split(/,\s*/).includes(header), header);
   // No session or resumption headers: the stateless endpoint never uses them.
-  assert.doesNotMatch(preflight.headers.get('access-control-allow-headers')!, /session-id|last-event-id/i);
+  assert.doesNotMatch(defined(preflight.headers.get('access-control-allow-headers')), /session-id|last-event-id/i);
   assert.equal(preflight.headers.get('access-control-allow-methods'), 'POST, OPTIONS');
   for (const origin of ['javascript:alert(1)', 'https://assistant.example/path', 'https://a.example?x', 'https://user@a.example', 'not an origin'])
     assert.equal((await fetch(f.origin + '/mcp', { method: 'OPTIONS', headers: { Origin: origin } })).status, 403, origin);
@@ -197,14 +201,14 @@ test('browser MCP clients discover OAuth without cookies; approval names are esc
   const challenge = await fetch(f.origin + '/mcp', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json', Cookie: 'cinve=untrusted' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'connect_account', arguments: { provider: 'cinex' } } }) });
   assert.equal(challenge.status, 401);
-  assert.match(challenge.headers.get('www-authenticate')!, /resource_metadata=/);
-  assert.match(challenge.headers.get('access-control-expose-headers')!, /WWW-Authenticate/);
-  const metadata = await (await fetch(f.origin + '/.well-known/oauth-protected-resource/mcp', { headers })).json() as { resource: string };
+  assert.match(defined(challenge.headers.get('www-authenticate')), /resource_metadata=/);
+  assert.match(defined(challenge.headers.get('access-control-expose-headers')), /WWW-Authenticate/);
+  const metadata = z.object({ resource: z.string() }).parse(await (await fetch(f.origin + '/.well-known/oauth-protected-resource/mcp', { headers })).json());
   assert.equal(metadata.resource, f.origin + '/mcp');
   const registered = await fetch(f.origin + '/oauth/register', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify({ client_name: '<script>alert(1)</script>', redirect_uris: ['http://127.0.0.1:8080/callback'] }) });
   assert.equal(registered.status, 201);
-  const { client_id } = await registered.json() as { client_id: string };
+  const { client_id } = Registered.parse(await registered.json());
   const a = await authorizationRequest(f.origin, client_id);
   a.url.searchParams.set('redirect_uri', 'http://127.0.0.1:8080/callback');
   const html = await (await fetch(a.url)).text();
@@ -236,18 +240,18 @@ test('cleanup removes stale anonymous OAuth registrations but keeps used or rece
 
 test('clients can identify with a Client ID Metadata Document instead of registering', async t => {
   const f = await fixture(t, undefined, undefined, { clientMetadata });
-  const metadata = await (await fetch(f.origin + '/.well-known/oauth-authorization-server')).json() as Record<string, unknown>;
+  const metadata = object(await (await fetch(f.origin + '/.well-known/oauth-authorization-server')).json());
   assert.equal(metadata.client_id_metadata_document_supported, true);
   const request = await authorizationRequest(f.origin, metadataUrl);
   const page = await (await fetch(request.url)).text();
   assert.match(page, /Metadata assistant/); assert.match(page, /documento publicado en <strong>assistant\.example<\/strong>/);
   const callback = await approve(f.origin, request.url);
-  const exchange = { grant_type: 'authorization_code', client_id: metadataUrl, code: callback.searchParams.get('code')!,
+  const exchange = { grant_type: 'authorization_code', client_id: metadataUrl, code: defined(callback.searchParams.get('code')),
     code_verifier: request.verifier, resource: f.origin + '/mcp', redirect_uri: request.params.redirect_uri };
-  const tokens = await (await form(f.origin, '/oauth/token', exchange)).json() as { access_token: string; refresh_token: string };
+  const tokens = OAuthTokens.parse(await (await form(f.origin, '/oauth/token', exchange)).json());
   assert.match(tokens.access_token, /^cva_/);
   const status = await (await f.client(tokens.access_token)).callTool({ name: 'get_auth_status', arguments: {} });
-  assert.equal((status.structuredContent as { connection: { client_authorized: boolean } }).connection.client_authorized, true);
+  assert.equal(AuthStatusResult.parse(status.structuredContent).connection.client_authorized, true);
   const refreshed = await form(f.origin, '/oauth/token', { grant_type: 'refresh_token', client_id: metadataUrl, refresh_token: tokens.refresh_token, resource: f.origin + '/mcp' });
   assert.equal(refreshed.status, 200);
   // Documents that do not match their URL, carry a secret, or cannot be fetched are refused

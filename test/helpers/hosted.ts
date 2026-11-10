@@ -8,6 +8,13 @@ import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/cli
 import { createHostedApp } from '../../src/hosted/app.js';
 import type { login } from '../../src/auth/login.js';
 import type { ClientMetadataFetcher } from '../../src/hosted/client-metadata.js';
+import * as z from 'zod';
+import { defined } from './assert.js';
+
+/** JSON bodies the hosted endpoints answer with, as the tests read them. */
+export const BrowserToken = z.object({ browser_token: z.string() });
+export const OAuthTokens = z.object({ access_token: z.string(), refresh_token: z.string() });
+const ConnectLink = z.object({ url: z.string() });
 
 export async function fixture(t: { after(fn: () => Promise<void>): void }, authenticate?: typeof login | undefined,
   request: typeof fetch = async () => new Response('["Caracas"]'), extra: { bodyTimeoutMs?: number; clientMetadata?: ClientMetadataFetcher } = {}) {
@@ -39,10 +46,10 @@ export async function fixture(t: { after(fn: () => Promise<void>): void }, authe
 }
 export const successfulLogin: typeof login = async (provider, username, password, store) => {
   assert.equal(username, 'person@example.test'); assert.equal(password, 'SYNTHETIC_PASSWORD');
-  await store!.save({ version: 1, provider, expires_at: Date.now() + 60000, access_token: 'SYNTHETIC_UPSTREAM_TOKEN' });
+  await defined(store, 'a session store').save({ version: 1, provider, expires_at: Date.now() + 60000, access_token: 'SYNTHETIC_UPSTREAM_TOKEN' });
   return { provider, authenticated: true, profile_update_requested: false };
 };
 export async function link(client: Client) {
   const response = await client.callTool({ name: 'connect_account', arguments: { provider: 'cinesunidos' } });
-  return new URL((response.structuredContent as { url: string }).url).hash.slice(1);
+  return new URL(ConnectLink.parse(response.structuredContent).url).hash.slice(1);
 }

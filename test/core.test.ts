@@ -24,8 +24,8 @@ test('operation result schemas advertise their literal item kind and retain rele
     concessions: { kind: 'concession', id: '1', name: 'Combo', cinema_id: '1002', prices: [], stock: 0, options_required: true, final_total_verified: false },
   } as const;
 
-  for (const [op, item] of Object.entries(samples)) {
-    const parsed = operationItemSchema(op as keyof typeof samples).parse(item);
+  for (const op of ['cities', 'cinemas', 'movies', 'showtimes', 'prices', 'concessions'] as const) {
+    const item = samples[op], parsed = operationItemSchema(op).parse(item);
     assert.equal(parsed.kind, item.kind);
     assert.equal(parsed.id, item.id);
     assert.equal(parsed.name, item.name);

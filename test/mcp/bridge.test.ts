@@ -10,6 +10,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { toNodeHandler } from '@modelcontextprotocol/node';
 import type { NodeIncomingMessageLike } from '@modelcontextprotocol/node';
 import * as z from 'zod';
+import { firstText } from '../helpers/assert.js';
 
 // The SDK declares method?: string, which Node's method?: string | undefined fails under exactOptionalPropertyTypes.
 const serve = (handler: Parameters<typeof toNodeHandler>[0]) => (req: IncomingMessage, res: ServerResponse) => { void toNodeHandler(handler)(req as NodeIncomingMessageLike, res); };
@@ -57,18 +58,18 @@ test('stdio bridge forwards application metadata but keeps its own server identi
     http.closeAllConnections(); await new Promise<void>(resolve => http.close(() => resolve()));
   });
   const result = await client.callTool({ name: 'metadata_fixture', arguments: {} });
-  assert.equal((result._meta as Record<string, unknown>)['fixture-key'], 'preserved');
+  assert.equal(result._meta?.['fixture-key'], 'preserved');
   assert.equal(client.getServerVersion()?.name, 'cinve');
   // Tools are re-published with their upstream schemas, annotations and descriptions.
   const echo = (await client.listTools()).tools.find(tool => tool.name === 'echo_fixture');
   assert.equal(echo?.description, 'Echo'); assert.equal(echo?.annotations?.readOnlyHint, true);
-  assert.deepEqual((echo?.inputSchema as { required?: string[] }).required, ['city']);
+  assert.deepEqual(echo?.inputSchema.required, ['city']);
   assert.equal(echo?._meta?.['fixture/tool'], 'kept', 'tool-definition metadata is kept');
-  assert.equal(((await client.callTool({ name: 'echo_fixture', arguments: { city: 'Caracas' } })).content[0] as { text: string }).text, 'Caracas|');
+  assert.equal(firstText((await client.callTool({ name: 'echo_fixture', arguments: { city: 'Caracas' } })).content), 'Caracas|');
   // Request metadata reaches upstream, and upstream progress returns to the caller.
   const updates: { progress: number; message?: string | undefined }[] = [];
   const withMeta = await client.callTool({ name: 'echo_fixture', arguments: { city: 'Caracas' }, _meta: { 'fixture/request': 'forwarded' } }, { onprogress: p => updates.push(p) });
-  assert.equal((withMeta.content[0] as { text: string }).text, 'Caracas|forwarded');
+  assert.equal(firstText(withMeta.content), 'Caracas|forwarded');
   assert.deepEqual(updates.map(u => [u.progress, u.message]), [[1, 'paso 1'], [2, 'paso 2']]);
   // Validation stays upstream, with its own messages.
   const invalid = await client.callTool({ name: 'echo_fixture', arguments: {} });
@@ -110,7 +111,7 @@ test('stdio bridge follows upstream tool changes made while it runs', async t =>
   const changed = await client.callTool({ name: 'changed', arguments: {} });
   assert.notEqual(changed.isError, true, JSON.stringify(changed.content));
   assert.deepEqual(changed.structuredContent, { after: true });
-  assert.equal(((await client.callTool({ name: 'added', arguments: {} })).content[0] as { text: string }).text, 'new');
+  assert.equal(firstText((await client.callTool({ name: 'added', arguments: {} })).content), 'new');
   const retired = await client.callTool({ name: 'retired', arguments: {} }).catch((error: Error) => ({ isError: true, content: [{ type: 'text', text: error.message }] }));
   assert.equal(retired.isError, true);
   // Concurrent lists reconcile once each without registering a name twice.
@@ -146,7 +147,7 @@ test('stdio bridge waits for upstream calls longer than the SDK default and the 
     await bridge.connect(serverTransport); await client.connect(clientTransport);
     return client.callTool({ name: 'slow', arguments: {} });
   };
-  assert.equal(((await call()).content[0] as { text: string }).text, 'done');
+  assert.equal(firstText((await call()).content), 'done');
   const cut = await call(100);
   assert.equal(cut.isError, true, 'the configured timeout is what bounds the upstream call');
   assert.match(JSON.stringify(cut.content), /timed out/i);

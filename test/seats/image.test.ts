@@ -12,15 +12,16 @@ import { CinemaService } from '../../src/service.js';
 import { HttpClient } from '../../src/http/client.js';
 import { createServer } from '../../src/mcp/server.js';
 import { SeatResult } from '../../src/seats/schema.js';
+import { Result } from '../../src/core.js';
 import { cpBuy, EmptySessionStore, page } from '../helpers/fixtures.js';
-import { capture, nth } from '../helpers/assert.js';
+import { capture, instance, nth } from '../helpers/assert.js';
 
 // Cinepic Candelaria's room on 2026-11-05: invertida "1", so its website draws
 // column 15 (seat A:5) left of column 23 (seat A:1).
 const cp = (columna: string, name: string, libre = '1') => ({ butaca: `A-${columna}-1`, nombre_butaca: name, fila: '1', columna, libre, seleccionada: '1', tipo_butaca_id: '8', invertida: '1' });
 const map = { butacas: [cp('15', 'A:5'), cp('17', 'A:4', '0'), cp('23', 'A:1')] };
 const header = { provider: 'cinepic', cinema: 'Cinepic Candelaria', session: '24939', queriedAt: '2026-11-05T16:52:00.000Z' };
-const xOf = (svg: string, title: string) => Number(svg.match(new RegExp(`<title>${title}[^<]*</title><rect x="([\\d.]+)"`))![1]);
+const xOf = (svg: string, title: string) => Number(capture(svg, new RegExp(`<title>${title}[^<]*</title><rect x="([\\d.]+)"`)));
 
 test('seat maps follow each provider website: Cinepic screen on top, numbered right to left when invertida', () => {
   const seats = parseCinepicSeats(map), layout = seatLayout('cinepic', map);
@@ -74,16 +75,19 @@ test('get_seats returns the map as a PNG by default, as SVG on request, and only
   const args = { provider: 'cinepic', cinema_id: '123300', session_id: 'f1', movie_id: 'p1' };
   const png = await client.callTool({ name: 'get_seats', arguments: args });
   assert.equal(png.isError, false);
-  const image = (png.content as { type: string; mimeType?: string; data?: string }[]).find(c => c.type === 'image');
-  assert.equal(image?.mimeType, 'image/png'); assert.ok(Buffer.from(image!.data!, 'base64').subarray(1, 4).toString() === 'PNG');
+  const image = png.content.find(c => c.type === 'image');
+  assert.ok(image?.type === 'image', 'an image block');
+  assert.equal(image.mimeType, 'image/png'); assert.ok(Buffer.from(image.data, 'base64').subarray(1, 4).toString() === 'PNG');
   assert.equal(SeatResult.parse(png.structuredContent).layout.screen, 'top');
   const svg = await client.callTool({ name: 'get_seats', arguments: { ...args, image: 'svg' } });
-  const resource = (svg.content as { type: string; resource?: { mimeType: string; text: string; uri: string } }[]).find(c => c.type === 'resource')?.resource;
-  assert.equal(resource?.mimeType, 'image/svg+xml'); assert.match(resource!.text, /^<svg /); assert.equal(resource!.uri, 'cinve://seats/cinepic/123300/f1.svg');
+  const embedded = svg.content.find(c => c.type === 'resource');
+  assert.ok(embedded?.type === 'resource' && 'text' in embedded.resource, 'an embedded text resource');
+  const { resource } = embedded;
+  assert.equal(resource.mimeType, 'image/svg+xml'); assert.match(resource.text, /^<svg /); assert.equal(resource.uri, 'cinve://seats/cinepic/123300/f1.svg');
   const none = await client.callTool({ name: 'get_seats', arguments: { ...args, image: 'none' } });
-  assert.deepEqual((none.content as { type: string }[]).map(c => c.type), ['text']);
+  assert.deepEqual(none.content.map(c => c.type), ['text']);
   const failed = await client.callTool({ name: 'get_seats', arguments: { ...args, provider: 'cinex', cinema_id: 'SBC' } });
-  assert.deepEqual((failed.content as { type: string }[]).map(c => c.type), ['text'], 'no image without a verified map');
+  assert.deepEqual(failed.content.map(c => c.type), ['text'], 'no image without a verified map');
 });
 
 // The function line as cinex.com.ve's seat page printed it on 2026-11-05.
@@ -133,7 +137,7 @@ test('Cinepic seats and ticket counters follow the purchase page', async t => {
   assert.deepEqual(parseCinepicSeats(butacas, cinepicBookableTypes(tarifas)).slice(0, 4).map(s => s.status), ['available', 'unavailable', 'unavailable', 'occupied']);
   assert.equal(cinepicBookableTypes([{ ...tarifas[0], id: '' }]), 'all', 'a tariff without id books any free seat');
   assert.equal(cinepicBookableTypes([]), 'all', 'an empty list keeps the map states');
-  assert.deepEqual([...cinepicBookableTypes([{ id: '08' }, { id: 'vip' }]) as Set<string>], ['8', 'vip']);
+  assert.deepEqual([...instance(cinepicBookableTypes([{ id: '08' }, { id: 'vip' }]), Set)], ['8', 'vip']);
   assert.equal(cinepicTicketsLeft({ tot: '9'.repeat(30), vend: '0', temp: '0' }), undefined, 'an unsafe integer is not a count');
   assert.equal(cinepicTicketsLeft(nth(tarifas, 0)), 146); assert.equal(cinepicTicketsLeft({ tot: '5' }), undefined);
   const body = page({ ...cpBuy, butacasData: butacas, functionData: { datos: [{ id: 'f1', codigo: 'p1' }], tarifas } });
@@ -148,7 +152,7 @@ test('Cinepic seats and ticket counters follow the purchase page', async t => {
   assert.match(seats.warnings.join(' '), /2 butacas libres de un tipo especial/);
   assert.match(seats.warnings.join(' '), /ofrece en línea 146 entradas COMPLETO, 146 entradas NIÑOS; puede vender menos entradas que las 196 butacas libres/);
   const { image: _, ...priceArgs } = args;
-  const prices = (await client.callTool({ name: 'get_ticket_prices', arguments: priceArgs })).structuredContent as { items: { name: string; tickets_available?: number }[] };
+  const prices = Result.parse((await client.callTool({ name: 'get_ticket_prices', arguments: priceArgs })).structuredContent);
   assert.deepEqual(prices.items.map(i => [i.name, i.tickets_available]), [['COMPLETO', 146], ['NIÑOS', 146]]);
 });
 
@@ -168,8 +172,8 @@ test('the image survives hostile or oversized maps without hiding the data', asy
   assert.throws(() => renderSeatMapSvg(tall, seatLayout('cinesunidos'), header), MapTooLarge);
   // On a narrow map the full legend no longer overlaps the total.
   const narrow = renderSeatMapSvg([s('A', '1', 0, 0), s('A', '1', 0, 1, 'occupied'), s('A', '1', 0, 2, 'unavailable'), s('A', '1', 0, 3, 'unknown')], seatLayout('cinesunidos'), header);
-  const legendY = Number(narrow.match(/y="([\d.]+)" font-size="12" fill="#3c4043">Desconocido/)![1]);
-  const totalY = Number(narrow.match(/y="([\d.]+)" font-size="12" font-weight="700" fill="#202124" text-anchor="end">1 libres de 4/)![1]);
+  const legendY = Number(capture(narrow, /y="([\d.]+)" font-size="12" fill="#3c4043">Desconocido/));
+  const totalY = Number(capture(narrow, /y="([\d.]+)" font-size="12" font-weight="700" fill="#202124" text-anchor="end">1 libres de 4/));
   assert.ok(totalY > legendY, `${totalY} > ${legendY}`);
 });
 
@@ -184,7 +188,7 @@ test('get_seats warns instead of failing when a map is too large to draw', async
   const r = await client.callTool({ name: 'get_seats', arguments: { provider: 'cinesunidos', cinema_id: '1008', session_id: 's1' } });
   const data = SeatResult.parse(r.structuredContent);
   assert.equal(data.status, 'available'); assert.equal(data.total, 120);
-  assert.deepEqual((r.content as { type: string }[]).map(c => c.type), ['text']);
+  assert.deepEqual(r.content.map(c => c.type), ['text']);
   assert.match(data.warnings.join(' '), /demasiado grande para dibujarlo como imagen/);
 });
 

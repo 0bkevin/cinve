@@ -6,7 +6,7 @@ import { HttpClient } from '../../src/http/client.js';
 import { inputSchema } from '../../src/mcp/server.js';
 import { ReadContext } from '../../src/http/read-context.js';
 import { parseCinexMovies, parseCinexCinemaShowtimes } from '../../src/providers/cinex/public-pages.js';
-import { nth } from '../helpers/assert.js';
+import { defined, nth } from '../helpers/assert.js';
 
 const base = 'https://www.cinex.com.ve';
 const card = (slug: string, name: string, image: string, city = 'Caracas') => `<a href="cinex-${slug}.html" title="Cinex ${name}, ${city}"><img src="${base}/assets/images/cinemas/${image}"><h3>${name}</h3></a>`;
@@ -15,7 +15,7 @@ function service(directory: () => string, pages: Record<string, string>, codes: 
   const http = new HttpClient(async input => {
     const url = new URL(String(input)); requests.push(url.href);
     if (url.pathname === '/cines.html') return new Response(directory());
-    if (url.pathname === '/assets/php/datasource.php') return Response.json({ data: codes[url.searchParams.get('cinemaid')!] ?? [] });
+    if (url.pathname === '/assets/php/datasource.php') return Response.json({ data: codes[defined(url.searchParams.get('cinemaid'))] ?? [] });
     const body = pages[url.pathname];
     return new Response(body ?? 'missing', { status: body === undefined ? 404 : 200 });
   });

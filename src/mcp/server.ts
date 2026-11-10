@@ -19,6 +19,8 @@ const paging = {
   offset: z.number().int().min(0).max(100000).default(0),
   limit: z.number().int().min(1).max(100).default(50),
 };
+/** get_auth_status output. */
+export const AuthStatusResult = z.object({ connection: z.object({ mode: z.enum(['local', 'hosted']), client_authorized: z.boolean() }), providers: z.array(z.object({ provider: z.enum(['cinex', 'cinesunidos']), status: z.string(), expires_at: z.string().nullable(), login_command: z.string(), remote_validity_checked: z.literal(false) })) });
 const provider = Provider.describe('Proveedor de cine; obtén capacidades y limitaciones con list_providers.');
 const cinemaIdText = 'ID de sede devuelto por list_cinemas del mismo proveedor. No mezcles IDs entre proveedores. Si la sede incluye code_status, usa cinema_id solo cuando sea verified; los IDs directory-* no permiten consultas.';
 const sessionIdText = 'ID de función devuelto por get_showtimes del mismo proveedor.';
@@ -126,7 +128,7 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
     title: 'Estado de autenticación',
     description: 'Estado de las sesiones Cinex y Cines Unidos y siguiente paso de conexión. No devuelve datos personales ni secretos. configured no garantiza que el proveedor no haya revocado la sesión.',
     inputSchema: z.object({}).strict(),
-    outputSchema: z.object({ connection: z.object({ mode: z.enum(['local', 'hosted']), client_authorized: z.boolean() }), providers: z.array(z.object({ provider: z.enum(['cinex', 'cinesunidos']), status: z.string(), expires_at: z.string().nullable(), login_command: z.string(), remote_validity_checked: z.literal(false) })) }),
+    outputSchema: AuthStatusResult,
     annotations: { ...annotations, openWorldHint: false },
   }, async () => {
     try {

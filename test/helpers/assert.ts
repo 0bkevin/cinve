@@ -20,3 +20,22 @@ export function sessionCookie(response: Response): string {
   assert.ok(header, 'Expected a Set-Cookie header.');
   return nth(header.split(';'), 0);
 }
+
+/** `value`, failing the test when it is null or undefined. */
+export function defined<T>(value: T | null | undefined, what = 'a value'): T {
+  assert.ok(value !== undefined && value !== null, `Expected ${what}.`);
+  return value;
+}
+
+/** The text of the first content block of a tool result, failing the test unless it is a text block. */
+export function firstText<B extends { type: string }>(content: readonly B[]): string {
+  const block = nth(content, 0);
+  assert.ok(block.type === 'text' && 'text' in block && typeof block.text === 'string', `Expected a text block, got ${block.type}.`);
+  return block.text;
+}
+
+/** `value` as an instance of `type`, failing the test when it is not one. */
+export function instance<T>(value: unknown, type: new (...args: never[]) => T): T {
+  assert.ok(value instanceof type, `Expected a ${type.name}.`);
+  return value;
+}

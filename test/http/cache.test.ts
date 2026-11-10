@@ -4,6 +4,7 @@ import { HttpClient } from '../../src/http/client.js';
 import { ReadContext } from '../../src/http/read-context.js';
 import { DataError } from '../../src/core.js';
 import { CinemaService } from '../../src/service.js';
+import { defined } from '../helpers/assert.js';
 
 const origin = 'https://gateway.cinesunidos.com';
 test('cache deduplicates concurrent requests and preserves original fetch time', async () => {
@@ -94,7 +95,7 @@ test('one city read through the search API fits in the cache alongside another c
     if (url.hostname === 'www.cinesunidos.com') return new Response('Just a moment...', { status: 403, headers: { 'cf-mitigated': 'challenge' } });
     if (url.pathname === '/search/cities') return Response.json(['Caracas', 'Valencia']);
     if (url.pathname.endsWith('/films')) return Response.json(Array.from({ length: 60 }, (_, i) => `Film ${i}`));
-    if (url.pathname.endsWith('/sessions')) return Response.json([{ showtime: '2026-11-04T18:15:00', sessionId: `s${reads}`, screenNumber: 1, format: '2D', ho: `HO${url.searchParams.get('Title')!.slice(5)}`, title: url.searchParams.get('Title'), cinemaId: '1005' }]);
+    if (url.pathname.endsWith('/sessions')) return Response.json([{ showtime: '2026-11-04T18:15:00', sessionId: `s${reads}`, screenNumber: 1, format: '2D', ho: `HO${defined(url.searchParams.get('Title')).slice(5)}`, title: url.searchParams.get('Title'), cinemaId: '1005' }]);
     return new Response('missing', { status: 404 });
   });
   const s = new CinemaService(http);

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fixture } from '../helpers/hosted.js';
+import { defined } from '../helpers/assert.js';
 
 test('the install guide carries the seat rules and no code download', async t => {
   const f = await fixture(t);
@@ -30,13 +31,13 @@ test('public pages use the configured origin and serve local fonts under the aut
   assert.equal(font.headers.get('content-type'), 'font/woff2');
   assert.equal(Buffer.from(await font.arrayBuffer()).subarray(0, 4).toString(), 'wOF2');
   const browser = await fetch(f.origin + '/install', { headers: { Accept: 'text/html' } });
-  assert.match(browser.headers.get('content-type')!, /text\/html/);
+  assert.match(defined(browser.headers.get('content-type')), /text\/html/);
   assert.ok((await browser.text()).includes(`${f.origin}/mcp`));
   const agent = await fetch(f.origin + '/install');
-  assert.match(agent.headers.get('content-type')!, /text\/plain/);
+  assert.match(defined(agent.headers.get('content-type')), /text\/plain/);
   assert.ok((await agent.text()).includes('Cinve MCP installation'));
   const raw = await fetch(f.origin + '/install?format=text', { headers: { Accept: 'text/html' } });
-  assert.match(raw.headers.get('content-type')!, /text\/plain/);
+  assert.match(defined(raw.headers.get('content-type')), /text\/plain/);
   const error = await fetch(f.origin + '/oauth/authorize');
   assert.equal(error.status, 400);
   assert.ok((await error.text()).includes('No se pudo autorizar la conexión.'));

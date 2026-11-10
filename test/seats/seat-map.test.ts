@@ -7,7 +7,7 @@ import { CinemaService } from '../../src/service.js';
 import { HttpClient } from '../../src/http/client.js';
 import { assertPrivateRead } from '../../src/http/allow-list.js';
 import { EmptySessionStore, page } from '../helpers/fixtures.js';
-import { nth } from '../helpers/assert.js';
+import { defined, nth } from '../helpers/assert.js';
 
 const cp = (overrides = {}) => ({ butaca: 'A-1-1', nombre_butaca: 'A:1', fila: '1', columna: '1', libre: '1', seleccionada: '1', tipo_butaca_id: '1', ...overrides });
 test('Cinepic availability ignores seleccionada and preserves physical labels, gaps, and unknown states', () => {
@@ -144,7 +144,7 @@ test('parallel Cinex seat and price reads for different functions do not switch 
     await new Promise(r => setTimeout(r, 5 + Math.random() * 15));
     inFlight--;
     if (u.pathname === '/checklogin.php') return new Response('on');
-    if (u.pathname === '/boletosdev.php' || u.pathname === '/boletos.php') { selected = u.searchParams.get('sessionid')!; return new Response('<form id="frmboletos"></form>'); }
+    if (u.pathname === '/boletosdev.php' || u.pathname === '/boletos.php') { selected = defined(u.searchParams.get('sessionid')); return new Response('<form id="frmboletos"></form>'); }
     if (u.pathname === '/asientosdev.php') return new Response(cinexMap.replace('sessionid=s1', `sessionid=${selected}`));
     return new Response('', { status: 404 });
   }, 15000, sessions);

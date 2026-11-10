@@ -2,28 +2,29 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { request as httpRequest } from 'node:http';
 import { Result } from '../../src/core.js';
-import { fixture, link, successfulLogin } from '../helpers/hosted.js';
-import { nth } from '../helpers/assert.js';
+import { BrowserToken, fixture, link, successfulLogin } from '../helpers/hosted.js';
+import { AuthStatusResult } from '../../src/mcp/server.js';
+import { defined, nth } from '../helpers/assert.js';
 
 test('hosted MCP authenticates every request; account links are one-use and sessions stay per user', async t => {
   const f = await fixture(t, successfulLogin);
   const anonymous = await f.client();
   assert.equal((await anonymous.listTools()).tools.length, 11);
   const publicData = await anonymous.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos' } });
-  assert.equal((publicData.structuredContent as { status: string }).status, 'available');
+  assert.equal(Result.parse(publicData.structuredContent).status, 'available');
   const protectedData = await anonymous.callTool({ name: 'get_ticket_prices', arguments: { provider: 'cinesunidos', cinema_id: '1', session_id: '1' } });
-  assert.equal((protectedData.structuredContent as { status: string }).status, 'auth_required');
+  assert.equal(Result.parse(protectedData.structuredContent).status, 'auth_required');
   assert.ok(!JSON.stringify(protectedData).includes('npm run')); 
   assert.equal((await fetch(f.origin + '/mcp', { method: 'POST', headers: { Authorization: 'Bearer invalid' } })).status, 401);
   const alice = await f.client(f.alice.token), bob = await f.client(f.bob.token);
   assert.equal((await alice.listTools()).tools.length, 11);
   const invitation = await link(alice);
   const page = await fetch(f.origin + '/connect');
-  assert.equal(page.headers.get('cache-control'), 'no-store'); assert.match(page.headers.get('content-security-policy')!, /frame-ancestors 'none'/);
+  assert.equal(page.headers.get('cache-control'), 'no-store'); assert.match(defined(page.headers.get('content-security-policy')), /frame-ancestors 'none'/);
   assert.ok(!(await page.text()).includes(invitation));
   assert.equal((await f.post('/connect/exchange', invitation, {}, { Origin: 'https://evil.test' })).status, 403);
   const exchanged = await f.post('/connect/exchange', invitation);
-  const { browser_token } = await exchanged.json() as { browser_token: string };
+  const { browser_token } = BrowserToken.parse(await exchanged.json());
   assert.equal(exchanged.status, 200);
   assert.equal((await f.post('/connect/exchange', invitation)).status, 410);
   const logged = await f.post('/connect/login', browser_token, { username: 'person@example.test', password: 'SYNTHETIC_PASSWORD' });
@@ -32,15 +33,15 @@ test('hosted MCP authenticates every request; account links are one-use and sess
   const aStatus = JSON.stringify((await alice.callTool({ name: 'get_auth_status', arguments: {} })).structuredContent);
   const bStatus = JSON.stringify((await bob.callTool({ name: 'get_auth_status', arguments: {} })).structuredContent);
   assert.ok(aStatus.includes('configured')); assert.ok(!bStatus.includes('configured')); assert.ok(!aStatus.includes('SYNTHETIC'));
-  const anonymousAuth = (await anonymous.callTool({ name: 'get_auth_status', arguments: {} })).structuredContent as { connection: { mode: string; client_authorized: boolean }; providers: Array<{ status: string }> };
+  const anonymousAuth = AuthStatusResult.parse((await anonymous.callTool({ name: 'get_auth_status', arguments: {} })).structuredContent);
   assert.deepEqual(anonymousAuth.connection, { mode: 'hosted', client_authorized: false });
   assert.ok(anonymousAuth.providers.every(p => p.status === 'client_authorization_required'));
-  const signedIn = (await alice.callTool({ name: 'get_auth_status', arguments: {} })).structuredContent as { connection: { mode: string; client_authorized: boolean } };
+  const signedIn = AuthStatusResult.parse((await alice.callTool({ name: 'get_auth_status', arguments: {} })).structuredContent);
   assert.deepEqual(signedIn.connection, { mode: 'hosted', client_authorized: true });
   const anonymousStatus = JSON.stringify(anonymousAuth);
   assert.ok(!anonymousStatus.includes('configured'));
   const stillPrivate = await anonymous.callTool({ name: 'get_ticket_prices', arguments: { provider: 'cinesunidos', cinema_id: '1', session_id: '1' } });
-  assert.equal((stillPrivate.structuredContent as { status: string }).status, 'auth_required');
+  assert.equal(Result.parse(stillPrivate.structuredContent).status, 'auth_required');
   const encrypted = JSON.stringify((await f.pool.query('SELECT ciphertext FROM cinev_sessions')).rows);
   assert.ok(!/SYNTHETIC|person@example/.test(encrypted));
   await bob.callTool({ name: 'disconnect_account', arguments: { provider: 'cinesunidos' } });
@@ -111,8 +112,8 @@ test('hosted requests retain verified unlisted Cinex IDs across request-scoped s
   const before = requests.length;
   const separateRequest = await f.client();
   const showtimes = await separateRequest.callTool({ name: 'get_showtimes', arguments: { provider: 'cinex', cinema_id: 'MTB', date: '2026-09-18', refresh: true } });
-  assert.equal((showtimes.structuredContent as { status: string; total: number }).status, 'available');
-  assert.equal((showtimes.structuredContent as { total: number }).total, 1);
+  assert.equal(Result.parse(showtimes.structuredContent).status, 'available');
+  assert.equal(Result.parse(showtimes.structuredContent).total, 1);
   assert.deepEqual(requests.slice(before), ['/cartelera.html', '/cinex-metropolisbarquisimeto.html']);
 });
 
@@ -123,7 +124,7 @@ test('disconnect during upstream login prevents a late session from being saved'
   const f = await fixture(t, async (...args) => { started(); await gate; return successfulLogin(...args); });
   const client = await f.client(f.alice.token);
   const invitation = await link(client);
-  const { browser_token } = await (await f.post('/connect/exchange', invitation)).json() as { browser_token: string };
+  const { browser_token } = BrowserToken.parse(await (await f.post('/connect/exchange', invitation)).json());
   const pending = f.post('/connect/login', browser_token, { username: 'person@example.test', password: 'SYNTHETIC_PASSWORD' });
   await ready;
   await client.callTool({ name: 'disconnect_account', arguments: { provider: 'cinesunidos' } });
@@ -134,11 +135,11 @@ test('disconnect during upstream login prevents a late session from being saved'
 test('hosted rejects rebinding, excess bodies, field injection, reused/revoked links and leaks', async t => {
   const f = await fixture(t, async () => { throw new Error('PRIVATE_PASSWORD'); });
   const badHost = await new Promise<number>(resolve => {
-    const req = httpRequest(f.origin + '/connect', { headers: { Host: 'evil.test' } }, res => { res.resume(); resolve(res.statusCode!); }); req.end();
+    const req = httpRequest(f.origin + '/connect', { headers: { Host: 'evil.test' } }, res => { res.resume(); resolve(defined(res.statusCode)); }); req.end();
   });
   assert.equal(badHost, 403);
   const client = await f.client(f.alice.token), invite = await link(client);
-  const { browser_token } = await (await f.post('/connect/exchange', invite)).json() as { browser_token: string };
+  const { browser_token } = BrowserToken.parse(await (await f.post('/connect/exchange', invite)).json());
   assert.equal((await f.post('/connect/login', browser_token, { provider: 'cinex', username: 'x', password: 'x' })).status, 400);
   assert.equal((await f.post('/connect/login', browser_token, { username: 'x', password: 'x'.repeat(17000) })).status, 413);
   const failure = await f.post('/connect/login', browser_token, { username: 'x', password: 'x' });
@@ -159,7 +160,7 @@ test('slow request bodies cannot bypass the per-client MCP concurrency limit', a
     const status = new Promise<number>((resolve, reject) => {
       const req = httpRequest({ host: '127.0.0.1', port, path: '/mcp', method: 'POST', headers: {
         'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', 'MCP-Protocol-Version': '2025-06-18',
-      } }, res => { res.resume(); resolve(res.statusCode!); });
+      } }, res => { res.resume(); resolve(defined(res.statusCode)); });
       req.on('error', reject);
       req.write(message.slice(0, 1));
       finish = () => req.end(message.slice(1));
@@ -179,7 +180,7 @@ test('refresh=true calls have their own small budget so the shared cache cannot 
   await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 minute',10)", [digest('refresh:anonymous:127.0.0.1')]);
   await assert.rejects(anonymous.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos', refresh: true } }));
   const cached = await anonymous.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos' } });
-  assert.equal((cached.structuredContent as { status: string }).status, 'available');
+  assert.equal(Result.parse(cached.structuredContent).status, 'available');
 });
 
 test('an unfinished MCP body is cut off at its deadline and releases its concurrency slot', async t => {
@@ -194,5 +195,5 @@ test('an unfinished MCP body is cut off at its deadline and releases its concurr
   assert.deepEqual(await Promise.all(stalled), ['closed', 'closed', 'closed', 'closed']);
   const anonymous = await f.client();
   const r = await anonymous.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos' } });
-  assert.equal((r.structuredContent as { status: string }).status, 'available', 'slots held by stalled bodies were released');
+  assert.equal(Result.parse(r.structuredContent).status, 'available', 'slots held by stalled bodies were released');
 });

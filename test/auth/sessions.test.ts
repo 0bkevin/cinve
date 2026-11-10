@@ -25,6 +25,7 @@ test('sessions persist with private permissions, expose no token in status and r
   assert.equal((await stat(join(store.directory, 'cinesunidos.json'))).mode & 0o777, 0o600);
   assert.equal((await store.status('cinesunidos')).status, 'configured');
   assert.ok(!JSON.stringify(await store.status('cinesunidos')).includes('SYNTHETIC_TOKEN'));
+  // Deliberately not an AuthSession: the runtime schema must reject the extra field.
   await assert.rejects(store.save({ ...cuSession(), password: 'DO_NOT_SAVE' } as never));
   assert.ok(!(await readFile(join(store.directory, 'cinesunidos.json'), 'utf8')).includes('DO_NOT_SAVE'));
   await chmod(join(store.directory, 'cinesunidos.json'), 0o644);

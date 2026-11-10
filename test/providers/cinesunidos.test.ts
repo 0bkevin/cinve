@@ -7,7 +7,7 @@ import { mockFetch, page, EmptySessionStore, cuMovies } from '../helpers/fixture
 import { inputSchema } from '../../src/mcp/server.js';
 import { cuLanguage, cuSiteTitle } from '../../src/providers/cinesunidos/adapter.js';
 import type { DataItem } from '../../src/core.js';
-import { nth } from '../helpers/assert.js';
+import { defined, nth } from '../helpers/assert.js';
 
 const url = 'https://www.cinex.com.ve/boletos.php?cinemaid=TLN&sessionid=s1';
 
@@ -55,7 +55,7 @@ test('CU preserves good venues and named venues without usable codes despite mal
   assert.equal(r.status, 'available'); assert.equal(r.total, 3); assert.equal(r.partial, true);
   assert.equal(r.items.find(i => i.name === 'Good')?.id, '1002');
   for (const name of ['Missing ID', 'Unsafe ID']) {
-    const item = r.items.find(i => i.name === name)!;
+    const item = defined(r.items.find(i => i.name === name));
     assert.equal(item.code_status, 'unverified'); assert.equal(item.cinema_id, undefined); assert.match(item.id, /^directory-/);
   }
 });
@@ -156,7 +156,7 @@ test('the Cines Unidos search fallback searches only matching titles and keeps t
     if (url.pathname === '/search/cities') return Response.json(['Caracas']);
     if (url.pathname.endsWith('/films')) return Response.json(['Good Film', 'Bad Film', 'El Silbón', 'Otra', 'Broken', 'Bad Id']);
     if (url.pathname.endsWith('/sessions')) {
-      const title = url.searchParams.get('Title')!; searched.push(title);
+      const title = defined(url.searchParams.get('Title')); searched.push(title);
       if (title === 'Bad Film') return new Response('down', { status: 500 });
       if (title === 'Broken') return Response.json([{ showtime: 'not-a-date', sessionId: 'x', ho: 'HOX', title, cinemaId: '1005' }]);
       if (title === 'Bad Id') return Response.json([{ showtime: '2026-11-04T19:00:00', sessionId: 'y', ho: 'bad/id', title, cinemaId: '1005' }]);
@@ -184,7 +184,7 @@ test('the Cines Unidos search fallback stops at its total deadline and keeps the
     if (url.pathname === '/search/cities') return Response.json(['Caracas']);
     if (url.pathname.endsWith('/films')) return Response.json(Array.from({ length: 40 }, (_, i) => `Film ${i}`));
     if (url.pathname.endsWith('/sessions')) {
-      const title = url.searchParams.get('Title')!;
+      const title = defined(url.searchParams.get('Title'));
       t.mock.timers.tick(10000); // every title search takes 10 s
       return Response.json([{ showtime: '2026-11-04T19:00:00', sessionId: title.replace(' ', '-'), ho: `HO${title.slice(5)}`, title, cinemaId: '1005' }]);
     }
@@ -208,7 +208,7 @@ test('the Cines Unidos search fallback counts its setup reads against the hosted
     if (url.pathname === '/search/cities') return Response.json(['Caracas']);
     if (url.pathname.endsWith('/films')) return Response.json(Array.from({ length: 8 }, (_, i) => `Film ${i}`));
     if (url.pathname.endsWith('/sessions')) {
-      const title = url.searchParams.get('Title')!;
+      const title = defined(url.searchParams.get('Title'));
       return Response.json([{ showtime: '2026-11-04T19:00:00', sessionId: title.replace(' ', '-'), ho: `HO${title.slice(5)}`, title, cinemaId: '1005' }]);
     }
     return new Response('missing', { status: 404 });

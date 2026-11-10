@@ -9,7 +9,7 @@ import { createServer, inputSchema } from '../../src/mcp/server.js';
 import { CinemaService } from '../../src/service.js';
 import { CinexCinemaCatalog } from '../../src/providers/cinex/venues.js';
 import { HttpClient } from '../../src/http/client.js';
-import { nth } from '../helpers/assert.js';
+import { defined, firstText, nth } from '../helpers/assert.js';
 
 test('official MCP client discovers tools, validates arguments and reads structured results over stdio', async () => {
   const client = new Client({ name: 'cinev-test', version: '1.0.0' });
@@ -33,7 +33,7 @@ test('official MCP client discovers tools, validates arguments and reads structu
     const r = await client.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos' } });
     const data = Result.parse(r.structuredContent);
     assert.equal(data.status, 'available'); assert.equal(data.total, 2);
-    const parsedText = JSON.parse((r.content[0] as { text: string }).text);
+    const parsedText = JSON.parse(firstText(r.content));
     assert.deepEqual(data, parsedText);
     const bad = await client.callTool({ name: 'get_showtimes', arguments: { provider: 'cinepic' } });
     assert.equal(bad.isError, true);
@@ -64,11 +64,11 @@ test('account adapter failures are returned without exposing internal exception 
     const result = await client.callTool({ name: 'connect_account', arguments: { provider: 'cinex' } });
     assert.equal(result.isError, true);
     assert.equal(JSON.stringify(result).includes('DATABASE_SECRET_INTERNAL'), false);
-    assert.match((result.content[0] as { text: string }).text, /No se pudo crear el enlace/);
+    assert.match(firstText(result.content), /No se pudo crear el enlace/);
     const disconnected = await client.callTool({ name: 'disconnect_account', arguments: { provider: 'cinex' } });
     assert.equal(disconnected.isError, true);
     assert.equal(JSON.stringify(disconnected).includes('DATABASE_SECRET_INTERNAL'), false);
-    assert.match((disconnected.content[0] as { text: string }).text, /No se pudo desconectar la cuenta/);
+    assert.match(firstText(disconnected.content), /No se pudo desconectar la cuenta/);
   } finally { await client.close(); await server.close(); }
 
   const authServer = createServer(new class extends CinemaService {
@@ -81,7 +81,7 @@ test('account adapter failures are returned without exposing internal exception 
     const status = await authClient.callTool({ name: 'get_auth_status', arguments: {} });
     assert.equal(status.isError, true);
     assert.equal(JSON.stringify(status).includes('AUTH_STATUS_INTERNAL'), false);
-    assert.match((status.content[0] as { text: string }).text, /No se pudo leer el estado/);
+    assert.match(firstText(status.content), /No se pudo leer el estado/);
   } finally { await authClient.close(); await authServer.close(); }
 });
 
@@ -111,7 +111,7 @@ test('long fan-outs report increasing progress to clients that send a progress t
   try {
     const updates: { progress: number; message?: string | undefined }[] = [];
     const r = await client.callTool({ name: 'get_showtimes', arguments: { provider: 'cinex', city: 'Caracas', date: '2026-09-18' } }, { onprogress: p => updates.push(p) });
-    assert.equal((r.structuredContent as { total: number }).total, 3);
+    assert.equal(Result.parse(r.structuredContent).total, 3);
     assert.ok(updates.length >= 4, JSON.stringify(updates)); // discovery batch + three venues
     assert.ok(updates.every((u, i) => i === 0 || u.progress > nth(updates, i - 1).progress), 'progress only increases');
     assert.ok(updates.some(u => u.message === 'Cinex: 3 de 3 sedes leídas.'), JSON.stringify(updates));
@@ -135,7 +135,7 @@ test('Cinepic calls without a venue name the two valid IDs, avoiding a discovery
 test('Cinex ticket prices require a function, since no public listing can supply them', () => {
   const r = inputSchema('prices').safeParse({ provider: 'cinex', cinema_id: 'TLN' });
   assert.equal(r.success, false);
-  assert.ok(r.error!.issues.some(i => i.path[0] === 'session_id'));
+  assert.ok(defined(r.error).issues.some(i => i.path[0] === 'session_id'));
 });
 
 test('null arguments from strict function-calling adapters are treated as absent', async () => {
@@ -154,12 +154,12 @@ test('null arguments from strict function-calling adapters are treated as absent
     const published = JSON.stringify(tools.tools.map(t => [t.inputSchema, t.outputSchema]));
     for (const construct of ['(?!', '(?=', '(?<', '\\\\p{']) assert.ok(!published.includes(construct), `published schemas contain ${construct}`);
     const r = await client.callTool({ name: 'list_cities', arguments: { provider: 'cinepic', query: null, offset: null, limit: null, refresh: null } });
-    assert.equal(r.isError, false); assert.equal((r.structuredContent as { total: number }).total, 1);
+    assert.equal(r.isError, false); assert.equal(Result.parse(r.structuredContent).total, 1);
     const seats = await client.callTool({ name: 'get_seats', arguments: { provider: 'cinepic', cinema_id: '123300', session_id: '1', movie_id: null } });
     assert.match(JSON.stringify(seats.content), /movie_id/, 'a null required-by-provider field still reports it as missing');
     const typo = await client.callTool({ name: 'list_cities', arguments: { provider: 'cinepic', typo: null } });
     assert.equal(typo.isError, true, 'an unknown key is rejected even when null');
-    const required = (name: string) => (tools.tools.find(t => t.name === name)!.inputSchema as { required?: string[] }).required;
+    const required = (name: string) => defined(tools.tools.find(t => t.name === name)).inputSchema.required;
     assert.deepEqual(required('get_ticket_prices')?.sort(), ['cinema_id', 'provider', 'session_id']);
     assert.deepEqual(required('get_concessions')?.sort(), ['cinema_id', 'provider']);
     const noSession = await client.callTool({ name: 'get_ticket_prices', arguments: { provider: 'cinex', cinema_id: 'TLN', session_id: null } });
