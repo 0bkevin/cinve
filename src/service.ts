@@ -32,8 +32,10 @@ function boundedWarnings(warnings: string[]): string[] {
   }
   if (omitted) {
     const aggregate = `Se omitieron ${omitted} advertencias repetidas o excedentes; consulta partial y los datos fuente.`;
-    while (output.length && (output.length >= resultWarningLimit || characters + aggregate.length > resultWarningCharacters)) {
-      characters -= output.pop()!.length;
+    while (output.length >= resultWarningLimit || characters + aggregate.length > resultWarningCharacters) {
+      const dropped = output.pop();
+      if (dropped === undefined) break;
+      characters -= dropped.length;
       omitted++;
     }
     output.push(aggregate);
@@ -91,7 +93,7 @@ export class CinemaService {
           }
         }
         // Validate inside the guarded path, before filtering/pagination can hide a bad record.
-        const item = operationItemSchema(op).parse(candidate) as DataItem;
+        const item: DataItem = operationItemSchema(op).parse(candidate);
         if (['movie', 'showtime', 'cinema'].includes(item.kind)) Id.parse(item.id);
         const key = `${item.kind}:${item.cinema_id ?? ''}:${item.id}`;
         if (item.kind === 'showtime') {

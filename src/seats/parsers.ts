@@ -6,7 +6,7 @@ import * as z from 'zod';
 import { beforeFirst, DataError, group, text } from '../core.js';
 import type { Query } from '../core.js';
 import { object, rows } from '../providers/parsing.js';
-import { Seat } from './schema.js';
+import { Seat, ShowingFields } from './schema.js';
 import type { SeatData, Showing } from './schema.js';
 
 export const clean = (value: unknown, max: number) => {
@@ -15,7 +15,8 @@ export const clean = (value: unknown, max: number) => {
 };
 /** Drops absent fields; undefined when nothing could be read. */
 export function showing(fields: Showing): Showing | undefined {
-  const kept = Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined)) as Showing;
+  const kept: Showing = {};
+  for (const key of ShowingFields.keyof().options) { const value = fields[key]; if (value !== undefined) kept[key] = value; }
   return Object.keys(kept).length ? kept : undefined;
 }
 
@@ -98,7 +99,7 @@ export function parseCinesUnidosSeats(data: unknown): SeatData[] {
         // Accessibility (3), selected (4), blocked/broken (5/6) are not free.
         status: ['0', '7'].includes(status) ? 'available' : ['1', '2'].includes(status) ? 'occupied' : ['3', '4', '5', '6'].includes(status) ? 'unavailable' : 'unknown',
         provider_status: status, category: text(a.areaCategoryCode),
-      } as SeatData;
+      } satisfies SeatData;
     }))));
 }
 

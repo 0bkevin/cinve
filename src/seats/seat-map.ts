@@ -37,8 +37,8 @@ export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions)
       const free = result.seats.filter(s => s.status === 'available').length;
       // A long or missing tariff name only shortens the label; its counter still counts.
       const tariffName = (t: Record<string, unknown>) => { const v = Array.from(text(t.descripcion).replace(/\s+/g, ' ')); return v.length ? (v.length > 60 ? `${v.slice(0, 59).join('').trimEnd()}…` : v.join('')) : 'sin nombre'; };
-      const left = (tariffs ?? []).map(t => [tariffName(t), cinepicTicketsLeft(t)] as const).filter(([, n]) => n !== undefined);
-      if (left.some(([, n]) => n! < free)) c.warnings.push(`La web de Cinepic ofrece en línea ${left.map(([name, n]) => `${n} entradas ${name}`).join(', ')}; puede vender menos entradas que las ${free} butacas libres del mapa.`);
+      const left = (tariffs ?? []).map(t => [tariffName(t), cinepicTicketsLeft(t)] as const).filter((entry): entry is readonly [string, number] => entry[1] !== undefined);
+      if (left.some(([, n]) => n < free)) c.warnings.push(`La web de Cinepic ofrece en línea ${left.map(([name, n]) => `${n} entradas ${name}`).join(', ')}; puede vender menos entradas que las ${free} butacas libres del mapa.`);
       c.warnings.push('La disponibilidad de Cinepic depende también del tipo de entrada elegido. El campo seleccionada del proveedor no indica una reserva del usuario.');
     } else if (q.provider === 'cinesunidos') {
       const url = `https://www.cinesunidos.com/api/seats?${new URLSearchParams({ theaterId: result.cinema_id, showTimeId: result.session_id })}`;

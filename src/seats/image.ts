@@ -3,7 +3,9 @@ import { createRequire } from 'node:module';
 import { deflateSync } from 'node:zlib';
 import { initWasm, Resvg } from '@resvg/resvg-wasm';
 
-export type SeatStatus = 'available' | 'occupied' | 'unavailable' | 'unknown';
+/** Every seat state, in legend order. */
+const seatStatuses = ['available', 'occupied', 'unavailable', 'unknown'] as const;
+export type SeatStatus = typeof seatStatuses[number];
 export type MapSeat = { label: string; row: string; area: string; row_index: number; column_index: number; status: SeatStatus };
 /** The provider-verified orientation from SeatResult.layout. */
 export type MapLayout = { screen: 'top' | 'bottom' | 'unverified'; column_order: 'ascending' | 'descending' };
@@ -21,7 +23,7 @@ const CELL = 30, SEAT = 26, LABEL = 30, PAD = 28;
 
 /** Characters XML 1.0 forbids (controls, lone surrogates, U+FFFE/FFFF); resvg and SVG viewers reject the whole document for one of them. */
 const invalidXml = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
-const escape = (value: string) => value.replace(invalidXml, '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+const escape = (value: string) => value.replace(invalidXml, '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
 /** Thrown before drawing a map whose image would exceed MAX_MAP_HEIGHT; the data answer is unaffected. */
 export class MapTooLarge extends Error {}
 /** In SVG units: about 90 rows of seats, far above any room seen (13-16 rows). */
@@ -119,8 +121,9 @@ export function renderSeatMapSvg(seats: MapSeat[], layout: MapLayout, header: Ma
   }
   if (layout.screen === 'bottom') { screen(y, 'bottom'); y += 44; }
   y += 6;
-  const counts = Object.fromEntries((Object.keys(palette) as SeatStatus[]).map(k => [k, seats.filter(s => s.status === k).length])) as Record<SeatStatus, number>;
-  const legend = (Object.keys(palette) as SeatStatus[]).filter(k => k === 'available' || k === 'occupied' || counts[k] > 0);
+  const counts: Record<SeatStatus, number> = { available: 0, occupied: 0, unavailable: 0, unknown: 0 };
+  for (const s of seats) counts[s.status]++;
+  const legend = seatStatuses.filter(k => k === 'available' || k === 'occupied' || counts[k] > 0);
   let lx = PAD;
   for (const k of legend) {
     const c = palette[k], label = `${c.name} (${counts[k]})`;
@@ -191,6 +194,7 @@ export async function renderSeatMapPng(svg: string): Promise<Uint8Array> {
  * repeated renders, uncollected multi-megabyte copies raised peak RSS by about 25 MB.
  */
 function discard(bytes: Uint8Array) {
+  // ArrayBuffer.prototype.transfer is ES2024 (Node 21+); the ES2022 lib does not declare it.
   const buffer = bytes.buffer as ArrayBuffer & { transfer?: (length: number) => ArrayBuffer };
   if (bytes.byteOffset === 0 && bytes.byteLength === buffer.byteLength) try { buffer.transfer?.(0); } catch { /* not detachable; GC frees it */ }
 }
