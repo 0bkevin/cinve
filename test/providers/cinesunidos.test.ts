@@ -3,9 +3,8 @@ import assert from 'node:assert/strict';
 import { parseCinesUnidosPrices } from '../../src/providers/cinesunidos/prices.js';
 import { CinemaService } from '../../src/service.js';
 import { HttpClient } from '../../src/http/client.js';
-import { mockFetch, page, EmptySessionStore, cuMovies, concessions } from '../helpers/fixtures.js';
+import { mockFetch, page, EmptySessionStore, cuMovies } from '../helpers/fixtures.js';
 import { inputSchema } from '../../src/mcp/server.js';
-import { Id } from '../../src/core.js';
 import { cuLanguage, cuSiteTitle } from '../../src/providers/cinesunidos/adapter.js';
 import type { DataItem } from '../../src/core.js';
 

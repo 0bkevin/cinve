@@ -4,9 +4,6 @@ import { HttpClient } from '../../src/http/client.js';
 import { ReadContext } from '../../src/http/read-context.js';
 import { DataError } from '../../src/core.js';
 import { SessionStore } from '../../src/auth/sessions.js';
-import { page } from '../helpers/fixtures.js';
-
-const origin = 'https://gateway.cinesunidos.com';
 
 test('Cinex ticket migration preserves IDs, credentials, deadline and final source without caching', async () => {
   const { SessionStore } = await import('../../src/auth/sessions.js');

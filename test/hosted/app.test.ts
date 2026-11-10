@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { request as httpRequest } from 'node:http';
 import { Result } from '../../src/core.js';
-import type { login } from '../../src/auth/login.js';
 import { fixture, link, successfulLogin } from '../helpers/hosted.js';
 
 test('hosted MCP authenticates every request; account links are one-use and sessions stay per user', async t => {

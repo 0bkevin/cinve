@@ -6,7 +6,6 @@ import { HttpClient } from '../../src/http/client.js';
 import { inputSchema } from '../../src/mcp/server.js';
 import { ReadContext } from '../../src/http/read-context.js';
 import { parseCinexMovies, parseCinexCinemaShowtimes } from '../../src/providers/cinex/public-pages.js';
-import { page } from '../helpers/fixtures.js';
 
 const base = 'https://www.cinex.com.ve';
 const card = (slug: string, name: string, image: string, city = 'Caracas') => `<a href="cinex-${slug}.html" title="Cinex ${name}, ${city}"><img src="${base}/assets/images/cinemas/${image}"><h3>${name}</h3></a>`;

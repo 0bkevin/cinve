@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SessionStore } from '../../src/auth/sessions.js';
 import { CinemaService } from '../../src/service.js';
-import { EmptySessionStore, page } from '../helpers/fixtures.js';
+import { EmptySessionStore } from '../helpers/fixtures.js';
 import { DataError } from '../../src/core.js';
 
 test('ReadContext deduplicates provenance by the final canonical URL, not the requested alias', async () => {

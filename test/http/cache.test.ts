@@ -4,7 +4,6 @@ import { HttpClient } from '../../src/http/client.js';
 import { ReadContext } from '../../src/http/read-context.js';
 import { DataError } from '../../src/core.js';
 import { CinemaService } from '../../src/service.js';
-import { page } from '../helpers/fixtures.js';
 
 const origin = 'https://gateway.cinesunidos.com';
 test('cache deduplicates concurrent requests and preserves original fetch time', async () => {

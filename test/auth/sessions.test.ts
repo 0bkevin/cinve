@@ -9,7 +9,6 @@ import { HttpClient } from '../../src/http/client.js';
 import { CinemaService } from '../../src/service.js';
 import { DataError } from '../../src/core.js';
 import { spawnSync } from 'node:child_process';
-import { login } from '../../src/auth/login.js';
 
 const ticketUrl = 'https://gateway.cinesunidos.com/tickets/www/theaters/1002/sessions/s1/';
 async function fixture(t: { after(fn: () => Promise<void>): void }) {

@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import { migrationSql } from '../../src/hosted/migrations.js';
 import { randomBytes } from 'node:crypto';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
-import type { login } from '../../src/auth/login.js';
 import type { ClientMetadataFetcher } from '../../src/hosted/client-metadata.js';
 import { fixture, link, successfulLogin } from '../helpers/hosted.js';
 

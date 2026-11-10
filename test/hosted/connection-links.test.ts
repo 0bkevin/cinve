@@ -3,8 +3,7 @@ import assert from 'node:assert/strict';
 import { migrationSql } from '../../src/hosted/migrations.js';
 import { EncryptedSessionStore } from '../../src/hosted/store.js';
 import { ConnectionLinks } from '../../src/hosted/connection-links.js';
-import type { login } from '../../src/auth/login.js';
-import { fixture, link } from '../helpers/hosted.js';
+import { fixture } from '../helpers/hosted.js';
 
 test('database links expire and cancellation invalidates browser stages', async t => {
   const f = await fixture(t), hash = (await f.users.hash(f.alice.id))!;

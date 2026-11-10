@@ -131,12 +131,6 @@ test('a failing session store is reported as Cinve failing, not the provider', a
   assert.equal(calls, 0);
 });
 
-async function store(t: { after(fn: () => Promise<void>): void }) {
-  const dir = await mkdtemp(join(tmpdir(), 'cinev-http-'));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  return new SessionStore(join(dir, 'sessions'));
-}
-
 test('queues reject overload instead of growing without a limit', async () => {
   let release!: () => void; const gate = new Promise<void>(r => { release = r; }); let count = 0;
   const http = new HttpClient(async () => { count++; await gate; return new Response('[]'); });
