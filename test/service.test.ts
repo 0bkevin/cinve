@@ -46,3 +46,15 @@ test('service caps distinct and repeated provider warnings with an explicit aggr
   assert.ok(result.warnings.join('').length <= 8192);
   assert.ok(result.warnings.some(w => /Se omitieron/.test(w)));
 });
+
+test('all providers block nonqueryable directory identifiers before network or authentication', async () => {
+  let calls = 0;
+  const s = new CinemaService(new HttpClient(async () => { calls++; throw new Error('Must not fetch'); }));
+  for (const provider of ['cinesunidos', 'cinepic', 'cinex'] as const) {
+    for (const op of ['prices', 'concessions', 'showtimes'] as const) {
+      const r = await s.query(op, { provider, cinema_id: 'directory-unknown', city: 'Caracas', movie_id: 'm', session_id: 's' });
+      assert.equal(r.status, 'unavailable'); assert.match(r.warnings.join(' '), /código/);
+    }
+  }
+  assert.equal(calls, 0);
+});

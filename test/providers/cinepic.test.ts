@@ -116,3 +116,42 @@ test('Cinepic omits unknown subtitle and overnight flags and marks the result pa
   assert.ok(result.warnings.some(w => /subtítulos/.test(w)));
   assert.ok(result.warnings.some(w => /trasnoche/.test(w)));
 });
+
+test('Cinepic retains both known venues when one site fails or changes its configuration ID', async () => {
+  for (const broken of ['network', 'wrong-id']) {
+    const s = new CinemaService(new HttpClient(async input => {
+      if (String(input).includes('cinepiccandelaria')) return broken === 'network' ? new Response('offline', { status: 503 }) : new Response(page({ config: { idUltracine: '123301', nombre: 'Wrong venue' } }));
+      return new Response(page({ config: { idUltracine: '123301', nombre: 'Cinepic VVIP' } }));
+    }));
+    const r = await s.query('cinemas', { provider: 'cinepic' });
+    assert.equal(r.status, 'available'); assert.equal(r.total, 2); assert.equal(r.partial, true);
+    assert.equal(r.items.find(i => i.id === '123301')?.code_status, 'verified');
+    assert.equal(r.items.find(i => i.name === 'Cinepic Candelaria')?.code_status, 'unverified');
+    const cities = await s.query('cities', { provider: 'cinepic' });
+    assert.equal(cities.items[0].name, 'Caracas'); assert.equal(cities.partial, false);
+  }
+});
+
+test('Cinepic configured cities return without probing either cinema website', async () => {
+  let requests = 0;
+  const s = new CinemaService(new HttpClient(async () => { requests++; return new Response('unexpected'); }));
+  const result = await s.query('cities', { provider: 'cinepic' });
+  assert.equal(result.status, 'available'); assert.deepEqual(result.items.map(item => item.name), ['Caracas']);
+  assert.equal(requests, 0); assert.ok(result.warnings.some(w => /configurada/.test(w)));
+});
+test('Cinepic retains movie references when scheduled sessions lack movie metadata', async () => {
+  const payload = structuredClone(cpSessions); payload.data.datos = [];
+  const s = new CinemaService(new HttpClient(async () => Response.json(payload)));
+  const q = { provider: 'cinepic' as const, cinema_id: '123300', date: '2026-09-18' };
+  const r = await s.query('movies', q);
+  assert.equal(r.total, 1); assert.equal(r.items[0].id, 'p1'); assert.equal(r.partial, true);
+  assert.equal((await s.query('showtimes', q)).partial, true);
+});
+
+test('Cinepic keeps explicitly unverified known sites if both sites fail, without fabricating live sources', async () => {
+  const s = new CinemaService(new HttpClient(async () => new Response('offline', { status: 503 })));
+  const r = await s.query('cinemas', { provider: 'cinepic' });
+  assert.equal(r.total, 2); assert.equal(r.partial, true); assert.equal(r.sources.length, 0);
+  assert.ok(r.items.every(i => i.code_status === 'unverified' && i.cinema_id === undefined));
+  assert.ok(r.warnings.some(w => w.includes('no hay descubrimiento automático')));
+});
