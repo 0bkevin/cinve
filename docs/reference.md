@@ -163,6 +163,9 @@ la fuente Inter incluida en `src/assets`, sin depender de fuentes del sistema.
 - Solo se guardan respuestas correctas: un error HTTP, un cuerpo vacío, un JSON
   inválido o una página sin la estructura esperada (por ejemplo, una página de
   mantenimiento) se informan y se vuelven a pedir en la siguiente consulta.
+- Los errores distinguen el lado que falló: un fallo al leer la sesión guardada
+  es de Cinve y no llega a consultar al proveedor; un plazo vencido o una
+  conexión cortada se atribuyen al proveedor.
 - Si un origen público responde con un desafío anti-bots, Cinve lo recuerda
   durante 10 minutos: las consultas siguientes usan directamente la alternativa
   documentada (o informan el bloqueo) sin volver a pedir la página. `refresh=true`

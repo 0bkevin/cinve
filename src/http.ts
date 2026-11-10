@@ -311,10 +311,14 @@ export class HttpClient {
     const requested = url;
     const deadline = Date.now() + this.timeout;
     const release = await this.acquire(origin, signal, deadline);
+    // Which side a failure belongs to: Cinve's own session store, or the provider.
+    const at: { phase: 'session' | 'provider' } = { phase: 'provider' };
     try {
       // Reload after queue admission: logout/account changes affect requests not yet sent.
       const requestPage = async (target: string) => {
+        at.phase = 'session';
         const auth = authorize ? await withSignal(authorize(target), signal) : {};
+        at.phase = 'provider';
         signal.throwIfAborted();
         return withSignal(this.request(target, {
           headers: { 'User-Agent': 'cinev-mcp/0.1', ...(refresh ? { 'Cache-Control': 'no-cache' } : {}), ...(origin.includes('gateway.cinesunidos.com') ? { xChannel: 'www' } : {}), ...auth },
@@ -375,8 +379,13 @@ export class HttpClient {
       return { body: authorize ? text : compactBody(url, text), source: { url, fetched_at: new Date().toISOString(), cached: false } };
     } catch (error) {
       if (error instanceof DataError) throw error;
-      if (signal.aborted) throw new DataError('error', `Se agotó el plazo total de la consulta a ${url}.`);
-      throw new DataError('error', `No se pudo leer ${url} (conexión, redirección o tiempo de espera).`);
+      // A failing session store (the hosted database, a local file) is Cinve's
+      // problem: never report it as the provider's connection failing.
+      if (at.phase === 'session') throw new DataError('error', signal.aborted
+        ? `Se agotó el plazo total de la consulta a ${url} mientras Cinve leía la sesión guardada; no llegó a consultarse al proveedor. Inténtalo de nuevo.`
+        : 'Cinve no pudo leer la sesión guardada de la cuenta; no llegó a consultarse al proveedor. Inténtalo de nuevo más tarde.');
+      if (signal.aborted) throw new DataError('error', `Se agotó el plazo total de la consulta a ${url}: el proveedor no terminó de responder en ${Math.round(this.timeout / 1000)} s.`);
+      throw new DataError('error', `No se pudo conectar con el proveedor ni leer su respuesta en ${url} (conexión rechazada, cortada o con un error de red).`);
     } finally {
       release();
     }

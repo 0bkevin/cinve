@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { HttpClient, ReadContext, decodeBody } from '../src/http.js';
 import { CinemaService } from '../src/service.js';
 import { DataError } from '../src/core.js';
+import { EmptySessionStore } from './fixtures.js';
 
 const cities = 'https://gateway.cinesunidos.com/search/cities';
 
@@ -61,4 +62,13 @@ test('bodies are decoded with their declared charset, and a UTF-8 byte-order mar
   assert.equal(decodeBody(Buffer.from('MÉRIDA'), 'text/html; charset=x-unknown'), 'MÉRIDA');
   const http = new HttpClient(async () => new Response(Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('["Mérida"]')]), { headers: { 'content-type': 'application/json; charset=utf-8' } }));
   assert.deepEqual(await new ReadContext(http).json(cities), ['Mérida']);
+});
+
+test('a failing session store is reported as Cinve failing, not the provider', async () => {
+  let calls = 0;
+  const sessions = new class extends EmptySessionStore { override async headers(): Promise<never> { throw new Error('connection terminated'); } };
+  const http = new HttpClient(async () => { calls++; return new Response('on'); }, 15000, sessions);
+  await assert.rejects(http.getAuthenticated('cinex', 'https://www.cinex.com.ve/checklogin.php'),
+    e => e instanceof DataError && /Cinve no pudo leer la sesión guardada/.test(e.message) && !/conectar con el proveedor/.test(e.message));
+  assert.equal(calls, 0);
 });
