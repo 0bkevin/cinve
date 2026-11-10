@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ClientMetadataCache, cacheDirectives, fetchClientMetadataDocument, isBlockedAddress, isClientIdUrl, validateClientMetadata } from '../src/hosted/client-metadata.js';
+import { ClientMetadataCache, cacheDirectives, fetchClientMetadataDocument, isBlockedAddress, isClientIdUrl, validateClientMetadata } from '../../src/hosted/client-metadata.js';
 
 const url = 'https://assistant.example/oauth/client.json';
 const doc = { client_id: url, client_name: 'Assistant', redirect_uris: ['https://assistant.example/callback'], token_endpoint_auth_method: 'none' };

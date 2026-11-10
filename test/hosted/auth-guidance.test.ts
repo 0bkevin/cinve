@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { hostedAuthInstructions } from '../src/hosted/auth-guidance.js';
-import { installGuide } from '../src/web/install.js';
+import { hostedAuthInstructions } from '../../src/hosted/auth-guidance.js';
+import { installGuide } from '../../src/web/install.js';
 
 test('served instructions never ask agents to download or run code to recover a stale connection', () => {
   for (const s of [hostedAuthInstructions, installGuide('https://example.test')]) {
