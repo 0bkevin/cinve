@@ -6,8 +6,8 @@ import { randomUUID } from 'node:crypto';
 import { CookieJar } from 'tough-cookie';
 import { load } from 'cheerio';
 import * as z from 'zod';
-import { DataError } from './core.js';
-import { assertPrivateRead } from './http/allow-list.js';
+import { DataError } from '../core.js';
+import { assertPrivateRead } from '../http/allow-list.js';
 
 class LoginError extends Error {}
 

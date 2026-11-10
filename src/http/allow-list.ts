@@ -4,7 +4,7 @@
 // holds or buys seats or tickets: boletos_datadev.php, which starts a timed
 // Cinex order, is deliberately absent.
 import { DataError, Id } from '../core.js';
-import type { AuthProviderId } from '../auth.js';
+import type { AuthProviderId } from '../auth/sessions.js';
 
 export const publicHosts = new Set(['www.cinex.com.ve', 'www.cinesunidos.com', 'gateway.cinesunidos.com', 'cinepiccandelaria.com', 'cinepicvip.com', 'apifront.cinexo.com.ar', 'api.cinexo.com.ar']);
 const ids = (value: string | null) => value !== null && Id.safeParse(value).success;

@@ -240,7 +240,7 @@ test('refresh bookkeeping is released after repeated success and failure', async
 });
 
 test('Cinex ticket migration preserves IDs, credentials, deadline and final source without caching', async () => {
-  const { SessionStore } = await import('../src/auth.js');
+  const { SessionStore } = await import('../src/auth/sessions.js');
   const source = 'https://www.cinex.com.ve/boletos.php?sessionid=23062&cinemaid=SBC';
   const target = 'https://www.cinex.com.ve/boletosdev.php?cinemaid=SBC&sessionid=23062';
   const authorized: string[] = [], signals: Array<AbortSignal | null | undefined> = [];
@@ -262,7 +262,7 @@ test('Cinex ticket migration preserves IDs, credentials, deadline and final sour
 });
 
 test('authenticated provenance deduplicates by final canonical URL after migration', async () => {
-  const { SessionStore } = await import('../src/auth.js');
+  const { SessionStore } = await import('../src/auth/sessions.js');
   const source = 'https://www.cinex.com.ve/boletos.php?sessionid=23062&cinemaid=SBC';
   const target = 'https://www.cinex.com.ve/boletosdev.php?cinemaid=SBC&sessionid=23062';
   class Store extends SessionStore { override async headers() { return { Cookie: 'SYNTHETIC' }; } }
@@ -284,7 +284,7 @@ test('configured deadline covers injected request, authorization and response-bo
   await assert.rejects(stalledRequest.get(origin + '/request-stall-again'), e => e instanceof DataError && /plazo total/.test(e.message));
   assert.equal(requests, 2, 'a timed-out request must release its active slot');
 
-  const { SessionStore } = await import('../src/auth.js');
+  const { SessionStore } = await import('../src/auth/sessions.js');
   class StalledStore extends SessionStore { override async headers() { return never<Record<string, string>>(); } }
   const stalledHeaders = new HttpClient(async () => new Response('must not reach transport'), 20, new StalledStore());
   await assert.rejects(stalledHeaders.getAuthenticated('cinesunidos', 'https://gateway.cinesunidos.com/tickets/www/theaters/1005/sessions/s1/'), e => e instanceof DataError && /plazo total/.test(e.message));
@@ -297,7 +297,7 @@ test('configured deadline covers injected request, authorization and response-bo
 });
 
 test('Cinex ticket redirects cannot change identity, escape the route or loop', async () => {
-  const { SessionStore } = await import('../src/auth.js');
+  const { SessionStore } = await import('../src/auth/sessions.js');
   class Store extends SessionStore { override async headers() { return { Cookie: 'SYNTHETIC' }; } }
   const source = 'https://www.cinex.com.ve/boletos.php?sessionid=23062&cinemaid=SBC';
   for (const destination of [

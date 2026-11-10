@@ -1,11 +1,11 @@
 import { DataError } from '../core.js';
 import type { z } from 'zod';
 import type { Source } from '../core.js';
-import { SessionStore } from '../auth.js';
+import { SessionStore } from '../auth/sessions.js';
 import { assertPrivateRead, publicHosts } from './allow-list.js';
 import { cancelBody, cancelReader, decodeBody, withSignal } from './response.js';
 import { cinexCinemaRedirect, cinexTicketRedirect } from './redirects.js';
-import type { AuthProviderId } from '../auth.js';
+import type { AuthProviderId } from '../auth/sessions.js';
 
 export type EvidenceSource = z.infer<typeof Source>;
 export type Page = { body: string; source: EvidenceSource };

@@ -1,5 +1,5 @@
 // Synthetic minimal responses based on the observed provider schemas; no customer data.
-import { SessionStore } from '../src/auth.js';
+import { SessionStore } from '../src/auth/sessions.js';
 export class EmptySessionStore extends SessionStore { override async read() { return undefined; } }
 export function page(props: unknown): string {
   const record = 'a:' + JSON.stringify(['$', 'component', null, props]) + '\n';

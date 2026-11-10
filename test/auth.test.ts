@@ -4,7 +4,7 @@ import { mkdtemp, rm, stat, readFile, chmod, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CookieJar } from 'tough-cookie';
-import { SessionStore, LoginHttp, login } from '../src/auth.js';
+import { SessionStore, LoginHttp, login } from '../src/auth/sessions.js';
 import { HttpClient } from '../src/http/client.js';
 import { CinemaService } from '../src/service.js';
 import { DataError } from '../src/core.js';

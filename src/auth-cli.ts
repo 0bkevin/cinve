@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { AuthProvider, login, SessionStore } from './auth.js';
-import { readCredentials } from './credentials-prompt.js';
+import { AuthProvider, login, SessionStore } from './auth/sessions.js';
+import { readCredentials } from './auth/credentials-prompt.js';
 
 async function main() {
   const [command, rawProvider, ...extra] = process.argv.slice(2);

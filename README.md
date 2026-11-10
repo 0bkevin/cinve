@@ -134,7 +134,7 @@ Asistente MCP → servidor Cinve → adaptador del proveedor → sitio o API del
 - `src/providers/`: integración con los proveedores, una carpeta por cadena.
 - `src/http/`: acceso HTTP, rutas permitidas, límites y caché.
 - `src/providers/parsing.ts`: lectura segura de JSON y HTML.
-- `src/auth.ts`: sesiones locales autorizadas.
+- `src/auth/`: login y sesiones locales autorizadas.
 
 Consulta la [referencia técnica](docs/reference.md) para herramientas, estados,
 límites y mapas de asientos, y la [guía de despliegue](docs/hosted.md) para el

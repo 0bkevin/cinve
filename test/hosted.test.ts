@@ -13,7 +13,7 @@ import { EncryptedSessionStore, HostedUsers } from '../src/hosted-store.js';
 import { Result } from '../src/core.js';
 import { ConnectionLinks } from '../src/hosted-links.js';
 import { createRemoteServer } from '../src/remote.js';
-import type { login } from '../src/auth.js';
+import type { login } from '../src/auth/sessions.js';
 import type { ClientMetadataFetcher } from '../src/client-metadata.js';
 
 async function fixture(t: { after(fn: () => Promise<void>): void }, authenticate?: typeof login,

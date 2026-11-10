@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DataError } from '../src/core.js';
-import { SessionStore } from '../src/auth.js';
-import type { AuthProviderId } from '../src/auth.js';
+import { SessionStore } from '../src/auth/sessions.js';
+import type { AuthProviderId } from '../src/auth/sessions.js';
 import { HttpClient } from '../src/http/client.js';
 import { HostedHttpClient } from '../src/hosted-http.js';
 

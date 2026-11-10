@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { setTimeout as delay, setImmediate as tick } from 'node:timers/promises';
 import { HttpClient } from '../src/http/client.js';
-import { SessionStore, LoginHttp, login } from '../src/auth.js';
+import { SessionStore, LoginHttp, login } from '../src/auth/sessions.js';
 import { assertPrivateRead } from '../src/http/allow-list.js';
 import { CinemaService } from '../src/service.js';
 import { DataError } from '../src/core.js';

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { HttpClient } from '../src/http/client.js';
 import { decodeBody } from '../src/http/response.js';
 import { ReadContext } from '../src/http/read-context.js';
-import { SessionStore } from '../src/auth.js';
+import { SessionStore } from '../src/auth/sessions.js';
 import { CinemaService } from '../src/service.js';
 import { DataError } from '../src/core.js';
 import { EmptySessionStore } from './fixtures.js';

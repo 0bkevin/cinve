@@ -1,5 +1,5 @@
 import { HttpClient } from './http/client.js';
-import { SessionStore } from './auth.js';
+import { SessionStore } from './auth/sessions.js';
 
 /**
  * A request-scoped client with an application-scoped public cache.

@@ -9,8 +9,8 @@ import type { CallOptions } from './http/read-context.js';
 import * as z from 'zod';
 import { DateInput, Id, Provider, idString, outputSchema } from './core.js';
 import type { Operation, Query } from './core.js';
-import { AuthProvider } from './auth.js';
-import type { AuthProviderId } from './auth.js';
+import { AuthProvider } from './auth/sessions.js';
+import type { AuthProviderId } from './auth/sessions.js';
 import { capabilities, CinemaService } from './service.js';
 
 const paging = {
