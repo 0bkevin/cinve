@@ -164,11 +164,14 @@ una autorización absoluta de 30 días. Reutilizar un token de renovación o un
 código consumido revoca la conexión para contener una posible repetición.
 
 Los tokens opacos se guardan únicamente como resúmenes SHA-256. Los tokens de
-acceso llevan además una firma HMAC-SHA256 con una subclave derivada (HKDF) de
-`CINEV_ENCRYPTION_KEY`: un token falsificado se rechaza en memoria, sin
-consultar la base, y uno válido se sigue comprobando en ella para respetar su
-vencimiento y su revocación. Los tokens sin firma emitidos antes de este cambio
-se aceptan hasta el 1 de diciembre de 2026. Las sesiones de
+acceso y de renovación llevan además una firma HMAC-SHA256 con una subclave
+derivada (HKDF) de `CINEV_ENCRYPTION_KEY`: un token falsificado se rechaza en
+memoria, sin consultar la base (también al revocarlo), y uno válido se sigue
+comprobando en ella para respetar su vencimiento, su revocación y la detección
+de reutilización. Los tokens sin firma emitidos antes de este cambio se aceptan
+hasta el 1 de diciembre de 2026 (acceso) y el 1 de enero de 2027 (renovación);
+si se despliega después del 2 de diciembre de 2026, retrasa la fecha de
+renovación al menos 30 días tras el despliegue. Las sesiones de
 cine se cifran con AES-256-GCM y se vinculan criptográficamente a su propietario
 y proveedor. El registro, la aprobación y la emisión de tokens tienen límites
 persistentes por IP y globales. El límite global solo se consume cuando la IP

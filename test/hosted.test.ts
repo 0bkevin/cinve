@@ -1094,3 +1094,48 @@ test('repeated failed credential lookups are refused in memory, without holding 
   const status = await (await f.client(tokens.access_token)).callTool({ name: 'get_auth_status', arguments: {} });
   assert.equal((status.structuredContent as { connection: { client_authorized: boolean } }).connection.client_authorized, true);
 });
+
+test('refresh tokens are signed: forgeries are refused and revocations ignored without touching token tables', async t => {
+  const f = await fixture(t);
+  const { digest } = await import('../src/hosted-store.js');
+  const { client_id, tokens } = await enrolled(f.origin);
+  assert.match(tokens.refresh_token, /^cvr_[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{43}$/);
+  const refresh = (refresh_token: string) => form(f.origin, '/oauth/token', { grant_type: 'refresh_token', client_id, refresh_token, resource: f.origin + '/mcp' });
+  const forged = tokens.refresh_token.slice(0, -1) + (tokens.refresh_token.endsWith('A') ? 'B' : 'A');
+  const query = f.pool.query.bind(f.pool), connect = f.pool.connect.bind(f.pool), texts: string[] = []; let connections = 0;
+  f.pool.query = ((...args: Parameters<typeof query>) => { texts.push(String(args[0])); return query(...args); }) as typeof f.pool.query;
+  // pool.query connects with a callback; a transaction connects through the promise form.
+  f.pool.connect = ((...args: unknown[]) => { if (!args.length) connections++; return (connect as (...a: unknown[]) => unknown)(...args); }) as typeof f.pool.connect;
+  const refused = await refresh(forged);
+  const revoked = await form(f.origin, '/oauth/revoke', { token: forged, client_id });
+  f.pool.query = query; f.pool.connect = connect;
+  assert.equal(refused.status, 400); assert.equal((await refused.json() as { error: string }).error, 'invalid_grant');
+  assert.equal(revoked.status, 200);
+  assert.equal(connections, 0, 'no transaction is opened');
+  assert.ok(texts.every(sql => sql.includes('cinev_budgets')), `only rate-limit writes: ${texts.join(' | ')}`);
+  // The genuine token was not affected by the forgery, and still rotates.
+  const rotated = await refresh(tokens.refresh_token);
+  assert.equal(rotated.status, 200);
+  const next = await rotated.json() as { access_token: string; refresh_token: string };
+  // An unsigned refresh token issued before signing still rotates until the cutoff, into a signed one.
+  const { rows } = await f.pool.query('SELECT user_id FROM cinev_oauth_tokens WHERE token_hash=$1', [digest(next.access_token)]);
+  const legacy = 'cvr_' + randomBytes(32).toString('base64url');
+  await f.pool.query(`INSERT INTO cinev_oauth_tokens(token_hash,user_id,kind,expires_at)
+    VALUES($1,$2,'refresh',(SELECT expires_at FROM cinev_oauth_grants WHERE user_id=$2))`, [digest(legacy), rows[0].user_id]);
+  const fromLegacy = await refresh(legacy);
+  assert.equal(fromLegacy.status, 200);
+  assert.match((await fromLegacy.json() as { refresh_token: string }).refresh_token, /^cvr_[A-Za-z0-9_-]{43}\./);
+});
+
+test('refresh token formats are judged in memory and never accept an access signature', async () => {
+  const { refreshTokenFormat, accessTokenFormat, legacyRefreshTokensUntil } = await import('../src/oauth.js');
+  const { createHmac } = await import('node:crypto');
+  const key = randomBytes(32), id = randomBytes(32).toString('base64url');
+  const mac = (prefix: string) => createHmac('sha256', key).update(prefix + id).digest('base64url');
+  assert.equal(refreshTokenFormat(`cvr_${id}.${mac('cvr_')}`, key), 'signed');
+  assert.equal(refreshTokenFormat(`cvr_${id}.${mac('cva_')}`, key), undefined, 'an access signature on a refresh id');
+  assert.equal(accessTokenFormat(`cva_${id}.${mac('cvr_')}`, key), undefined, 'a refresh signature on an access id');
+  assert.equal(refreshTokenFormat(`cva_${id}.${mac('cva_')}`, key), undefined, 'an access token is not a refresh token');
+  assert.equal(refreshTokenFormat('cvr_' + id, key, legacyRefreshTokensUntil - 1), 'legacy');
+  assert.equal(refreshTokenFormat('cvr_' + id, key, legacyRefreshTokensUntil), undefined);
+});

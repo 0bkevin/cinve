@@ -26,24 +26,33 @@ const registration = z.object({
   response_types: z.array(z.literal('code')).default(['code']),
 });
 /**
- * Access tokens issued before signing was introduced (cva_ plus 43 random
- * characters). They last one hour, so this cutoff only has to outlive the
- * deployment that introduces signing; after it, every access token must be
- * signed and the legacy branch can be removed.
+ * Tokens issued before signing was introduced (a prefix plus 43 random
+ * characters) stay valid until these cutoffs, which only have to outlive the
+ * deployment that introduces signing: access tokens last one hour, refresh
+ * tokens at most the 30-day grant. After them every token must be signed and
+ * the legacy branch can be removed. A deployment after 2026-12-02 must move
+ * the refresh cutoff to at least 30 days after it.
  */
 export const legacyAccessTokensUntil = Date.parse('2026-12-01T00:00:00Z');
-const accessMac = (key: Buffer, id: string) => createHmac('sha256', key).update('cva_' + id).digest('base64url');
+export const legacyRefreshTokensUntil = Date.parse('2027-01-01T00:00:00Z');
+type TokenPrefix = 'cva_' | 'cvr_';
+// The prefix is part of the signed text, so an access signature never validates a refresh token.
+const tokenMac = (key: Buffer, prefix: TokenPrefix, id: string) => createHmac('sha256', key).update(prefix + id).digest('base64url');
+const signedToken = (key: Buffer, prefix: TokenPrefix) => { const id = secret(); return `${prefix}${id}.${tokenMac(key, prefix, id)}`; };
 /**
- * Which kind of access token this is, judged in memory: 'signed' when its
- * HMAC is valid, 'legacy' for the unsigned format before the cutoff, and
- * undefined otherwise. Only these reach the database, so a flood of forged
- * tokens costs no queries.
+ * Which kind of token this is, judged in memory: 'signed' when its HMAC is
+ * valid, 'legacy' for the unsigned format before the cutoff, and undefined
+ * otherwise. Only these reach the database, so a flood of forged tokens
+ * costs no queries.
  */
-export function accessTokenFormat(token: string, key: Buffer, now = Date.now()): 'signed' | 'legacy' | undefined {
-  const signed = token.match(/^cva_([A-Za-z0-9_-]{43})\.([A-Za-z0-9_-]{43})$/);
-  if (signed) return timingSafeEqual(Buffer.from(signed[2]), Buffer.from(accessMac(key, signed[1]))) ? 'signed' : undefined;
-  return /^cva_[A-Za-z0-9_-]{43}$/.test(token) && now < legacyAccessTokensUntil ? 'legacy' : undefined;
+function tokenFormat(prefix: TokenPrefix, cutoff: number, token: string, key: Buffer, now: number): 'signed' | 'legacy' | undefined {
+  if (!token.startsWith(prefix)) return undefined;
+  const signed = token.slice(prefix.length).match(/^([A-Za-z0-9_-]{43})\.([A-Za-z0-9_-]{43})$/);
+  if (signed) return timingSafeEqual(Buffer.from(signed[2]), Buffer.from(tokenMac(key, prefix, signed[1]))) ? 'signed' : undefined;
+  return /^[A-Za-z0-9_-]{43}$/.test(token.slice(prefix.length)) && now < cutoff ? 'legacy' : undefined;
 }
+export const accessTokenFormat = (token: string, key: Buffer, now = Date.now()) => tokenFormat('cva_', legacyAccessTokensUntil, token, key, now);
+export const refreshTokenFormat = (token: string, key: Buffer, now = Date.now()) => tokenFormat('cvr_', legacyRefreshTokensUntil, token, key, now);
 class OAuthError extends Error {
   constructor(readonly error: string, readonly status = 400) { super(error); }
 }
@@ -152,7 +161,7 @@ export class HostedOAuth {
     return rows[0] ? { id: rows[0].id as string, tokenHash: rows[0].token_hash as string } : undefined;
   }
   private async tokens(client: PoolClient, user: string) {
-    const id = secret(), access = `cva_${id}.${accessMac(this.tokenKey, id)}`, refresh = 'cvr_' + secret();
+    const access = signedToken(this.tokenKey, 'cva_'), refresh = signedToken(this.tokenKey, 'cvr_');
     await client.query(`INSERT INTO cinev_oauth_tokens(token_hash,user_id,kind,expires_at) VALUES
       ($1,$3,'access',now()+interval '1 hour'),
       ($2,$3,'refresh',(SELECT expires_at FROM cinev_oauth_grants WHERE user_id=$3))`, [digest(access), digest(refresh), user]);
@@ -192,6 +201,7 @@ export class HostedOAuth {
     }
     if (grant === 'refresh_token') {
       const token = required(p.get('refresh_token'));
+      if (!refreshTokenFormat(token, this.tokenKey)) throw new OAuthError('invalid_grant'); // Forged: no database work.
       if (p.has('scope') && p.get('scope') !== scope) throw new OAuthError('invalid_scope');
       const result = await transaction(this.pool, async client => {
         const find = () => client.query(`SELECT t.*,g.app_id,g.resource,g.expires_at AS grant_expiry FROM cinev_oauth_tokens t
@@ -384,6 +394,8 @@ export class HostedOAuth {
       if (path === '/oauth/revoke' && req.method === 'POST') {
         const p = await payload(req) as URLSearchParams;
         const token = required(p.get('token')), app = required(p.get('client_id'));
+        // RFC 7009: an invalid token is answered like a revoked one, here without database work.
+        if (!accessTokenFormat(token, this.tokenKey) && !refreshTokenFormat(token, this.tokenKey)) { send(200, {}); return true; }
         await transaction(this.pool, async client => {
           const { rows } = await client.query(`SELECT t.user_id FROM cinev_oauth_tokens t JOIN cinev_oauth_grants g ON g.user_id=t.user_id
             WHERE t.token_hash=$1 AND g.app_id=$2 AND g.resource=$3`, [digest(token), app, this.resource]);
