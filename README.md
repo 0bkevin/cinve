@@ -134,6 +134,10 @@ Lee [`CONTRIBUTING.md`](CONTRIBUTING.md) antes de proponer cambios y
 [referencia técnica](docs/reference.md) describe las herramientas MCP, el
 contrato de respuesta y los mapas de asientos.
 
+## Autor
+
+Creado por [Kevin Bravo](https://kevinbravo.com).
+
 ## Licencia
 
 [MIT](LICENSE). Las fuentes y hojas de estilo incluidas en `src/assets`
