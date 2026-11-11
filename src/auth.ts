@@ -20,6 +20,14 @@ export class LoginError extends Error {
 export class CredentialsRejected extends LoginError {}
 /** The credentials never reached the cinema: it failed, or changed its login flow, before that step. */
 export class CinemaUnavailable extends LoginError {}
+/**
+ * A firewall challenge (cf-mitigated: challenge) stopped a request at the
+ * cinema's edge. firstHop: it was the first request of its read, so for the
+ * credential submission the credentials provably never reached the login.
+ */
+class ChallengeError extends LoginError {
+  constructor(readonly firstHop: boolean) { super('El cine exige un desafío anti-bots y no admite el inicio de sesión automatizado.', 403); }
+}
 // Answers to the credential submission that mean the cinema refused it. 429
 // (the cinema throttling Cinve) and 5xx are outages, not verdicts.
 const refusalStatuses = new Set([400, 401, 403, 422]);
@@ -144,9 +152,7 @@ export class LoginHttp {
         }
         if (!r.ok) {
           await r.body?.cancel();
-          // A firewall challenge stops the request at the cinema's edge: the
-          // credentials never reached its login, so this is an outage.
-          if (r.status === 403 && r.headers.get('cf-mitigated')?.toLowerCase() === 'challenge') throw new CinemaUnavailable('El cine exige un desafío anti-bots y no admite el inicio de sesión automatizado.');
+          if (r.status === 403 && r.headers.get('cf-mitigated')?.toLowerCase() === 'challenge') throw new ChallengeError(step === 0);
           throw new LoginError(`El login respondió HTTP ${r.status}.`, r.status);
         }
         const reader = r.body?.getReader(); if (!reader) throw new Error('Respuesta de login vacía.');
@@ -171,7 +177,11 @@ export async function login(provider: AuthProviderId, username: string, password
   const submit = async (url: string, init: RequestInit) => {
     sent = true;
     try { return await http.read(url, init); } catch (e) {
-      if (e instanceof LoginError && !(e instanceof CinemaUnavailable) && e.status !== undefined && refusalStatuses.has(e.status)) throw new CredentialsRejected('El cine rechazó el login.');
+      // A challenge on the submission itself stopped it before the login: an
+      // outage. One on a later hop (a redirect after the cinema accepted the
+      // password) is unclear, never an outage, which would reveal the password.
+      if (e instanceof ChallengeError) throw e.firstHop ? new CinemaUnavailable(e.message) : new LoginError(e.message);
+      if (e instanceof LoginError && e.status !== undefined && refusalStatuses.has(e.status)) throw new CredentialsRejected('El cine rechazó el login.');
       throw e;
     }
   };

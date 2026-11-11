@@ -24,13 +24,16 @@ export const signInRefusalMessage: Record<SignInRefusal, string> = {
   strained: 'Demasiados intentos fallidos en Cinve en este momento. Espera 15 minutos y vuelve a intentarlo.',
 };
 /**
- * Refused and unclear sign-ins are answered no sooner than this after the
- * attempt began. Some unclear failures only follow a correct password and
- * take an extra round trip; the floor hides that difference in timing.
+ * Refused and unclear sign-ins are answered at the next multiple of this
+ * interval after the attempt began (at least one). Some unclear failures only
+ * follow a correct password and take an extra round trip; answering in fixed
+ * steps hides that difference, also when the cinema is slow.
  */
 export const signInFloorMs = 2000;
 export async function signInFloor(started: number, floorMs = signInFloorMs) {
-  const wait = started + floorMs - Date.now();
+  if (floorMs <= 0) return;
+  const elapsed = Date.now() - started;
+  const wait = Math.max(1, Math.ceil(elapsed / floorMs)) * floorMs - elapsed;
   if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
 }
 /** For a sign-in whose credentials never reached the cinema. */

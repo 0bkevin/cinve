@@ -313,7 +313,8 @@ export async function createHostedApp(options: {
           const result = await (options.authenticate ?? login)(connection.provider, data.username.trim(), data.password, staged);
           profile = result.profile_update_requested;
         } catch (error) {
-          if (await links.signInError(subject, error) === 'unavailable') throw new HttpError(503, cinemaUnavailableMessage);
+          // Nothing was tested: the link keeps its attempt too.
+          if (await links.signInError(subject, error) === 'unavailable') { refund = true; throw new HttpError(503, cinemaUnavailableMessage); }
           await signInFloor(started, options.signInFloorMs);
           throw new HttpError(401, 'No se pudo conectar. Revisa tus datos o comprueba en la web del cine si requiere una verificación adicional.');
         }

@@ -1587,3 +1587,30 @@ test('dead signed tokens buy no headroom, and signed traffic is also capped per 
   const elsewhere = await mcp(many[11].tokens.access_token, '2001:db8:78::1');
   assert.notEqual(elsewhere.status, 429, 'another /48'); assert.notEqual(elsewhere.status, 401);
 });
+
+test('an unreachable cinema spends no link or consent attempt', async t => {
+  const { CinemaUnavailable } = await import('../src/auth.js');
+  let down = true, calls = 0;
+  const f = await fixture(t, async (...args) => { calls++; if (down) throw new CinemaUnavailable('down'); return successfulLogin(...args); });
+  const client = await f.client(f.alice.token);
+  const browser = ((await (await f.post('/connect/exchange', await link(client))).json()) as { browser_token: string }).browser_token;
+  for (let i = 0; i < 7; i++) assert.equal((await f.post('/connect/login', browser, { username: 'person@example.test', password: 'SYNTHETIC_PASSWORD' })).status, 503);
+  down = false;
+  assert.equal((await f.post('/connect/login', browser, { username: 'person@example.test', password: 'SYNTHETIC_PASSWORD' })).status, 200);
+  down = true;
+  const consent = await consentForm(f.origin, await register(f.origin));
+  for (let i = 0; i < 7; i++) assert.equal((await consent.submit({ ...cinema, password: 'SYNTHETIC_PASSWORD' })).status, 503);
+  down = false;
+  assert.equal((await consent.submit({ ...cinema, password: 'SYNTHETIC_PASSWORD' })).status, 303);
+  assert.equal(calls, 16);
+});
+
+test('refused sign-ins are answered in fixed time steps, also when the cinema is slow', async () => {
+  const { signInFloor } = await import('../src/hosted-links.js');
+  for (const [took, expected] of [[0, 300], [100, 300], [350, 600], [610, 900]] as const) {
+    const started = Date.now() - took;
+    await signInFloor(started, 300);
+    const total = Date.now() - started;
+    assert.ok(total >= expected - 5 && total < expected + 80, `took ${took} ms: answered at ${total} ms, expected ${expected}`);
+  }
+});

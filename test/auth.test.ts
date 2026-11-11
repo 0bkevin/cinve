@@ -158,5 +158,14 @@ test('login errors say whether the cinema refused the credentials, never saw the
   assert.equal(await kind('cinex', cinex(challenge)), 'unavailable');
   assert.equal(await kind('cinesunidos', unidos(challenge)), 'unavailable');
   assert.equal(await kind('cinex', cinex(() => new Response('', { status: 403 }))), 'refused', 'a plain 403 is still a refusal');
+  // A challenge after the cinema accepted the password is unclear, never an outage that would reveal it.
+  const accepted: typeof fetch = async input => String(input).endsWith('validatelogin.php') ? new Response('{"result":"OK"}')
+    : String(input).endsWith('checklogin.php') ? challenge() : new Response('<html>home</html>');
+  assert.equal(await kind('cinex', accepted), 'unclear');
+  assert.equal(await kind('cinesunidos', unidos(() => new Response(null, { status: 302, headers: { Location: 'https://www.cinesunidos.com/api/auth/callback/keycloak?code=C' } }))
+    ), 'unclear', 'without a challenge: a callback that fails is unclear');
+  const challengedCallback: typeof fetch = async (input, init) => new URL(String(input)).pathname === '/api/auth/callback/keycloak' ? challenge() : unidos(() =>
+    new Response(null, { status: 302, headers: { Location: 'https://www.cinesunidos.com/api/auth/callback/keycloak?code=C' } }))(input, init);
+  assert.equal(await kind('cinesunidos', challengedCallback), 'unclear', 'a challenge on the redirect after the submission');
   assert.equal(await store.read('cinex'), undefined); assert.equal(await store.read('cinesunidos'), undefined);
 });

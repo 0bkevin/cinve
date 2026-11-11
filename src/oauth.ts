@@ -425,7 +425,11 @@ export class HostedOAuth {
               const started = Date.now();
               try { await this.accounts!.authenticate(provider.data, username, password, staged); }
               catch (error) {
-                if (await this.budgets.signInError(subject, error) === 'unavailable') return again(503, cinemaUnavailableMessage);
+                if (await this.budgets.signInError(subject, error) === 'unavailable') {
+                  // Nothing was tested: the request keeps its attempt too.
+                  await this.pool.query('UPDATE cinev_oauth_requests SET attempts=GREATEST(attempts-1,0) WHERE id=$1', [id]);
+                  return again(503, cinemaUnavailableMessage);
+                }
                 await signInFloor(started, this.accounts!.refusalFloorMs);
                 return again(401, 'No se pudo iniciar sesión. Revisa tus datos o comprueba en la web del cine si pide una verificación adicional.');
               }
