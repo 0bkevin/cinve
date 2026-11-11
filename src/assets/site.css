@@ -173,14 +173,17 @@ p a:hover, .note a:hover { text-decoration-color: currentColor; }
 .board { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .board th, .board td { text-align: left; vertical-align: middle; }
 .board thead th { padding: 0 16px 18px; font: 700 clamp(17px, 1.9vw, 26px)/1.1 var(--font-display); letter-spacing: -0.03em; color: var(--foreground); }
-.board thead td { width: 36%; }
+.board thead td { width: 28%; }
+.board-scroll { overflow-x: auto; }
 .board tbody tr { border-top: 1px solid var(--border); }
 .board tbody :is(th, td) { transition: background-color 0.2s; }
 .board tbody tr:last-child { border-bottom: 1px solid var(--border); }
 .board tbody tr:hover,
 .board:has(:is(th, td):nth-child(2):hover) :is(th, td):nth-child(2),
 .board:has(:is(th, td):nth-child(3):hover) :is(th, td):nth-child(3),
-.board:has(:is(th, td):nth-child(4):hover) :is(th, td):nth-child(4) { background: rgba(246, 238, 228, 0.03); }
+.board:has(:is(th, td):nth-child(4):hover) :is(th, td):nth-child(4),
+.board:has(:is(th, td):nth-child(5):hover) :is(th, td):nth-child(5),
+.board:has(:is(th, td):nth-child(6):hover) :is(th, td):nth-child(6) { background: rgba(246, 238, 228, 0.03); }
 .board tbody th { padding: 26px 24px 26px 0; font-weight: inherit; }
 .board .topic { display: block; font: 700 clamp(19px, 2.1vw, 30px)/1.05 var(--font-display); letter-spacing: -0.03em; color: var(--foreground); }
 .board .ask { display: block; margin-top: 6px; font-size: 15px; color: var(--dust); }
@@ -205,7 +208,7 @@ p a:hover, .note a:hover { text-decoration-color: currentColor; }
 .more > summary:hover { color: var(--amber); }
 .more > summary .chevron { width: 18px; height: 18px; transition: transform 0.25s ease; }
 .more[open] > summary .chevron { transform: rotate(180deg); }
-.more[open] > .board { margin-top: 28px; animation: unfold 0.35s ease-out; }
+.more[open] > .board-scroll { margin-top: 28px; animation: unfold 0.35s ease-out; }
 @keyframes unfold { from { opacity: 0; transform: translateY(-6px); } }
 
 /* How visitor data is handled. */
@@ -316,7 +319,9 @@ p a:hover, .note a:hover { text-decoration-color: currentColor; }
   .faq details > p { padding: 0 16px 18px; }
   .closing { padding: 80px 0 88px; }
   .closing-links .btn { width: 100%; }
-  .board thead td { width: 34%; }
+  .board-scroll { margin-inline: -16px; padding-inline: 16px; }
+  .board { min-width: 600px; }
+  .board thead td { width: 140px; }
   .board thead th { padding: 0 4px 14px; font-size: 15px; }
   .board tbody th { padding: 18px 10px 18px 0; }
   .board .topic { font-size: 18px; }
@@ -334,7 +339,7 @@ p a:hover, .note a:hover { text-decoration-color: currentColor; }
   html { scroll-behavior: auto; }
   .row, .seat[data-state=taken], .seat[data-state=pair] { animation: none; }
   .board tbody :is(th, td) { transition: none; }
-  .more > summary .chevron, .more[open] > .board, .faq details, .faq summary .plus { transition: none; animation: none; }
+  .more > summary .chevron, .more[open] > .board-scroll, .faq details, .faq summary .plus { transition: none; animation: none; }
   .spinner { animation-duration: 2.4s; }
 }
 
@@ -347,3 +352,12 @@ button:disabled, .btn:disabled { cursor: not-allowed; }
 .prompt h2 { margin: 0 0 12px; font: 600 13px/1 var(--font-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--dust); }
 .prompt pre { margin: 0; padding: 20px 22px; background: var(--surface); border-radius: 14px; font: 400 14px/1.65 var(--font-sans); color: var(--foreground); white-space: pre-wrap; overflow-wrap: anywhere; }
 .more .prompt:first-of-type { margin-top: 20px; }
+
+/* Consent page */
+.warning { margin: 16px 0; padding: 10px 0 10px 14px; border-left: 3px solid var(--destructive); color: var(--foreground); }
+#login-account.warning { margin: 4px 0 0; }
+.consent-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 20px 0 16px; }
+/* Basecoat draws the arrow from a data: image, which the CSP (img-src 'self') blocks. */
+.select-wrap { position: relative; }
+.select-wrap .select { width: 100%; background-image: none; padding-right: 36px; }
+.select-wrap .chevron { position: absolute; right: 12px; top: 50%; width: 16px; height: 16px; translate: 0 -50%; pointer-events: none; color: var(--muted-foreground); }

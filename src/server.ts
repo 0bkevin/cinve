@@ -30,7 +30,7 @@ const schema = z.object({
   provider,
   city: z.string().trim().min(1).max(80).optional().describe('Nombre de ciudad tal como lo devuelve list_cities del mismo proveedor (p. ej. Caracas); no distingue tildes ni mayúsculas en Cines Unidos.'),
   cinema_id: cinemaId.optional(), movie_id: movieId.optional(), session_id: sessionId.optional(),
-  date: DateInput.optional().describe('YYYY-MM-DD; por defecto hoy en America/Caracas para películas y funciones de Cinepic/Cines Unidos y funciones de Cinex.'),
+  date: DateInput.optional().describe('YYYY-MM-DD; por defecto hoy en America/Caracas para películas y funciones de Cinepic/Cines Unidos y funciones de Cinex, Supercines y Gran Cine.'),
   ...paging,
 }).strict();
 
@@ -54,7 +54,8 @@ export function inputSchema(op: Operation): z.ZodType<Query> {
     : op === 'cinemas' ? schema.pick({ provider: true, city: true, offset: true, limit: true, query: true, refresh: true })
     // Every provider needs these, so the published schema marks them required;
     // provider-specific requirements stay in the descriptions and validation.
-    : op === 'prices' ? schema.pick({ provider: true, movie_id: true, offset: true, limit: true, refresh: true }).extend({ cinema_id: requiredCinemaId, session_id: requiredSessionId })
+    : op === 'prices' ? schema.pick({ provider: true, movie_id: true, offset: true, limit: true, refresh: true }).extend({ cinema_id: requiredCinemaId, session_id: requiredSessionId,
+      date: DateInput.optional().describe('Solo Supercines: fecha de la función (YYYY-MM-DD), la misma usada en get_showtimes; por defecto hoy en America/Caracas. Sus tarifas varían por día.') })
     : op === 'concessions' ? schema.pick({ provider: true, query: true, offset: true, limit: true, refresh: true }).extend({ cinema_id: requiredCinemaId })
     : schema.omit({ session_id: true });
   return z.preprocess(absentNulls(base.shape), base.superRefine((value, ctx) => {
@@ -74,6 +75,16 @@ export function inputSchema(op: Operation): z.ZodType<Query> {
       if (['cinemas', 'movies', 'showtimes'].includes(op)) need('city');
       if (['prices', 'concessions'].includes(op)) need('cinema_id');
       if (op === 'prices') need('session_id');
+    }
+    if (q.provider !== 'supercines' && op === 'prices' && q.date) ctx.addIssue({ code: 'custom', path: ['date'], message: 'date en tarifas solo aplica a Supercines; el session_id ya identifica la función.' });
+    if (q.provider === 'grancine') {
+      if (['movies', 'showtimes'].includes(op) && q.city && q.cinema_id) ctx.addIssue({ code: 'custom', path: ['city'], message: 'Gran Cine: usa city para todas sus salas de la ciudad o cinema_id para una sala.' });
+    }
+    if (q.provider === 'supercines') {
+      if (op === 'showtimes' && !q.movie_id && !q.city && !q.cinema_id) ctx.addIssue({ code: 'custom', path: ['cinema_id'], message: 'Supercines requiere cinema_id, city o movie_id para supercines/showtimes.' });
+      if (op === 'movies' && (q.city || q.movie_id || q.date)) ctx.addIssue({ code: 'custom', message: 'Supercines movies devuelve la cartelera vigente, general o de una sede (cinema_id): usa query para buscar y get_showtimes para fechas.' });
+      if (['prices', 'concessions'].includes(op)) need('cinema_id');
+      if (op === 'prices') { need('session_id'); need('movie_id'); }
     }
     if (q.provider === 'cinex') {
       if (op === 'prices' && q.movie_id) ctx.addIssue({ code: 'custom', path: ['movie_id'], message: 'Cinex consulta tarifas por cinema_id y session_id; no admite filtrar estas tarifas por movie_id.' });
@@ -104,7 +115,7 @@ function callOptions(ctx: ServerContext): CallOptions {
 }
 
 export type AccountTools = {
-  connect(provider: AuthProviderId): Promise<{ url: string; expires_at: string }>;
+  connect(provider: AuthProviderId): Promise<{ connected: true } | { connected: false; url: string; expires_at: string }>;
   disconnect(provider: AuthProviderId): Promise<void>;
 };
 export function createServer(service = new CinemaService(), accounts?: AccountTools, publicHosted = false, origin = 'https://cinve.kevinbravo.com') {
@@ -120,9 +131,9 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
   const annotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true };
   server.registerTool('get_auth_status', {
     title: 'Estado de autenticación',
-    description: 'Estado de las sesiones Cinex y Cines Unidos y siguiente paso de conexión. No devuelve datos personales ni secretos. configured no garantiza que el proveedor no haya revocado la sesión.',
+    description: 'Estado de las sesiones Cinex, Cines Unidos y Supercines y siguiente paso de conexión. La cuenta Supercines es opcional: sin ella las tarifas son las públicas. No devuelve datos personales ni secretos. configured no garantiza que el proveedor no haya revocado la sesión.',
     inputSchema: z.object({}).strict(),
-    outputSchema: z.object({ connection: z.object({ mode: z.enum(['local', 'hosted']), client_authorized: z.boolean() }), providers: z.array(z.object({ provider: z.enum(['cinex', 'cinesunidos']), status: z.string(), expires_at: z.string().nullable(), login_command: z.string(), remote_validity_checked: z.literal(false) })) }),
+    outputSchema: z.object({ connection: z.object({ mode: z.enum(['local', 'hosted']), client_authorized: z.boolean() }), providers: z.array(z.object({ provider: AuthProvider, status: z.string(), expires_at: z.string().nullable(), login_command: z.string(), remote_validity_checked: z.literal(false) })) }),
     annotations: { ...annotations, openWorldHint: false },
   }, async () => {
     try {
@@ -139,15 +150,15 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
     outputSchema: z.object({ version: z.string(), capability_audit_date: z.string(), live_health_check: z.literal(false), providers: z.array(z.object({ id: Provider, capabilities: z.record(z.string(), z.string()) })) }),
     annotations: { ...annotations, openWorldHint: false },
   }, async () => {
-    const data = { version: '0.1.0', capability_audit_date: '2026-11-04', live_health_check: false as const, providers: Object.entries(capabilities).map(([id, capabilities]) => ({ id, capabilities })) };
+    const data = { version: '0.1.0', capability_audit_date: '2026-11-11', live_health_check: false as const, providers: Object.entries(capabilities).map(([id, capabilities]) => ({ id, capabilities })) };
     return { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data };
   });
   if (accounts || publicHosted) {
     server.registerTool('connect_account', {
       title: 'Conectar cuenta',
-      description: 'En modo alojado, inicia automáticamente la autorización de Cinve si hace falta; después crea un enlace privado y de un solo uso para que el usuario conecte su cuenta Cinex o Cines Unidos. Preséntalo solo al usuario de esta conversación y no lo compartas con terceros: quien lo use conecta su cuenta a este acceso. No abras ni completes el formulario como agente. Nunca pidas credenciales por chat. Caduca en 10 minutos.',
+      description: 'En modo alojado, inicia automáticamente la autorización de Cinve si hace falta. Si la cuenta ya está conectada devuelve connected=true: repite la consulta original sin pedir nada al usuario. Si no, devuelve connected=false y un enlace privado y de un solo uso para que el usuario conecte su cuenta Cinex, Cines Unidos o Supercines (opcional: Supercines muestra tarifas públicas sin cuenta; solo conéctala si el usuario lo pide). Preséntalo solo al usuario de esta conversación y no lo compartas con terceros: quien lo use conecta su cuenta a este acceso. No abras ni completes el formulario como agente. Nunca pidas credenciales por chat. Caduca en 10 minutos.',
       inputSchema: z.object({ provider: AuthProvider }).strict(),
-      outputSchema: z.object({ url: z.string().url(), expires_at: z.string() }),
+      outputSchema: z.object({ connected: z.boolean(), url: z.string().url().optional(), expires_at: z.string().optional() }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     }, async ({ provider }) => {
       try {
@@ -194,11 +205,11 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
   });
   const tools: Array<[string, Operation, string]> = [
     ['list_cities', 'cities', 'Lista ciudades del proveedor. Usa sus nombres al consultar Cines Unidos.'],
-    ['list_cinemas', 'cinemas', 'Lista sedes e IDs. Cines Unidos requiere city; Cinepic verifica las sedes configuradas Candelaria y VVIP Lido. Los proveedores conservan sedes conocidas sin código verificado (code_status=unverified). Cinex admite city opcional e incluye sedes conocidas ausentes del directorio actual (directory_status=not_listed); ninguna condición indica cierre.'],
-    ['list_movies', 'movies', 'Busca películas por nombre. Cinepic requiere cinema_id (123300 Candelaria o 123301 VVIP Lido) y filtra funciones del día; Cines Unidos requiere city y permite cinema_id/date. Cinex devuelve catálogo general sin fecha/sede: solo provider, query y paginación. Los IDs pertenecen al proveedor y, en Cinepic, a la sede.'],
-    ['get_showtimes', 'showtimes', 'Consulta funciones de una fecha (hoy en Caracas por defecto). Cinepic requiere cinema_id (123300 Candelaria o 123301 VVIP Lido); Cines Unidos city; Cinex acepta city para todas sus sedes verificadas de la ciudad en una llamada, cinema_id para una sede (con movie_id opcional para filtrar), o solo movie_id para consultar la ficha de la película en todas las sedes; usa query para filtrar por título. La llamada de sede resuelve títulos contra el catálogo y marca partial cuando no puede confirmar un movie_id. Retorna IDs necesarios para tarifas, sala/formato cuando disponibles y URL de la web.'],
-    ['get_ticket_prices', 'prices', 'Consulta tarifas. Cinepic requiere cinema_id, movie_id y session_id de get_showtimes. Cines Unidos requiere cinema_id, session_id y una cuenta conectada. Cinex requiere cinema_id, session_id y una cuenta conectada. Devuelve USD/VES cuando verificables, desglose Cinex en VES. No devuelve totales finales de compra.'],
-    ['get_concessions', 'concessions', 'Consulta caramelería por sede. Cinepic y Cines Unidos requieren solo cinema_id, por API pública; Cinepic puede devolver catálogo vacío. Cinex requiere cinema_id y una cuenta conectada. Stock solo cuando está verificado; no usa cero para precios ausentes.'],
+    ['list_cinemas', 'cinemas', 'Lista sedes e IDs. Cines Unidos requiere city; Supercines admite city opcional; Cinepic verifica las sedes configuradas Candelaria y VVIP Lido. Los proveedores conservan sedes conocidas sin código verificado (code_status=unverified). Cinex admite city opcional e incluye sedes conocidas ausentes del directorio actual (directory_status=not_listed); ninguna condición indica cierre.'],
+    ['list_movies', 'movies', 'Busca películas por nombre. Cinepic requiere cinema_id (123300 Candelaria o 123301 VVIP Lido) y filtra funciones del día; Cines Unidos requiere city y permite cinema_id/date. Cinex devuelve catálogo general sin fecha/sede: solo provider, query y paginación. Supercines devuelve su cartelera vigente (con preventa), general o de una sede con cinema_id, sin fecha. Gran Cine devuelve los títulos con funciones en la fecha, con cinema_id o city opcionales. Los IDs pertenecen al proveedor y, en Cinepic, a la sede.'],
+    ['get_showtimes', 'showtimes', 'Consulta funciones de una fecha (hoy en Caracas por defecto). Cinepic requiere cinema_id (123300 Candelaria o 123301 VVIP Lido); Cines Unidos city; Cinex acepta city para todas sus sedes verificadas de la ciudad en una llamada, cinema_id para una sede (con movie_id opcional para filtrar), o solo movie_id para consultar la ficha de la película en todas las sedes; Supercines acepta cinema_id, city o movie_id; Gran Cine (cine de autor, incluye las salas del Paseo Las Mercedes) acepta cinema_id, city o ninguno para todas sus salas, sin IDs de función del proveedor; usa query para filtrar por título. La llamada de sede resuelve títulos contra el catálogo y marca partial cuando no puede confirmar un movie_id. Retorna IDs necesarios para tarifas, sala/formato cuando disponibles y URL de la web.'],
+    ['get_ticket_prices', 'prices', 'Consulta tarifas (Gran Cine no las publica). Cinepic requiere cinema_id, movie_id y session_id de get_showtimes. Cines Unidos requiere cinema_id, session_id y una cuenta conectada. Cinex requiere cinema_id, session_id y una cuenta conectada. Supercines requiere cinema_id, movie_id y session_id, y date si la función no es de hoy; no requiere cuenta (si el usuario conectó la suya, se leen con ella). Devuelve USD/VES cuando verificables, desglose Cinex en VES. No devuelve totales finales de compra.'],
+    ['get_concessions', 'concessions', 'Consulta caramelería por sede. Cinepic y Cines Unidos requieren solo cinema_id, por API pública; Cinepic puede devolver catálogo vacío. Cinex requiere cinema_id y una cuenta conectada. Supercines requiere solo cinema_id. Stock solo cuando está verificado; no usa cero para precios ausentes.'],
   ];
   for (const [name, op, description] of tools) server.registerTool(name, {
     title: ({
@@ -208,7 +219,7 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
     description, inputSchema: inputSchema(op), outputSchema: outputSchema(op), annotations,
   }, async (args, ctx) => {
     const data = await service.query(op, args as Query, callOptions(ctx));
-    if (publicHosted && data.status === 'auth_required') data.warnings = ['El proveedor exige una cuenta para esta consulta. Llama connect_account con este proveedor para iniciar la autorización de Cinve y obtener el enlace privado del cine. Presenta el enlace al usuario; después de conectar, comprueba get_auth_status y repite esta consulta. No busques páginas de acceso en la web ni pidas contraseñas o tokens en el chat. Los datos públicos siguen disponibles. ' + authGuidance];
+    if (publicHosted && data.status === 'auth_required') data.warnings = ['El proveedor exige una cuenta para esta consulta. Llama connect_account con este proveedor para iniciar la autorización de Cinve. Si devuelve connected=true, repite esta consulta; si no, presenta el enlace privado del cine al usuario y, después de conectar, comprueba get_auth_status y repite esta consulta. No busques páginas de acceso en la web ni pidas contraseñas o tokens en el chat. Los datos públicos siguen disponibles. ' + authGuidance];
     // A provider-level failure is still a valid Result payload, but MCP clients
     // need isError to distinguish it from an empty/available business result.
     const isError = !['available', 'empty'].includes(data.status);

@@ -5,7 +5,7 @@ import { readCredentials } from './credentials-prompt.js';
 async function main() {
   const [command, rawProvider, ...extra] = process.argv.slice(2);
   if (!['login', 'logout', 'status'].includes(command ?? '') || extra.length || (rawProvider && !AuthProvider.safeParse(rawProvider).success) || (command !== 'status' && !rawProvider)) {
-    throw new Error('Uso: node dist/auth-cli.js login|logout|status [cinex|cinesunidos]');
+    throw new Error('Uso: node dist/auth-cli.js login|logout|status [cinex|cinesunidos|supercines]');
   }
   const store = new SessionStore();
   if (command === 'status') {

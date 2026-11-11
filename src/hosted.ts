@@ -1,4 +1,4 @@
-import { instructionsPage, landingPage, servePublicAsset } from './public-web.js';
+import { instructionsPage, landingPage, servePublicAsset, setSecurityHeaders } from './public-web.js';
 import { hostedAuthInstructions } from './hosted-auth-guidance.js';
 import { HostedOAuth } from './oauth.js';
 import { ClientMetadataCache } from './client-metadata.js';
@@ -34,10 +34,28 @@ class AnonymousSessions extends SessionStore {
 }
 
 class HostedService extends CinemaService {
-  constructor(http: HttpClient, catalog: CinexCinemaCatalog) { super(http, catalog); }
+  constructor(private readonly client: HttpClient, catalog: CinexCinemaCatalog, private readonly store?: EncryptedSessionStore) { super(client, catalog); }
+  /**
+   * A cinema can end a session before its stored expiry; drop it so
+   * reconnecting is offered. Only when a request made with the session's own
+   * credentials was refused, never for an unrelated auth_required.
+   */
+  private async rejected(status: string, provider: string) {
+    // Supercines fares fall back to public ones when its session is refused,
+    // so that refusal arrives with an available result, not auth_required.
+    const cinema = provider === 'cinex' || provider === 'cinesunidos' || provider === 'supercines';
+    if ((status === 'auth_required' || provider === 'supercines') && this.store && cinema && this.client.rejectedSessions.has(provider))
+      await this.store.discardRejected(provider).catch(() => {});
+  }
   override async query(op: Operation, q: Query, call?: CallOptions) {
     const result = await super.query(op, q, call);
+    await this.rejected(result.status, q.provider);
     if (result.status === 'auth_required') result.warnings = ['Conecta tu cuenta con connect_account. Introduce tus credenciales solo en el enlace privado, nunca en el chat.'];
+    return result;
+  }
+  override async seats(q: Query, call?: CallOptions) {
+    const result = await super.seats(q, call);
+    await this.rejected(result.status, q.provider);
     return result;
   }
 }
@@ -78,7 +96,10 @@ export async function createHostedApp(options: {
       (publicUrl.protocol !== 'https:' && !(options.allowLocal && publicUrl.protocol === 'http:' && publicUrl.hostname === '127.0.0.1'))) throw new Error('CINEV_PUBLIC_URL debe ser un origen HTTPS.');
   if (options.key.length !== 32) throw new Error('Clave de cifrado no válida.');
   let origin = publicUrl.origin;
-  const oauth = new HostedOAuth(options.pool, () => origin, new ClientMetadataCache(options.clientMetadata));
+  const oauth = new HostedOAuth(options.pool, () => origin, new ClientMetadataCache(options.clientMetadata), {
+    authenticate: options.authenticate ?? login,
+    save: (client, user, session) => new EncryptedSessionStore(options.pool, user, options.key).saveInTransaction(client, session),
+  });
   const users = new HostedUsers(options.pool);
   const links = new ConnectionLinks(options.pool);
   // Public cache and in-flight deduplication live for this hosted app. The
@@ -92,10 +113,7 @@ export async function createHostedApp(options: {
   const active = new Map<string, number>(); let totalActive = 0;
   const storeFor = (id: string) => new EncryptedSessionStore(options.pool, id, options.key);
   const handler = async (req: IncomingMessage, res: ServerResponse) => {
-    res.setHeader('Cache-Control', 'no-store'); res.setHeader('Referrer-Policy', 'no-referrer');
-    res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'self'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'");
-    if (publicUrl.protocol === 'https:') res.setHeader('Strict-Transport-Security', 'max-age=31536000');
+    setSecurityHeaders(res, publicUrl.protocol === 'https:');
     const send = (status: number, data: unknown) => { if (!res.headersSent) { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(data)); } };
     try {
       if (servePublicAsset(req, res) || serveInstall(req, res, origin)) return;
@@ -155,12 +173,15 @@ export async function createHostedApp(options: {
           const refreshes = refreshCalls(parsed);
           if (refreshes && !await links.budget(`refresh:${clientKey}`, 10)) throw new HttpError(429, 'Demasiadas consultas con refresh=true. Repite sin refresh o inténtalo en un minuto.');
           const store = principal ? storeFor(principal.id) : new AnonymousSessions(origin);
-          const service = new HostedService(new HostedHttpClient(options.request ?? fetch, 15000, store, publicHttp), cinexCatalog);
+          const service = new HostedService(new HostedHttpClient(options.request ?? fetch, 15000, store, publicHttp), cinexCatalog,
+            store instanceof EncryptedSessionStore ? store : undefined);
           handler = createMcpHandler(() => createServer(service, principal ? {
             connect: async provider => {
+              // An account connected while authorizing (or earlier) needs no link.
+              if ((await store.status(provider)).status === 'configured') return { connected: true as const };
               if (!await links.budget(`link:${principal.id}`, 12)) throw new Error('Demasiados enlaces. Inténtalo en un minuto.');
               const link = await links.issue(principal.id, principal.tokenHash, provider);
-              return { url: `${origin}/connect#${link.token}`, expires_at: link.expires_at };
+              return { connected: false as const, url: `${origin}/connect#${link.token}`, expires_at: link.expires_at };
             },
             disconnect: async provider => { await store.remove(provider); },
           } : undefined, !principal, origin), { maxSubscriptions: 0, keepAliveMs: 0 });
@@ -179,7 +200,7 @@ export async function createHostedApp(options: {
         await body(req, 512);
         const exchanged = await links.exchange(token);
         if (!exchanged || await users.hash(exchanged.connection.user) !== exchanged.connection.tokenHash) throw new HttpError(410, 'Enlace vencido o utilizado.');
-        send(200, { browser_token: exchanged.browserToken, provider: exchanged.connection.provider, user_label: exchanged.connection.user.slice(0, 8) }); return;
+        send(200, { browser_token: exchanged.browserToken, provider: exchanged.connection.provider, app: await oauth.appFor(exchanged.connection.user) ?? null }); return;
       }
       const connection = await links.get(token);
       if (!connection || await users.hash(connection.user) !== connection.tokenHash) throw new HttpError(410, 'Conexión vencida o revocada.');

@@ -13,7 +13,7 @@ export function loginPage() {
       <header><h2 id="login-title">Conecta tu cuenta</h2><p id="login-account"></p></header>
       <section class="stack">
         <div class="field">
-          <label for="username">Correo de tu cuenta</label>
+          <label for="username">Correo de tu cuenta del cine</label>
           <input id="username" name="username" type="email" autocomplete="username" inputmode="email" maxlength="320" required />
         </div>
         <div class="field">
@@ -25,7 +25,6 @@ export function loginPage() {
         </div>
         <Alert id="feedback" variant="destructive" icon={icons.circleAlert()} role="alert" hidden><p id="feedback-text"></p></Alert>
         <p class="fine">{icons.lock()} Cinve enviará tus datos al cine por una conexión segura y guardará tu sesión cifrada para que tu asistente consulte precios con tu cuenta. No guarda tu contraseña.</p>
-        <p class="fine"><strong>Usa este enlace solo si tu asistente acaba de crearlo para ti.</strong> Si otra persona te lo envió, ciérralo: tu cuenta del cine quedaría conectada al acceso de esa persona.</p>
       </section>
       <footer>
         <button class="btn full" id="connect" type="submit" data-size="lg" disabled>Conectar cuenta</button>
@@ -43,6 +42,6 @@ export function loginPage() {
     <template id="icon-error">{icons.circleAlert()}</template>
     <template id="icon-spinner">{icons.spinner()}</template>
     <noscript><Alert icon={icons.circleAlert()} title="Activa JavaScript para conectar tu cuenta."><p>El enlace se comprueba en tu navegador para que nunca llegue al servidor.</p></Alert></noscript>
-    <p class="note">Cinepic funciona sin cuenta. Vuelve a tu asistente después de conectar. Este enlace caduca en 10 minutos.</p>
+    <p class="note">Cinepic y Gran Cine funcionan sin cuenta. Vuelve a tu asistente después de conectar. Este enlace caduca en 10 minutos.</p>
   </Page>);
 }

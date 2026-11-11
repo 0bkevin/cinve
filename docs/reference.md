@@ -8,7 +8,7 @@ o mantener Cinve. Para empezar, consulta el [README](../README.md).
 | Herramienta | Uso principal |
 | --- | --- |
 | `list_providers` | Describe proveedores, capacidades y límites implementados. |
-| `get_auth_status` | Informa el estado de las conexiones Cinex y Cines Unidos. |
+| `get_auth_status` | Informa el estado de las conexiones Cinex, Cines Unidos y Supercines (opcional). |
 | `connect_account` | En modo alojado, crea el enlace privado para conectar un cine. |
 | `disconnect_account` | Elimina la sesión de un cine y sus enlaces pendientes. |
 | `list_cities` | Lista las ciudades publicadas por un proveedor. |
@@ -20,7 +20,7 @@ o mantener Cinve. Para empezar, consulta el [README](../README.md).
 | `get_concessions` | Consulta la caramelería publicada para una sede. |
 
 Salvo `list_providers` y `get_auth_status`, las herramientas reciben `provider`:
-`cinepic`, `cinesunidos` o `cinex`. Los listados admiten `query`
+`cinepic`, `cinesunidos`, `cinex`, `supercines` o `grancine`. Los listados admiten `query`
 cuando corresponde, `offset` y `limit` —50 por defecto y 100 como máximo—.
 Continúa con `next_offset` hasta que sea `null`. Un argumento opcional enviado
 como `null` equivale a omitirlo, como lo envían los adaptadores de llamadas a
@@ -34,10 +34,23 @@ Para responder con pocas llamadas:
 - Cines Unidos: `get_showtimes` con `city` devuelve toda la ciudad; añade
   `cinema_id` para una sede.
 - Cinepic: sus dos sedes son `123300` (Candelaria) y `123301` (VVIP Lido).
+- Supercines: `get_showtimes` con `cinema_id` lee toda una sede; con `city`,
+  sus sedes de la ciudad. Sus tarifas requieren `movie_id` y, si la función no
+  es de hoy, la misma `date` usada en `get_showtimes`, porque varían por día.
+- Gran Cine: `get_showtimes` sin sede ni ciudad lee todas sus salas; con `city`
+  o `cinema_id`, solo esas. Los `id` de sus funciones los calcula Cinve.
 - Las funciones incluyen `cinema_name` cuando la fuente publica el nombre de la
   sede junto a la función.
 - Las tarifas de Cinex y Cines Unidos requieren `cinema_id`, `session_id` y una
   cuenta conectada.
+- Las tarifas de Supercines son públicas. Si el usuario conectó su cuenta
+  (`npm run login -- supercines` o `connect_account`), se leen con ella, sin
+  caché: la web solo las muestra tras iniciar sesión y una cuenta puede ver
+  tarifas o canjes propios. La cuenta solo se envía a esa lista de tarifas
+  (`/listBoletos`); nunca a reservas, asientos ni compra. Si Supercines no
+  reconoce la sesión (HTTP 419), se muestran las tarifas públicas con una
+  advertencia y, en modo alojado, se descarta la sesión. Las cuentas creadas con
+  Google no tienen contraseña y no pueden conectarse.
 
 ## Flujo recomendado
 
@@ -74,6 +87,8 @@ que Cinve omitió o no pudo verificar parte de la respuesta.
 | --- | --- | --- |
 | Cinepic | Dos sedes configuradas; películas, funciones, precios, asientos y consulta de caramelería. | No descubre sedes nuevas automáticamente. La conversión a USD usa la tasa publicada por el proveedor. |
 | Cines Unidos | Ciudades, sedes, películas, funciones, caramelería, precios y asientos. | Precios y asientos requieren una cuenta conectada. Si su web exige un desafío anti-bots (ocurre desde algunas redes de centros de datos, como la del servicio alojado), sedes, películas y funciones se leen de su API pública de búsqueda y el resultado lo advierte. Esa vía consulta cada título por separado, dos a la vez y con un plazo total de 45 s; con `query` solo consulta los títulos que coinciden. Los títulos que fallan o no se alcanzan a leer se cuentan en una advertencia y el resultado se marca `partial`. |
+| Supercines | Seis sedes (Valencia, Maracay, Carrizal, Puerto Cabello y Barcelona); ciudades, sedes, cartelera, funciones, precios y caramelería, sin cuenta. | Sin mapa de asientos: solo se muestra dentro del flujo de compra. Las funciones se leen título por título, como en su web: dos a la vez, hasta 40 títulos y 60 s desde el inicio de la llamada; Supercines no envía validadores (ETag ni Last-Modified), así que comprobar si algo cambió cuesta releerlo: las respuestas "sin funciones aún" se cachean 1 minuto, la programación de mañana (que carga sede por sede durante el día) 2 minutos y la de hoy y las fechas de preventa 10 minutos; `refresh=true` relee al instante. Ante HTTP 429 o tres fallos seguidos, Cinve deja de consultar y lo advierte; tras un 429 espera lo que indique `Retry-After` (un minuto por defecto). Las funciones sin venta en línea (Playa Mar vende solo en taquilla) no tienen identificador: se informan por sede y hora en `warnings`, como la web las muestra en gris; Playa Mar tampoco ofrece caramelería en línea. Carga la programación poco antes: la del día siguiente, sede por sede durante el día (las preventas, en sus propias fechas); un resultado vacío explica si la fecha aún no se publica o en qué sedes sí hay funciones, y con `movie_id` lista las fechas publicadas del título (una lectura de su página, cacheada 10 minutos); las fechas pasadas no se consultan. Los importes son VES; la conversión a USD usa la tasa publicada en su página de compra y no incluye impuestos ni el total final. |
+| Gran Cine | Circuito de cine de autor: salas del C. C. Paseo Las Mercedes (sede del Trasnocho Cultural), Cine Ávila, Villa Planchart, Cinética Cultural, funciones al aire libre y sus títulos en salas asociadas de Cines Unidos y Supercines; títulos y funciones (hora y sala) por fecha. | Solo programación: no publica tarifas, caramelería, asientos ni identificadores de función, así que Cinve calcula un `id` estable que no sirve para otras consultas. Publica unos 20 días desde hoy; las fechas pasadas no se consultan. En salas asociadas lista solo sus títulos. La ciudad de una sala nueva solo se conoce si su nombre la indica. |
 | Cinex | Ciudades, sedes, catálogo, funciones, precios, caramelería y asientos. | Precios, caramelería y asientos requieren una cuenta conectada. Algunos cruces de títulos pueden ser parciales. El descubrimiento de sedes tiene un plazo de 40 s, comprobado antes de cada lectura; las sedes sin comprobar se devuelven como `unverified` y `partial`. Las funciones por ciudad leen hasta 16 sedes, dos a la vez, con un plazo total de 45 s; nombran las que no se pudieron leer y fallan si no se leyó ninguna. |
 
 La cobertura describe implementaciones, no certifica que cada proveedor esté

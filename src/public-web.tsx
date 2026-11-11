@@ -1,3 +1,4 @@
+import type { ServerResponse } from 'node:http';
 import { h, Fragment, renderDocument } from './web/jsx.js';
 import { Page, type PageOptions } from './web/layout.js';
 import { Alert, Button, Card, LinkButton, icons } from './web/ui.js';
@@ -8,6 +9,14 @@ import { cinemaInstructions } from './install.js';
 
 export { escapeHtml } from './web/jsx.js';
 export { servePublicAsset } from './web/assets.js';
+
+/** Headers for every response, including pages served outside the hosted app (for example /install on Vercel). */
+export function setSecurityHeaders(res: ServerResponse, https: boolean) {
+  res.setHeader('Cache-Control', 'no-store'); res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'self'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'");
+  if (https) res.setHeader('Strict-Transport-Security', 'max-age=31536000');
+}
 
 const page = (title: string, content: JSX.Element, options: PageOptions = {}) =>
   renderDocument(<Page title={title} {...options}>{content}</Page>);
@@ -50,17 +59,17 @@ function SeatMap() {
 
 // What each cinema publishes and whether it needs the visitor's own account.
 type Access = 'open' | 'account' | 'none';
-const accessLabel: Record<Access, string> = { open: 'Sin cuenta', account: 'Con tu cuenta', none: 'No suele publicarla' };
-const cinemas = ['Cinex', 'Cines Unidos', 'Cinepic'];
-const coverage: { topic: string; ask: string; access: [Access, Access, Access] }[] = [
-  { topic: 'Cartelera y horarios', ask: '¿Qué hay hoy en Caracas?', access: ['open', 'open', 'open'] },
-  { topic: 'Precios', ask: '¿Cuánto cuesta la entrada?', access: ['account', 'account', 'open'] },
-  { topic: 'Asientos', ask: '¿Quedan dos asientos juntos?', access: ['account', 'account', 'open'] },
-  { topic: 'Caramelería', ask: '¿Qué combos tienen?', access: ['account', 'open', 'none'] },
+const accessLabel: Record<Access, string> = { open: 'Sin cuenta', account: 'Con tu cuenta', none: 'No disponible' };
+const cinemas = ['Cinex', 'Cines Unidos', 'Cinepic', 'Supercines', 'Gran Cine'];
+const coverage: { topic: string; ask: string; access: Access[] }[] = [
+  { topic: 'Cartelera y horarios', ask: '¿Qué hay hoy en Caracas?', access: ['open', 'open', 'open', 'open', 'open'] },
+  { topic: 'Precios', ask: '¿Cuánto cuesta la entrada?', access: ['account', 'account', 'open', 'open', 'none'] },
+  { topic: 'Asientos', ask: '¿Quedan dos asientos juntos?', access: ['account', 'account', 'open', 'none', 'none'] },
+  { topic: 'Caramelería', ask: '¿Qué combos tienen?', access: ['account', 'open', 'none', 'open', 'none'] },
 ];
 
 function Coverage() {
-  return <table class="board">
+  return <div class="board-scroll" role="region" aria-label="Qué ofrece cada cine" tabindex="0"><table class="board">
     <caption class="visually-hidden">Qué puede consultar tu asistente en cada cine</caption>
     <thead><tr><td></td>{cinemas.map(name => <th scope="col">{name}</th>)}</tr></thead>
     <tbody>
@@ -69,7 +78,7 @@ function Coverage() {
         {access.map(level => <td data-access={level}><span class="mark"><span class="glyph" aria-hidden="true">{level === 'account' && icons.lock()}</span>{accessLabel[level]}</span></td>)}
       </tr>)}
     </tbody>
-  </table>;
+  </table></div>;
 }
 
 // How visitor data is handled: a four-card summary, then the details. Every
@@ -93,11 +102,11 @@ const safeguards: [JSX.Element, string, string][] = [
 const faq: [string, string][] = [
   ['¿Cuánto cuesta?', 'Nada. Cinve es gratis y no muestra anuncios.'],
   ['¿Con qué asistentes funciona?', 'Con los que aceptan conexiones MCP remotas, como Claude Code, Codex u OpenCode. Si tu asistente no tiene esa opción, todavía no puede usar Cinve.'],
-  ['¿Necesito crear una cuenta?', 'En Cinve, no. Para ver precios y asientos de Cinex y Cines Unidos, tu asistente te pedirá conectar tu cuenta de ese cine con un enlace privado.'],
+  ['¿Necesito crear una cuenta?', 'En Cinve, no. Para ver precios y asientos de Cinex y Cines Unidos, tu asistente te pedirá conectar tu cuenta de ese cine. En Supercines es opcional: sin ella ves las tarifas públicas.'],
   ['¿Qué tan actualizada está la información?', 'Cinve la consulta en la web del cine cuando preguntas y reutiliza algunas respuestas por unos minutos. Los asientos pueden cambiar antes de que compres.'],
   ['¿Puedo comprar entradas desde el chat?', 'No. Cinve solo consulta; la compra se hace en la web o la app del cine.'],
   ['¿Por qué no aparece mi cine o mi ciudad?', 'Cinve muestra las sedes que cada cine publica en su web, y Cinepic por ahora solo en Caracas. Si falta alguna, avísanos en GitHub.'],
-  ['¿Cómo desconecto mi cuenta del cine?', 'Escríbele a tu asistente «desconecta mi cuenta de Cinex» (o de Cines Unidos) y borramos la sesión guardada.'],
+  ['¿Cómo desconecto mi cuenta del cine?', 'Escríbele a tu asistente «desconecta mi cuenta de Cinex» (o de Cines Unidos o Supercines) y borramos la sesión guardada.'],
   ['¿Cinve es oficial?', 'No. Es un proyecto independiente, sin relación con los cines.'],
 ];
 
@@ -115,7 +124,7 @@ export function landingPage(origin: string) {
       <div class="hero-copy">
         <h1 id="titulo"><span>¿Qué</span> <span>vemos hoy?</span></h1>
         <div>
-          <p class="lead">Pregúntaselo a tu asistente. Con Cinve, él revisa Cinex, Cines Unidos y Cinepic por ti.</p>
+          <p class="lead">Pregúntaselo a tu asistente. Con Cinve, él revisa Cinex, Cines Unidos, Cinepic, Supercines y Gran Cine por ti.</p>
           <LinkButton href="#empezar" size="lg">Añadir Cinve a mi asistente</LinkButton>
         </div>
       </div>
@@ -226,30 +235,50 @@ export function instructionsPage(origin: string) {
   </>, { compact: true });
 }
 
-export function authorizationPage(app: string, destination: string, id: string, csrf: string, publisher?: string) {
-  // A metadata-document client is identified by the site that publishes it;
-  // its name is self-declared, so the page names that site as well.
-  const provenance = publisher
-    ? <>Esta aplicación se identifica con un documento publicado en <strong>{publisher}</strong>. Comprueba que reconoces ese sitio y el destino:</>
-    : 'Esta aplicación fue registrada por un tercero. Comprueba que reconoces el destino:';
+type Consent = { app: string; destination: string; id: string; csrf: string; publisher?: string; recognized: boolean;
+  cinemaLogin: boolean; error?: string; provider?: string; username?: string };
+
+export function authorizationPage(o: Consent) {
+  const hidden = <><input type="hidden" name="request_id" value={o.id} /><input type="hidden" name="csrf" value={o.csrf} /></>;
+  const option = (value: string, label: string) => <option value={value} selected={o.provider === value}>{label}</option>;
   return page('Conectar tu asistente', <>
-    <h1>Conecta tu asistente.</h1>
-    <p class="lead">Autoriza a <strong>{app}</strong> para conectar tus cuentas de cine y consultar precios con ellas.</p>
-    <p>Después volverás al chat para elegir el cine y conectar tu cuenta. Tu asistente no recibirá la contraseña del cine.</p>
-    <form class="card" method="post" action="/oauth/authorize">
-      <header><h2>Revisa la conexión</h2><p>{provenance}</p></header>
-      <section>
-        <input type="hidden" name="request_id" value={id} />
-        <input type="hidden" name="csrf" value={csrf} />
-        <code class="code">{destination}</code>
-        <p class="note">Esta aprobación crea una conexión privada nueva para este asistente. No comparte cuentas conectadas en otras aplicaciones. Permite consultar y desconectar las cuentas que conectes aquí; no comprar entradas.</p>
+    <h1>Conecta Cinve a {o.app}.</h1>
+    <p class="lead">{o.cinemaLogin
+      ? 'Inicia sesión con tu cuenta del cine para consultar precios desde tu asistente. Después vuelves al chat y listo.'
+      : `Autoriza a ${o.app} para conectar tus cuentas de cine y consultar precios con ellas.`}</p>
+    {/* A self-declared name is never enough: the destination (and, for a
+        metadata-document client, the site that publishes it) is always shown. */}
+    {o.publisher && <p class="note">Aplicación publicada por <strong>{o.publisher}</strong>. Continúa solo si reconoces ese sitio.</p>}
+    <p class="note">Destino: <strong>{o.destination}</strong></p>
+    {!o.recognized && <p class="warning" role="alert"><strong>Cinve no puede verificar esta aplicación.</strong> Su nombre lo eligió quien la registró y el destino no pertenece al sitio que la identifica. Continúa solo si acabas de iniciar esta conexión desde tu asistente y reconoces el destino. Si alguien te envió este enlace, cancela.</p>}
+    {o.cinemaLogin && <form class="card" method="post" action="/oauth/authorize">
+      <section class="stack">
+        {hidden}
+        {o.error && <Alert variant="destructive" icon={icons.circleAlert()} role="alert"><p>{o.error}</p></Alert>}
+        <div class="field">
+          <label for="provider">Cine</label>
+          <div class="select-wrap"><select class="select" id="provider" name="provider">{option('cinex', 'Cinex')}{option('cinesunidos', 'Cines Unidos')}{option('supercines', 'Supercines')}</select>{icons.chevronDown()}</div>
+        </div>
+        <div class="field">
+          <label for="username">Correo de tu cuenta del cine</label>
+          <input id="username" name="username" type="email" autocomplete="username" maxlength="320" required value={o.username ?? ''} autofocus={!o.error} />
+        </div>
+        <div class="field">
+          <label for="password">Contraseña</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" maxlength="4096" required autofocus={Boolean(o.error)} />
+        </div>
+        <p class="fine">{icons.lock()} Cinve envía tus datos al cine por una conexión segura y guarda solo tu sesión cifrada, nunca tu contraseña. {o.app} no la verá.</p>
       </section>
-      <footer>
-        <button class="btn" type="submit" name="decision" value="approve">{icons.shieldCheck()}Autorizar conexión</button>
-        <button class="btn" data-variant="outline" type="submit" name="decision" value="deny">Cancelar</button>
-      </footer>
+      <footer><button class="btn full" type="submit" data-size="lg" name="decision" value="connect">Conectar</button></footer>
+    </form>}
+    <form method="post" action="/oauth/authorize" class="consent-actions">
+      {hidden}
+      {o.cinemaLogin
+        ? <button class="btn" data-variant="outline" type="submit" name="decision" value="approve">Continuar sin conectar un cine</button>
+        : <button class="btn" type="submit" name="decision" value="approve">{icons.shieldCheck()}Autorizar conexión</button>}
+      <button class="btn" data-variant="ghost" type="submit" name="decision" value="deny">Cancelar</button>
     </form>
-    <p class="fine">La solicitud caduca en 10 minutos. Si no iniciaste esta conexión, cancela.</p>
+    <p class="fine">Cinve solo consulta datos: no compra entradas. La solicitud caduca en 10 minutos.</p>
   </>, { compact: true });
 }
 

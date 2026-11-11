@@ -15,7 +15,7 @@ test('vendored stylesheet and fonts are the pinned package files, unmodified', (
 
 test('pages carry no inline styles or scripts, so they render under the CSP without unsafe-inline', () => {
   const pages = [landingPage('https://cinve.example'), installationPage('https://cinve.example'), instructionsPage('https://cinve.example'), authorizationErrorPage(), loginPage(),
-    authorizationPage('App', 'https://app.example', 'id', 'csrf')];
+    authorizationPage({ app: 'App', destination: 'https://app.example', id: 'id', csrf: 'csrf', recognized: false, cinemaLogin: true, error: 'x' })];
   for (const html of pages) {
     assert.doesNotMatch(html, /<style|\sstyle=|\son[a-z]+=|<script>/);
     assert.match(html, /<link rel="stylesheet" href="\/assets\/basecoat\.css\?v=[0-9a-f]+">/);

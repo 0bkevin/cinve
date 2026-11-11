@@ -2,7 +2,8 @@
 // The invitation travels in the URL fragment so it never reaches server logs
 // or Referer headers; it is exchanged once for a short-lived browser token.
 
-type Exchange = { browser_token: string; provider: 'cinex' | 'cinesunidos'; user_label: string };
+type App = { name: string; publisher: string | null; verified: boolean };
+type Exchange = { browser_token: string; provider: 'cinex' | 'cinesunidos' | 'supercines'; app: App | null };
 type Login = { profile_update_requested?: boolean };
 
 const invitation = location.hash.slice(1);
@@ -18,7 +19,7 @@ const show = element<HTMLButtonElement>('show');
 const connect = element<HTMLButtonElement>('connect');
 const cancel = element<HTMLButtonElement>('cancel');
 const feedback = element<HTMLDivElement>('feedback');
-const providerNames = { cinex: 'Cinex', cinesunidos: 'Cines Unidos' } as const;
+const providerNames = { cinex: 'Cinex', cinesunidos: 'Cines Unidos', supercines: 'Supercines' } as const;
 
 let token = '';
 
@@ -103,7 +104,12 @@ request<Exchange>('/connect/exchange', {}, invitation).then(data => {
   token = data.browser_token;
   const name = providerNames[data.provider] ?? data.provider;
   element('login-title').textContent = `Conecta tu cuenta de ${name}`;
-  element('login-account').textContent = `Se conectará a tu acceso Cinve (${data.user_label}).`;
+  // The app name is self-declared unless Cinve verified who publishes it.
+  const app = data.app;
+  element('login-account').textContent = !app ? 'Se conectará a tu acceso Cinve.'
+    : app.verified ? `Se conectará a ${app.name} (${app.publisher}). Usa este enlace solo si tu asistente acaba de crearlo para ti.`
+    : `Se conectará a «${app.name}». Cinve no puede confirmar qué aplicación es: continúa solo si tu asistente acaba de crear este enlace para ti.`;
+  element('login-account').classList.toggle('warning', Boolean(app && !app.verified));
   connect.disabled = false;
   showCard(form);
   username.focus();
