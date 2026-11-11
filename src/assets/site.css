@@ -458,3 +458,17 @@ button:disabled, .btn:disabled { cursor: not-allowed; }
    install message button keeps its look and only changes its label. */
 /* Specific enough to beat Basecoat's dark-mode ghost hover rule. */
 .manual .snippet .btn[data-variant=ghost][data-copied] { color: var(--amber); }
+
+/* 404: an empty row of seats, numbered like the hero's rows. */
+.lost-row { display: flex; align-items: center; gap: 10px; margin-bottom: 36px; }
+.lost-label { margin-right: 6px; font: 800 22px/1 var(--font-display); letter-spacing: -0.02em; color: var(--amber); }
+.lost-row i { width: 30px; aspect-ratio: 1 / 0.86; border-radius: 42% 42% 20% 20% / 52% 52% 24% 24%; box-shadow: inset 0 0 0 1.5px rgba(184, 167, 161, 0.45); animation: row-in .5s ease-out backwards; }
+.lost-row i:nth-of-type(2) { animation-delay: .05s; } .lost-row i:nth-of-type(3) { animation-delay: .1s; } .lost-row i:nth-of-type(4) { animation-delay: .15s; }
+.lost-row i:nth-of-type(5) { animation-delay: .2s; } .lost-row i:nth-of-type(6) { animation-delay: .25s; } .lost-row i:nth-of-type(7) { animation-delay: .3s; } .lost-row i:nth-of-type(8) { animation-delay: .35s; }
+.lost-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }
+@media (max-width: 640px) {
+  .lost-row { gap: 6px; }
+  .lost-row i { width: 24px; }
+  .lost-actions .btn { width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) { .lost-row i { animation: none; } }
