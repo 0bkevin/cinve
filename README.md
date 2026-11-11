@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="src/assets/favicon.svg" alt="Logo de Cinve" width="96" height="96">
+</p>
+
 # Cinve
 
 Cartelera de cine de Venezuela para tu asistente de IA.
