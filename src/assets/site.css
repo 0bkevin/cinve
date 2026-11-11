@@ -419,6 +419,8 @@ button:disabled, .btn:disabled { cursor: not-allowed; }
 .works-with li { display: inline-flex; align-items: center; gap: 10px; padding: 6px 14px 6px 6px; border-radius: 999px; background: var(--night); font-size: 14px; font-weight: 500; color: var(--foreground); }
 .app-mark { display: inline-grid; place-items: center; flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%; background: #f6eee4; }
 .app-mark img { width: 18px; height: 18px; object-fit: contain; }
+/* Claude Code's brand colour (#D97757, per simple-icons) through its vendored shape. */
+.logo-claudecode { width: 18px; height: 18px; background: #d97757; mask: url(/assets/logos/claudecode.svg) center / contain no-repeat; -webkit-mask: url(/assets/logos/claudecode.svg) center / contain no-repeat; }
 .manual-list h3 { display: flex; align-items: center; gap: 10px; }
 
 /* The install page's command snippets turn amber once copied; the main

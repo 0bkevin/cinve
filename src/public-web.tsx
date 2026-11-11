@@ -87,20 +87,25 @@ function Coverage() {
 // MCP server (sources in src/assets/logos/SOURCES.md and each tool's docs or
 // --help). Codex is configured in config.toml because some versions of
 // `codex mcp add` start an optional login at once.
+// Gemini CLI is left out: since June 2026 it only serves Gemini Code Assist
+// Standard/Enterprise, and individual users moved to Antigravity.
 type Assistant = { name: string; logo: string; how: string; setup: (endpoint: string) => string; file?: string };
 const assistants: Assistant[] = [
   { name: 'Claude Code', logo: '/assets/logos/claudecode.svg', how: 'Ejecuta en tu terminal:', setup: url => `claude mcp add --transport http cinve ${url}` },
   { name: 'Codex', logo: '/assets/logos/codex.png', how: 'Añade esto a', file: '~/.codex/config.toml', setup: url => `[mcp_servers.cinve]\nurl = "${url}"` },
   { name: 'OpenCode', logo: '/assets/logos/opencode.svg', how: 'Ejecuta en tu terminal:', setup: url => `opencode mcp add cinve --global --url ${url}` },
   { name: 'Antigravity', logo: '/assets/logos/antigravity.svg', how: 'Ejecuta en tu terminal:', setup: url => `agy mcp add cinve ${url}` },
-  { name: 'Gemini CLI', logo: '/assets/logos/gemini.svg', how: 'Ejecuta en tu terminal:', setup: url => `gemini mcp add --scope user --transport http cinve ${url}` },
   { name: 'Hermes', logo: '/assets/logos/hermes.svg', how: 'Ejecuta en tu terminal:', setup: url => `hermes mcp add cinve --url ${url}` },
   { name: 'OpenClaw', logo: '/assets/logos/openclaw.svg', how: 'Ejecuta en tu terminal:', setup: url => `openclaw mcp add cinve --url ${url} --transport streamable-http` },
 ];
 
 /** The assistant's logo on a light disc, so each mark shows as published. */
+// Claude Code's vendored mark is a bare shape, so CSS paints it in its brand
+// colour through a mask (see .logo-claudecode) instead of editing the file.
 const AppMark = ({ logo }: { logo: string }) =>
-  <span class="app-mark" aria-hidden="true"><img src={assetUrl(logo)} alt="" width="18" height="18" loading="lazy" /></span>;
+  <span class="app-mark" aria-hidden="true">{logo.endsWith('claudecode.svg')
+    ? <span class="logo-claudecode"></span>
+    : <img src={assetUrl(logo)} alt="" width="18" height="18" loading="lazy" />}</span>;
 
 function WorksWith() {
   return <ul class="works-with" aria-label="Asistentes compatibles">
