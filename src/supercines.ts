@@ -355,7 +355,22 @@ export async function supercines(op: Operation, q: Query, c: ReadContext): Promi
     if (!functions.some(s => s.id === sessionId && s.cinema_id === cinemaId)) throw new DataError('unavailable', 'La función no aparece en la programación de Supercines para esa sede, película y fecha; consulta get_showtimes (y pasa date si no es hoy).');
     const booking = `${SC}/booking/${movieId}`;
     const { rate, threeD } = parseSupercinesBooking(await c.get(booking, 600000));
-    const html = await c.form(`${SC}/listBoletos`, { idFuncion: sessionId, fecha: date, unico: movieId, tresD: threeD, idEmpresa: cinemaId }, 60000);
+    const fields = { idFuncion: sessionId, fecha: date, unico: movieId, tresD: threeD, idEmpresa: cinemaId };
+    // Fares are public; with a connected account they are read as that
+    // account (its page may add member fares or point redemptions), never
+    // cached or shared. An ended session falls back to the public fares.
+    let html: string | undefined, account = false;
+    if (await c.hasSession('supercines')) {
+      try { html = await c.authenticatedForm('supercines', `${SC}/listBoletos`, fields); account = true; }
+      catch (error) {
+        if (!(error instanceof DataError && error.status === 'auth_required')) throw error;
+        c.warnings.push('Supercines no reconoció la sesión de tu cuenta (expiró o se cerró): se muestran las tarifas públicas. Conecta de nuevo la cuenta para ver las de tu cuenta.');
+      }
+    }
+    html ??= await c.form(`${SC}/listBoletos`, fields, 60000);
+    c.warnings.push(account
+      ? 'Tarifas leídas con tu cuenta de Supercines: pueden incluir tarifas o canjes propios de la cuenta.'
+      : 'Tarifas públicas de Supercines, sin cuenta (las mismas que su web muestra tras iniciar sesión, salvo tarifas o canjes propios de una cuenta).');
     c.warnings.push('Tarifas VES de Supercines para la fecha consultada (varían por día y formato). Incluyen el cargo por boleto mostrado en la web; impuestos y total final de compra no verificados.');
     if (rate) c.warnings.push('USD calculado con la tasa publicada en la página de compra de Supercines, no con una tasa BCV verificada.');
     else c.warnings.push('Supercines no publicó una tasa de cambio positiva; se omite la equivalencia USD.');

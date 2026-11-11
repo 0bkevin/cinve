@@ -16,7 +16,8 @@ Un cliente MCP puede conectarse a `https://<dominio>/mcp` sin cabecera
 o la caramelería que sean públicos.
 
 Las operaciones protegidas de Cinex y Cines Unidos devuelven
-`auth_required`. Un token inválido devuelve HTTP 401; el servidor nunca degrada
+`auth_required`. Las tarifas de Supercines son públicas; una cuenta Supercines
+conectada solo cambia con qué sesión se leen. Un token inválido devuelve HTTP 401; el servidor nunca degrada
 silenciosamente una conexión autenticada a acceso anónimo.
 
 ## Conectar una cuenta de cine

@@ -8,7 +8,7 @@ o mantener Cinve. Para empezar, consulta el [README](../README.md).
 | Herramienta | Uso principal |
 | --- | --- |
 | `list_providers` | Describe proveedores, capacidades y límites implementados. |
-| `get_auth_status` | Informa el estado de las conexiones Cinex y Cines Unidos. |
+| `get_auth_status` | Informa el estado de las conexiones Cinex, Cines Unidos y Supercines (opcional). |
 | `connect_account` | En modo alojado, crea el enlace privado para conectar un cine. |
 | `disconnect_account` | Elimina la sesión de un cine y sus enlaces pendientes. |
 | `list_cities` | Lista las ciudades publicadas por un proveedor. |
@@ -43,6 +43,14 @@ Para responder con pocas llamadas:
   sede junto a la función.
 - Las tarifas de Cinex y Cines Unidos requieren `cinema_id`, `session_id` y una
   cuenta conectada.
+- Las tarifas de Supercines son públicas. Si el usuario conectó su cuenta
+  (`npm run login -- supercines` o `connect_account`), se leen con ella, sin
+  caché: la web solo las muestra tras iniciar sesión y una cuenta puede ver
+  tarifas o canjes propios. La cuenta solo se envía a esa lista de tarifas
+  (`/listBoletos`); nunca a reservas, asientos ni compra. Si Supercines no
+  reconoce la sesión (HTTP 419), se muestran las tarifas públicas con una
+  advertencia y, en modo alojado, se descarta la sesión. Las cuentas creadas con
+  Google no tienen contraseña y no pueden conectarse.
 
 ## Flujo recomendado
 

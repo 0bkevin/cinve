@@ -59,7 +59,7 @@ export function authorizationPage(o: { app: string; destination: string; id: str
   const option = (value: string, label: string) => `<option value="${value}"${o.provider === value ? ' selected' : ''}>${label}</option>`;
   const login = o.cinemaLogin ? `<form class="card" method="post" action="/oauth/authorize">${hidden}
 ${o.error ? `<p class="feedback error" role="alert">${escapeHtml(o.error)}</p>` : ''}
-<label for="provider">Cine</label><select id="provider" name="provider">${option('cinex', 'Cinex')}${option('cinesunidos', 'Cines Unidos')}</select>
+<label for="provider">Cine</label><select id="provider" name="provider">${option('cinex', 'Cinex')}${option('cinesunidos', 'Cines Unidos')}${option('supercines', 'Supercines')}</select>
 <label for="username">Correo de tu cuenta del cine</label><input id="username" name="username" type="email" autocomplete="username" maxlength="320" required value="${escapeHtml(o.username ?? '')}"${o.error ? '' : ' autofocus'}>
 <label for="password">Contraseña</label><input id="password" name="password" type="password" autocomplete="current-password" maxlength="4096" required${o.error ? ' autofocus' : ''}>
 <button class="primary full" name="decision" value="connect">Conectar</button>

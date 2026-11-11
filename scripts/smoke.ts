@@ -51,7 +51,7 @@ try {
   if (tools.tools.length !== expectedTools) throw new Error(`Expected ${expectedTools} tools.`);
   const auth = z.object({ providers: z.array(z.object({ provider: z.string(), status: z.string() })) }).parse((await client.callTool({ name: 'get_auth_status', arguments: {} })).structuredContent);
   console.log(JSON.stringify(auth));
-  if (requireAuth && !auth.providers.every(p => p.status === 'configured')) throw new Error('Authenticated smoke requires both local accounts to be connected.');
+  if (requireAuth && !auth.providers.filter(p => p.provider !== 'supercines').every(p => p.status === 'configured')) throw new Error('Authenticated smoke requires both local accounts to be connected.');
   const providers = await client.callTool({ name: 'list_providers', arguments: {} });
   if (!providers.structuredContent) throw new Error('Missing structured provider catalog.');
   for (const provider of ['cinex', 'cinesunidos', 'cinepic', 'supercines', 'grancine']) await call('list_cities', { provider });

@@ -7,6 +7,7 @@ import type { CallOptions } from './http.js';
 import { cinepic, cinesunidos, cinex } from './providers.js';
 import { supercines } from './supercines.js';
 import { grancine } from './grancine.js';
+import { AuthProvider } from './auth.js';
 
 const resultWarningLimit = 64;
 const resultWarningCharacters = 8192;
@@ -60,14 +61,14 @@ function boundedSources(sources: QueryResult['sources'], warnings: string[]): Qu
 export const capabilities = {
   cinepic: { seats: 'public_page_data_ascii', cities: 'public', cinemas: 'public', movies: 'public_api', showtimes: 'public_api', prices: 'page_data_ves_and_derived_usd', concessions: 'public_api_empty_in_samples' },
   cinesunidos: { seats: 'authenticated_api_ascii', cities: 'public_api', cinemas: 'page_data', movies: 'page_data', showtimes: 'page_data', prices: 'authenticated_api', concessions: 'public_api' },
-  supercines: { seats: 'not_supported', cities: 'public_form_api', cinemas: 'public_form_api', movies: 'public_api_billboard_by_cinema', showtimes: 'public_form_html_per_title', prices: 'public_form_html_ves_and_derived_usd_requires_movie_and_date', concessions: 'public_form_html_ves' },
+  supercines: { seats: 'not_supported', cities: 'public_form_api', cinemas: 'public_form_api', movies: 'public_api_billboard_by_cinema', showtimes: 'public_form_html_per_title', prices: 'public_form_html_ves_and_derived_usd_requires_movie_and_date_account_optional', concessions: 'public_form_html_ves' },
   grancine: { seats: 'not_published', cities: 'html_directory_with_known_cities', cinemas: 'html', movies: 'html_titles_with_functions', showtimes: 'html_per_venue_and_date_no_upstream_ids', prices: 'not_published', concessions: 'not_published' },
   cinex: { seats: 'authenticated_html_ascii', cities: 'public_api', cinemas: 'html', movies: 'html_general_catalog', showtimes: 'html_requires_cinema_or_movie', prices: 'authenticated_html_requires_session', concessions: 'authenticated_html' },
 };
 export class CinemaService {
   constructor(private http = new HttpClient(), private cinexCatalog = new CinexCinemaCatalog()) {}
   async seats(q: Query, call?: CallOptions) { return getSeatMap(this.http, q, call); }
-  async authStatus() { return Promise.all((['cinex', 'cinesunidos'] as const).map(p => this.http.sessions.status(p))); }
+  async authStatus() { return Promise.all(AuthProvider.options.map(p => this.http.sessions.status(p))); }
   async query(op: Operation, q: Query, call?: CallOptions): Promise<QueryResult> {
     // One commercial date for the entire operation, including midnight boundaries.
     if (!q.date && (op === 'showtimes' || (op === 'movies' && q.provider !== 'cinex' && q.provider !== 'supercines'))) q = { ...q, date: today() };

@@ -146,6 +146,27 @@ export class HttpClient {
   constructor(private request: typeof fetch = fetch, private timeout = 15000, readonly sessions = new SessionStore()) {}
   /** Providers whose session a request made with its credentials was refused on. */
   readonly rejectedSessions = new Set<AuthProviderId>();
+  /**
+   * A form read made with the user's own account: never cached or shared.
+   * Supercines answers 419 when the account's session has ended (a guest
+   * session has another form token), so that becomes auth_required rather
+   * than a silent guest read.
+   */
+  async postAuthenticated(provider: AuthProviderId, url: string, fields: Record<string, string>): Promise<Page> {
+    assertPrivateRead(provider, url);
+    assertPublicForm(url, fields);
+    const body = new URLSearchParams(Object.entries(fields).sort(([a], [b]) => a.localeCompare(b))).toString();
+    try {
+      return await this.read(url, new URL(url).origin, target => this.sessions.headers(provider, target), false, undefined,
+        { method: 'POST', body, headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' } });
+    } catch (error) {
+      if (error instanceof FormTokenExpired || (error instanceof DataError && error.status === 'auth_required')) {
+        this.rejectedSessions.add(provider);
+        throw new DataError('auth_required', 'El cine no reconoció la sesión de tu cuenta (expiró o se cerró); conéctala de nuevo.');
+      }
+      throw error;
+    }
+  }
   async getAuthenticated(provider: AuthProviderId, url: string): Promise<Page> {
     assertPrivateRead(provider, url);
     try {
@@ -605,6 +626,16 @@ export class ReadContext {
   /** Reports one completed step of a fan-out, when the client asked for progress. */
   progress(message: string) {
     try { this.call.progress?.(message); } catch { /* Progress is advisory; it never fails a read. */ }
+  }
+  /** Whether the user has a stored, unexpired session for this provider (not checked upstream). */
+  async hasSession(provider: AuthProviderId): Promise<boolean> {
+    return (await this.http.sessions.status(provider)).status === 'configured';
+  }
+  async authenticatedForm(provider: AuthProviderId, url: string, fields: Record<string, string>): Promise<string> {
+    this.checkCancelled();
+    const page = await this.http.postAuthenticated(provider, url, fields);
+    if (!this.sources.some(s => s.url === page.source.url)) this.sources.push(page.source);
+    return page.body;
   }
   async authenticated(provider: AuthProviderId, url: string): Promise<string> {
     this.checkCancelled();
