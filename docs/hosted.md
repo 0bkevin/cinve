@@ -41,7 +41,10 @@ enlace privado, válido durante diez minutos. El usuario introduce sus
 credenciales únicamente en ese formulario y el asistente repite la consulta.
 
 Solo se ejecuta un inicio de sesión a la vez por solicitud y hay un máximo de
-cinco intentos por solicitud, además de un cupo por dirección IP. Un doble
+cinco intentos por solicitud. Los inicios de sesión de la aprobación y de los
+enlaces comparten un cupo por red (20 por minuto) y uno global del servicio
+(120 por minuto), para que Cinve no pueda usarse para probar credenciales en
+los cines. Un doble
 envío espera al primero y devuelve al navegador al asistente con un código
 nuevo; el código anterior deja de ser válido.
 
@@ -156,7 +159,10 @@ En `/mcp`, cada conexión admite hasta 120 solicitudes por minuto y cuatro
 simultáneas; el proceso admite 32 simultáneas. La plaza se reserva antes de leer
 el cuerpo, que debe llegar completo en diez segundos. Las llamadas con
 `refresh: true` evitan la caché pública compartida y pueden generar varias
-lecturas al proveedor, por lo que tienen un cupo propio de diez por minuto.
+lecturas al proveedor, por lo que tienen un cupo propio de diez por minuto y uno global de 120 por
+minuto. Los cupos por dirección agrupan IPv6 por su prefijo /64, porque un solo
+usuario suele disponer de un bloque así de direcciones; IPv4 se cuenta por
+dirección.
 
 `/mcp` admite solicitudes desde cualquier origen web, porque la autorización es
 solo mediante token Bearer y nunca usa cookies; la comprobación exacta de `Host`

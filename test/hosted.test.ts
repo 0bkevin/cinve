@@ -933,3 +933,43 @@ test('clients can identify with a Client ID Metadata Document instead of registe
   const response = await fetch(unlisted, { redirect: 'manual' });
   assert.equal(response.status, 400); assert.equal(response.headers.get('location'), null);
 });
+
+test('rate limits group an IPv6 subscriber by /64 and keep IPv4 per address', async () => {
+  const { rateLimitNetwork } = await import('../src/hosted.js');
+  assert.equal(rateLimitNetwork('203.0.113.7'), '203.0.113.7');
+  assert.equal(rateLimitNetwork('::ffff:203.0.113.7'), '203.0.113.7');
+  const network = rateLimitNetwork('2001:db8:1:2::1');
+  assert.equal(network, '2001:0db8:0001:0002::/64');
+  assert.equal(rateLimitNetwork('2001:0db8:0001:0002:ffff:eeee:dddd:cccc'), network);
+  assert.notEqual(rateLimitNetwork('2001:db8:1:3::1'), network);
+  assert.equal(rateLimitNetwork('unknown'), 'unknown');
+});
+
+test('connection-link sign-ins share the per-network and service-wide sign-in quotas', async t => {
+  let calls = 0;
+  const f = await fixture(t, async () => { calls++; throw new Error('rejected'); });
+  const { digest } = await import('../src/hosted-store.js');
+  const client = await f.client(f.alice.token);
+  const browser = async () => ((await (await f.post('/connect/exchange', await link(client))).json()) as { browser_token: string }).browser_token;
+  // Each self-service connection has its own link budget; the network quota still applies.
+  await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 minute',20)", [digest('oauth:login-ip:127.0.0.1')]);
+  const limited = await f.post('/connect/login', await browser(), { username: 'x', password: 'x' });
+  assert.equal(limited.status, 429); assert.equal(calls, 0);
+  await f.pool.query('DELETE FROM cinev_budgets');
+  await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 minute',120)", [digest('login:global')]);
+  assert.equal((await f.post('/connect/login', await browser(), { username: 'x', password: 'x' })).status, 429);
+  assert.equal(calls, 0);
+  await f.pool.query('DELETE FROM cinev_budgets');
+  assert.equal((await f.post('/connect/login', await browser(), { username: 'x', password: 'x' })).status, 401);
+  assert.equal(calls, 1);
+});
+
+test('refresh=true also has a service-wide budget across addresses', async t => {
+  const f = await fixture(t);
+  const { digest } = await import('../src/hosted-store.js');
+  const anonymous = await f.client();
+  await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 minute',120)", [digest('refresh:global')]);
+  await assert.rejects(anonymous.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos', refresh: true } }));
+  const cached = await anonymous.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos' } });
+  assert.equal((cached.structuredContent as { status: string }).status, 'available');
+});

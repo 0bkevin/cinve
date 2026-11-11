@@ -2,6 +2,7 @@ import { landingPage, servePublicAsset, setSecurityHeaders } from './public-web.
 import { hostedAuthInstructions } from './hosted-auth-guidance.js';
 import { HostedOAuth } from './oauth.js';
 import { ClientMetadataCache } from './client-metadata.js';
+import { addressBytes } from './client-metadata.js';
 import type { ClientMetadataFetcher } from './client-metadata.js';
 import { serveInstall } from './install.js';
 import { createServer as nodeServer } from 'node:http';
@@ -61,6 +62,18 @@ function wellFormedOrigin(value: string): boolean {
   if (value === 'null') return true;
   try { const u = new URL(value); return ['http:', 'https:'].includes(u.protocol) && u.origin === value; } catch { return false; }
 }
+/**
+ * The network a rate limit is charged to. One IPv6 subscriber is normally
+ * delegated at least a /64, so per-address IPv6 limits could be bypassed by
+ * rotating addresses; IPv4 (including IPv4-mapped IPv6) stays per address.
+ */
+export function rateLimitNetwork(address: string): string {
+  const bytes = addressBytes(address);
+  if (!bytes) return address;
+  if (bytes.length === 4) return bytes.join('.');
+  if (bytes.slice(0, 10).every(b => b === 0) && bytes[10] === 0xff && bytes[11] === 0xff) return bytes.slice(12).join('.');
+  return Buffer.from(bytes.slice(0, 8)).toString('hex').replace(/(.{4})(?!$)/g, '$1:') + '::/64';
+}
 class HttpError extends Error { constructor(readonly status: number, message: string) { super(message); } }
 async function body(req: IncomingMessage, max: number, deadlineMs = 10000): Promise<unknown> {
   if (req.headers['content-type']?.split(';')[0].trim() !== 'application/json') throw new HttpError(415, 'Se requiere JSON.');
@@ -117,7 +130,7 @@ export async function createHostedApp(options: {
       if (req.method === 'GET' && req.url === '/health') { send(200, { status: 'ok' }); return; }
       if (req.headers.host !== publicUrl.host) throw new HttpError(403, 'Origen no permitido.');
       const forwarded = options.trustedVercelProxy ? req.headers['x-vercel-forwarded-for'] : undefined;
-      const ip = typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : req.socket.remoteAddress ?? 'unknown';
+      const ip = rateLimitNetwork(typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : req.socket.remoteAddress ?? 'unknown');
       if (await oauth.handle(req, res, ip)) return;
       if (req.url === '/mcp') {
         // MCP authorization is exclusively bearer-based; cookies are never used,
@@ -171,7 +184,8 @@ export async function createHostedApp(options: {
           // provider reads (for example, Cinex venue discovery). Keep it scarce so
           // one client cannot get the shared egress address blocked upstream.
           const refreshes = refreshCalls(parsed);
-          if (refreshes && !await links.budget(`refresh:${clientKey}`, 10)) throw new HttpError(429, 'Demasiadas consultas con refresh=true. Repite sin refresh o inténtalo en un minuto.');
+          // A service-wide cap too, since many addresses could each use their own.
+          if (refreshes && (!await links.budget(`refresh:${clientKey}`, 10) || !await links.budget('refresh:global', 120))) throw new HttpError(429, 'Demasiadas consultas con refresh=true. Repite sin refresh o inténtalo en un minuto.');
           const store = principal ? storeFor(principal.id) : new AnonymousSessions(origin);
           const service = new HostedService(new HostedHttpClient(options.request ?? fetch, 15000, store, publicHttp), cinexCatalog,
             store instanceof EncryptedSessionStore ? store : undefined);
@@ -206,7 +220,7 @@ export async function createHostedApp(options: {
       if (!connection || await users.hash(connection.user) !== connection.tokenHash) throw new HttpError(410, 'Conexión vencida o revocada.');
       if (req.url === '/connect/cancel') { await links.consume(token); send(200, { cancelled: true }); return; }
       if (req.url !== '/connect/login') throw new HttpError(404, 'Ruta no disponible.');
-      if (connection.busy || connection.attempts >= 5 || !await links.budget(`login:${connection.user}`, 10)) throw new HttpError(429, 'Demasiados intentos. Pide un enlace nuevo más tarde.');
+      if (connection.busy || connection.attempts >= 5 || !await links.budget(`login:${connection.user}`, 10) || !await links.signIn(ip)) throw new HttpError(429, 'Demasiados intentos. Pide un enlace nuevo más tarde.');
       let claimed = false;
       let data: Record<string, unknown> = {};
       try {

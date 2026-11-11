@@ -75,6 +75,15 @@ export class ConnectionLinks {
       RETURNING count`, [digest(key), limit]);
     return rows[0].count <= limit;
   }
+  /**
+   * A cinema sign-in, from either the consent page or a connection link: a
+   * per-network quota, then a service-wide one charged only when the network
+   * still has room. Connections are self-service, so per-connection limits
+   * alone would let one network test unbounded credentials through Cinve.
+   */
+  async signIn(network: string) {
+    return await this.budget(`oauth:login-ip:${network}`, 20) && await this.budget('login:global', 120);
+  }
   async cleanup() {
     // A cinema connected on the consent page whose code was never exchanged
     // belongs to nobody: drop its connection (and session) with the request.
