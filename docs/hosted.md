@@ -14,9 +14,15 @@ almacenamiento local independiente.
 Las páginas públicas, la conexión de cuentas y el consentimiento OAuth admiten
 español e inglés. `?lang=es` o `?lang=en` tiene prioridad sobre `Accept-Language`;
 sin una preferencia compatible se usa español. Las rutas existentes siguen
-funcionando. Los enlaces internos conservan el idioma explícito y las páginas
-negociadas envían `Vary: Accept-Language` y `Content-Language`. `/install` también
-varía por `Accept`: su guía de texto para agentes sigue en inglés y sin caché.
+funcionando. Cuando una página pública detecta inglés automáticamente, responde
+con una redirección temporal sin caché a `?lang=en`. Así, al compartir esa URL,
+el contenido y la imagen social siguen en inglés aunque el robot de la red
+social no envíe preferencias de idioma. Sin preferencias, las URLs originales
+siguen mostrando español. Los enlaces internos conservan el idioma explícito y
+las páginas negociadas envían `Vary: Accept-Language` y `Content-Language`.
+`/install` también varía por `Accept`: su guía de texto para agentes sigue en inglés y sin caché.
+Las URLs `/install?lang=es` y `/install?lang=en` sirven HTML también a robots
+de vistas previas sin `Accept: text/html`; `?format=text` siempre fuerza la guía.
 
 Los catálogos están en `src/web/locales/es.ts` y `en.ts`; las claves y las listas
 deben coincidir y `npm run check` verifica su estructura. Los mensajes del

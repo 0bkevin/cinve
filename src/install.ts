@@ -1,5 +1,5 @@
 import { installationPage } from './public-web.js';
-import { pageLocale, publicPageCache, setSecurityHeaders } from './web/http.js';
+import { pageLocale, publicPageCache, redirectNegotiatedEnglish, setSecurityHeaders } from './web/http.js';
 import { canonicalUrl } from './web/locale.js';
 import { seatInstructions } from './seat-guidance.js';
 import { cinemaInstructions } from './agent-instructions.js';
@@ -148,14 +148,20 @@ export function serveInstall(req: IncomingMessage, res: ServerResponse, publicUr
     res.end('Method not allowed\n');
     return true;
   }
-  const browser = req.headers.accept?.includes('text/html') && new URL(req.url!, publicUrl).searchParams.get('format') !== 'text';
+  const requested = new URL(req.url!, publicUrl);
+  const explicitLocale = requested.searchParams.get('lang');
+  // Explicit locale URLs are shareable visitor pages, including for preview
+  // crawlers that send no HTML Accept header. The bare agent URL stays text.
+  const browser = requested.searchParams.get('format') !== 'text' &&
+    (explicitLocale === 'es' || explicitLocale === 'en' || Boolean(req.headers.accept?.includes('text/html')));
   res.setHeader('Vary', 'Accept');
   const locale = browser ? pageLocale(req, res) : 'en';
+  if (browser && redirectNegotiatedEnglish(req, res, locale)) return true;
   if (!browser) res.setHeader('Content-Language', 'en');
   const guide = browser ? installationPage(publicUrl, locale) : installGuide(publicUrl);
   if (browser) res.setHeader('Content-Type', 'text/html; charset=utf-8');
   // Assistants follow the text guide while installing, so it is never cached;
-  // the HTML page is the same for everyone and may sit briefly in the CDN.
+  // public HTML may sit briefly in the CDN with the Vary headers above.
   if (browser) res.setHeader('Cache-Control', publicPageCache);
   // The plain-text guide and the HTML page are one document for search.
   res.setHeader('Link', `<${canonicalUrl(new URL('/install', publicUrl).href, browser ? locale : 'es')}>; rel="canonical"`);

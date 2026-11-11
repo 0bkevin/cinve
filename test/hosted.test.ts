@@ -1889,3 +1889,63 @@ test('OAuth consent preserves authorization fields across language links, errors
   assert.equal(approve.status, 303);
   assert.equal(new URL(approve.headers.get('location')!).searchParams.get('state'), 'state123');
 });
+
+test('public pages pin negotiated English for sharing and serve matching default and explicit OG images', async t => {
+  const f = await fixture(t);
+  const cases = [
+    { query: '', language: '', locale: 'es' },
+    { query: '', language: 'fr-FR,fr;q=0.9', locale: 'es' },
+    { query: '', language: 'es-VE,es;q=0.9,en;q=0.8', locale: 'es' },
+    { query: '', language: 'en-US,en;q=0.9,es;q=0.8', locale: 'en' },
+    { query: '?lang=es', language: 'en-US,en;q=0.9', locale: 'es' },
+    { query: '?lang=en', language: 'es-VE,es;q=0.9', locale: 'en' },
+  ] as const;
+  const images = new Set<string>();
+  for (const path of ['/', '/install', '/instrucciones']) {
+    const negotiated = await fetch(f.origin + path + '?source=share', { redirect: 'manual', headers: { Accept: 'text/html', 'Accept-Language': 'en-US' } });
+    assert.equal(negotiated.status, 307);
+    assert.equal(negotiated.headers.get('cache-control'), 'no-store');
+    assert.match(negotiated.headers.get('vary')!, /Accept-Language/);
+    const location = new URL(negotiated.headers.get('location')!, f.origin);
+    assert.equal(location.searchParams.get('lang'), 'en');
+    assert.equal(location.searchParams.get('source'), 'share');
+    for (const { query, language, locale } of cases) {
+      const response = await fetch(f.origin + path + query, { headers: { Accept: 'text/html', ...(language ? { 'Accept-Language': language } : {}) } });
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get('content-language'), locale);
+      assert.equal(new URL(response.url).searchParams.get('lang'), locale === 'en' ? 'en' : query ? 'es' : null);
+      const $ = load(await response.text());
+      assert.equal($('html').attr('lang'), locale);
+      assert.equal($('meta[property="og:locale"]').attr('content'), locale === 'en' ? 'en_US' : 'es_VE');
+      assert.equal($('meta[property="og:title"]').attr('content'), $('title').text());
+      const image = $('meta[property="og:image"]').attr('content')!;
+      assert.equal(new URL(image).pathname, locale === 'en' ? '/og-en.png' : '/og.png');
+      assert.equal($('meta[name="twitter:image"]').attr('content'), image);
+      assert.equal($('meta[property="og:image:width"]').attr('content'), '1200');
+      assert.equal($('meta[property="og:image:height"]').attr('content'), '630');
+      images.add(image);
+      // A crawler does not inherit the visitor's browser settings. The final
+      // English URL must still deliver English and its OG image without them.
+      if (locale === 'en') {
+        const crawler = load(await (await fetch(response.url)).text());
+        assert.equal(crawler('html').attr('lang'), 'en');
+        assert.equal(crawler('meta[property="og:image"]').attr('content'), image);
+      }
+    }
+  }
+  assert.equal(images.size, 2);
+  const spanishInstall = await fetch(f.origin + '/install?lang=es');
+  assert.match(spanishInstall.headers.get('content-type')!, /text\/html/);
+  assert.equal(load(await spanishInstall.text())('html').attr('lang'), 'es');
+  for (const url of images) {
+    const response = await fetch(url);
+    assert.equal(response.status, 200); assert.equal(response.headers.get('content-type'), 'image/png');
+    const png = Buffer.from(await response.arrayBuffer());
+    assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+    assert.equal(png.readUInt32BE(16), 1200); assert.equal(png.readUInt32BE(20), 630);
+  }
+  const head = await fetch(f.origin + '/', { method: 'HEAD', redirect: 'manual', headers: { 'Accept-Language': 'en-US' } });
+  assert.equal(head.status, 307); assert.equal(await head.text(), '');
+  const guide = await fetch(f.origin + '/install?format=text', { redirect: 'manual', headers: { Accept: 'text/html', 'Accept-Language': 'en-US' } });
+  assert.equal(guide.status, 200); assert.match(await guide.text(), /^Cinve MCP installation/);
+});

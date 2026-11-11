@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { resolveLocale } from './locale.js';
+import { localeUrl, resolveLocale, type Locale } from './locale.js';
 
 /** Append rather than overwrite: /install also varies by representation. */
 export function pageLocale(req: IncomingMessage, res: ServerResponse) {
@@ -11,8 +11,20 @@ export function pageLocale(req: IncomingMessage, res: ServerResponse) {
   return locale;
 }
 
-/** For pages that are the same for everyone (/, /install, /instrucciones):
- *  the CDN may cache them briefly; private pages keep no-store. */
+/** Pin automatically selected English to its shareable URL. Social crawlers
+ *  do not inherit the visitor's browser language preferences. */
+export function redirectNegotiatedEnglish(req: IncomingMessage, res: ServerResponse, locale: Locale): boolean {
+  const url = new URL(req.url ?? '/', 'https://cinve.invalid');
+  const explicit = url.searchParams.get('lang');
+  if (locale !== 'en' || explicit === 'es' || explicit === 'en') return false;
+  res.setHeader('Cache-Control', 'no-store');
+  res.writeHead(307, { Location: localeUrl(url.pathname + url.search, 'en') });
+  res.end();
+  return true;
+}
+
+/** Public HTML may be cached briefly, varying by language and representation.
+ *  Private pages and language-negotiation redirects keep no-store. */
 export const publicPageCache = 'public, max-age=0, s-maxage=300, stale-while-revalidate=86400';
 
 /** Headers for every response, including pages served outside the hosted app (for example /install on Vercel). */
