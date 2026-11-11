@@ -211,8 +211,8 @@ export class ConnectionLinks {
       expires_at=CASE WHEN cinev_budgets.expires_at<=now() THEN EXCLUDED.expires_at ELSE cinev_budgets.expires_at END`,
     [entries.map(([key]) => this.keyHash(key)), entries.map(([, seconds]) => seconds)]);
   }
-  // The per-account budget each admitted attempt was charged to, for a refund.
-  private charged = new WeakMap<SignInSubject, string>();
+  // Everything each admitted attempt was charged, for a refund if the cinema never saw it.
+  private charged = new WeakMap<SignInSubject, string[]>();
   /** Gives back one use of each window (a charge that turned out not to be needed). */
   private async refund(keys: string[]) {
     if (keys.length) await this.pool.query('UPDATE cinev_budgets SET count=GREATEST(count-1,0) WHERE key_hash=ANY($1) AND expires_at>now()', [keys.map(key => this.keyHash(key))]);
@@ -248,7 +248,7 @@ export class ConnectionLinks {
     const owner = proofs.find((_, i) => known[i] > 0);
     if (owner !== undefined) {
       if (!await this.budget(pairKey(subject, owner), L.accountAttempts, L.accountWindowSeconds)) return 'account';
-      this.charged.set(subject, pairKey(subject, owner));
+      this.charged.set(subject, [pairKey(subject, owner)]);
       return undefined;
     }
     const charged: string[] = [];
@@ -267,7 +267,7 @@ export class ConnectionLinks {
     if (!await charge(`oauth:login-ip:${subject.network}`, L.networkPerMinute)) return refuse('network');
     if (keys.block && !await charge(`signin:block:${keys.block}`, L.blockPerMinute)) return refuse('network');
     if (!await charge(accountKey(subject), L.accountAttempts, L.accountWindowSeconds)) return refuse('account');
-    this.charged.set(subject, accountKey(subject));
+    this.charged.set(subject, charged);
     return undefined;
   }
   /** Refused credentials (or a failure of unknown kind): every failure counter. */
@@ -277,12 +277,14 @@ export class ConnectionLinks {
       ...(keys.block ? [[keys.blockDay!, day], [keys.blockRecent!, recent]] as Array<[string, number]> : [])]);
   }
   /**
-   * The credentials never reached the cinema: give back the attempt this
-   * subject was charged (nothing was tested).
+   * The credentials never reached the cinema: give back everything this
+   * attempt was charged (account, network and /48 attempts, slow-lane and
+   * strained slots), since nothing was tested.
    */
   async signInUnavailable(subject: SignInSubject) {
-    const key = this.charged.get(subject);
-    if (key) await this.pool.query('UPDATE cinev_budgets SET count=GREATEST(count-1,0) WHERE key_hash=$1 AND expires_at>now()', [this.keyHash(key)]);
+    const keys = this.charged.get(subject);
+    this.charged.delete(subject);
+    if (keys) await this.refund(keys);
   }
   /**
    * How a failed sign-in counts. Only a refusal counts as a failure (and a

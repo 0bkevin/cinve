@@ -41,7 +41,8 @@ enlace privado, válido durante diez minutos. El usuario introduce sus
 credenciales únicamente en ese formulario y el asistente repite la consulta.
 
 Solo se ejecuta un inicio de sesión a la vez por solicitud y hay un máximo de
-cinco intentos por solicitud. Para que Cinve no pueda usarse para probar
+cinco intentos por solicitud. Hasta ocho envíos repetidos de una misma
+aprobación (dieciséis por red) esperan al primero; el resto se rechaza. Para que Cinve no pueda usarse para probar
 credenciales en los cines, los inicios de sesión de la aprobación y de los
 enlaces comparten estos límites:
 
@@ -65,8 +66,9 @@ la red, el modo de ataque global o los intentos contra la cuenta) no lo bloquea.
 La prueba de que es el dueño no es su dirección, sino algo que solo él tiene:
 en un enlace, la conexión de Cinve con la que conectó la cuenta antes; en la
 aprobación, una cookie propia de Cinve (`cinve_device`, HttpOnly, 30 días) que
-su navegador recibe tras un inicio de sesión correcto. Así nadie puede usar ni
-detectar esa excepción. Un inicio correcto no reinicia ningún contador. Cada
+su navegador recibe tras un inicio de sesión correcto, con un valor nuevo cada
+vez, para que un valor plantado de antemano en el navegador nunca sirva de
+prueba. Así nadie puede usar ni detectar esa excepción. Un inicio correcto no reinicia ningún contador. Cada
 cupo se cobra de forma atómica, y si un límite rechaza el intento se devuelve
 lo ya cobrado, también los intentos del enlace y de la aprobación.
 

@@ -690,14 +690,22 @@ test('a double submit signs in once and still sends the browser back to the assi
   assert.equal((await f.pool.query('SELECT count(*)::int AS n FROM cinev_clients')).rows[0].n, 3, 'no orphaned connection');
 });
 
-test('waiting duplicate submits do not use up the per-address sign-in budget', async t => {
+test('waiting duplicate submits do not use up the per-address sign-in budget, and a flood of them is bounded', async t => {
   let calls = 0;
   const slowLogin: typeof login = async (...args) => { calls++; await new Promise(r => setTimeout(r, 300)); return successfulLogin(...args); };
   const f = await fixture(t, slowLogin);
   const consent = await consentForm(f.origin, await register(f.origin));
-  const many = await Promise.all(Array.from({ length: 25 }, () => consent.submit({ ...cinema, password: 'SYNTHETIC_PASSWORD' })));
-  assert.ok(many.every(r => r.status === 303), `25 duplicate submits: ${many.map(r => r.status).join(',')}`);
+  // Repeated clicks: every response sends the browser on, whichever one it keeps.
+  const clicks = await Promise.all(Array.from({ length: 8 }, () => consent.submit({ ...cinema, password: 'SYNTHETIC_PASSWORD' })));
+  assert.ok(clicks.every(r => r.status === 303), `8 duplicate submits: ${clicks.map(r => r.status).join(',')}`);
   assert.equal(calls, 1);
+  // A flood: at most 8 submits of one approval wait (each polls the database).
+  const flood = await consentForm(f.origin, await register(f.origin));
+  const many = await Promise.all(Array.from({ length: 25 }, () => flood.submit({ ...cinema, password: 'SYNTHETIC_PASSWORD' })));
+  const statuses = many.map(r => r.status);
+  assert.equal(statuses.filter(s => s === 303).length, 9, `the sign-in and 8 waiters: ${statuses.join(',')}`);
+  assert.equal(statuses.filter(s => s === 429).length, 16);
+  assert.equal(calls, 2);
 });
 
 test('approving while a cinema sign-in is running wins cleanly, and the attempt cap spans the whole request', async t => {
@@ -1695,4 +1703,31 @@ test('the signing epoch is recorded once, at the first signed token, even with c
   assert.ok(until > Date.now() && until <= Date.now() + 60000, 'only for a minute');
   (early.oauth as unknown as { cutoffsUntil: number }).cutoffsUntil = 0;
   assert.notEqual((await early.oauth.legacy()).access, Infinity, 'then read again');
+});
+
+test('an outage gives back every charge of the attempt, including a strained slot', async t => {
+  const f = await fixture(t);
+  const { CinemaUnavailable } = await import('../src/auth.js');
+  await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '15 minutes',300)", [f.links.keyHash('signin-fail:global')]);
+  const network = '198.51.100.140';
+  const first = { network, provider: 'cinex' as const, username: 'a@example.test' };
+  assert.equal(await f.links.admitSignIn(first), undefined, 'takes the network\'s only strained slot');
+  assert.equal(await f.links.signInError(first, new CinemaUnavailable('down')), 'unavailable');
+  const counts = await f.pool.query('SELECT count FROM cinev_budgets WHERE key_hash=ANY($1)', [[`signin:strained:${network}`, `oauth:login-ip:${network}`, 'signin:account:cinex:a@example.test'].map(k => f.links.keyHash(k))]);
+  assert.deepEqual(counts.rows.map(r => r.count), [0, 0, 0]);
+  assert.equal(await f.links.admitSignIn({ ...first }), undefined, 'the slot is free again');
+});
+
+test('a device id planted in a browser never becomes a proof for the account signed in there', async t => {
+  const f = await fixture(t, successfulLogin);
+  const planted = 'P'.repeat(43);
+  const consent = await consentForm(f.origin, await register(f.origin));
+  const done = await consent.submit({ ...cinema, password: 'SYNTHETIC_PASSWORD' }, { Origin: f.origin, Cookie: `${consent.cookie}; cinve_device=${planted}` });
+  assert.equal(done.status, 303);
+  const issued = done.headers.getSetCookie().find(c => c.startsWith('cinve_device='))!.split(';')[0].split('=')[1];
+  assert.notEqual(issued, planted, 'a fresh id is issued');
+  const subject = (device: string) => ({ network: '203.0.113.150', provider: 'cinesunidos' as const, username: 'person@example.test', proofs: [`browser:${device}`] });
+  await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 minute',21)", [f.links.keyHash('oauth:login-ip:203.0.113.150')]);
+  assert.equal(await f.links.admitSignIn(subject(planted)), 'network', 'whoever planted the id gets no exemption');
+  assert.equal(await f.links.admitSignIn(subject(issued)), undefined, 'the browser that signed in does');
 });

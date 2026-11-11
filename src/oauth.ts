@@ -132,6 +132,9 @@ export function recognizedDestination(redirect: string, publisher?: string) {
  * it never grants access to an existing cinema session or browser identity. */
 export class HostedOAuth {
   private authorizations = 0;
+  // Submits of one approval waiting for its sign-in (a double click) in this
+  // instance, per request and per network: a bound on database polling.
+  private waiters = new Map<string, number>();
   private cutoffs?: Promise<LegacyCutoffs>;
   private cutoffsUntil = Infinity;
   /**
@@ -386,9 +389,9 @@ export class HostedOAuth {
         if (cookie !== csrf) throw junk(403);
         // A first-party cookie that marks this browser as having connected a
         // cinema here before: the proof that exempts its owner from what
-        // others do (see admitSignIn). Created on the first successful sign-in.
+        // others do (see admitSignIn). Issued anew on every successful sign-in.
         const known = req.headers.cookie?.split(';').map(v => v.trim()).find(v => v.startsWith('cinve_device='))?.split('=')[1];
-        const device = known && /^[A-Za-z0-9_-]{43}$/.test(known) ? known : secret();
+        const device = known && /^[A-Za-z0-9_-]{43}$/.test(known) ? known : undefined;
         // No network quota: only a browser holding this request's approval
         // cookie gets here, so approvals are bounded by authorization starts
         // (limited above), and cinema sign-ins have their own limits. Others
@@ -396,7 +399,8 @@ export class HostedOAuth {
         // Approving and connecting a cinema in one step. The upstream sign-in
         // never runs inside a transaction; its session is committed together
         // with the code below, or not at all.
-        let session: AuthSession | undefined, claimed = false;
+        let session: AuthSession | undefined, claimed = false, fresh: string | undefined;
+        const waiting: string[] = [];
         const release = () => this.pool.query('UPDATE cinev_oauth_requests SET busy_until=NULL WHERE id=$1', [id]).catch(() => {});
         try {
           if (decision === 'connect') {
@@ -430,12 +434,18 @@ export class HostedOAuth {
               if (!r || !r.live || r.code_hash) break; // The transaction below decides: re-issue or refuse.
               if (!r.busy && r.attempts >= 5) return again(429, 'Demasiados intentos. Vuelve a tu asistente para empezar de nuevo.');
               if (Date.now() - started > (r.busy ? 75000 : 20000)) return again(503, 'El cine está tardando en responder. Inténtalo de nuevo.');
+              if (!waiting.length) {
+                // A few duplicate submits (double clicks) wait for the first; a flood does not.
+                if ((this.waiters.get(`request:${id}`) ?? 0) >= 8 || (this.waiters.get(`network:${ip}`) ?? 0) >= 16)
+                  return again(429, 'Ya se está iniciando sesión con esta solicitud. Espera unos segundos.');
+                for (const key of [`request:${id}`, `network:${ip}`]) { this.waiters.set(key, (this.waiters.get(key) ?? 0) + 1); waiting.push(key); }
+              }
               await new Promise(resolve => setTimeout(resolve, 300));
             }
             if (claimed) {
               // The per-address budget counts sign-ins, not duplicate submits that only wait.
               // Proof of ownership: a cookie this browser received after an earlier successful sign-in here.
-              const subject = { network: ip, provider: provider.data, username, proofs: [`browser:${device}`] };
+              const subject = { network: ip, provider: provider.data, username, proofs: device ? [`browser:${device}`] : [] };
               const refusal = await this.budgets.admitSignIn(subject);
               if (refusal) {
                 // The sign-in never ran: give back the request's attempt.
@@ -456,7 +466,11 @@ export class HostedOAuth {
               }
               // Not a refusal of the credentials, so it is not counted as a failure.
               if (!session || session.provider !== provider.data) return again(502, 'El cine no entregó una sesión válida. Inténtalo de nuevo.');
-              await this.budgets.signInSucceeded(subject);
+              // A fresh device id on every success: an id planted in this
+              // browser beforehand (for example by a sibling subdomain) never
+              // becomes a proof for this account.
+              fresh = secret();
+              await this.budgets.signInSucceeded({ ...subject, proofs: [`browser:${fresh}`] });
             }
           }
           const destination = await transaction(this.pool, async client => {
@@ -496,9 +510,12 @@ export class HostedOAuth {
           claimed = false;
           const secure = origin.startsWith('https:') ? '; Secure' : '';
           res.setHeader('Set-Cookie', [`cinve_approval_${id}=; HttpOnly; SameSite=Lax; Path=/oauth/authorize; Max-Age=0${secure}`,
-            ...(session ? [`cinve_device=${device}; HttpOnly; SameSite=Lax; Path=/oauth/authorize; Max-Age=${30 * 86400}${secure}`] : [])]);
+            ...(fresh ? [`cinve_device=${fresh}; HttpOnly; SameSite=Lax; Path=/oauth/authorize; Max-Age=${30 * 86400}${secure}`] : [])]);
           res.writeHead(303, { Location: destination }); res.end(); return true;
-        } finally { if (claimed) await release(); }
+        } finally {
+          for (const key of waiting) { const left = this.waiters.get(key)! - 1; if (left) this.waiters.set(key, left); else this.waiters.delete(key); }
+          if (claimed) await release();
+        }
       }
       if (path === '/oauth/token' && req.method === 'POST') {
         send(200, await this.exchange(await payload(req) as URLSearchParams, async signedId => {
