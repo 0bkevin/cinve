@@ -314,7 +314,10 @@ guardar una sesión después de cancelar, reemplazar, vencer o revocar el enlace
 Ante una caída de la base, las operaciones protegidas fallan de forma cerrada.
 
 Una tarea diaria autenticada elimina sesiones, enlaces, límites y objetos OAuth
-vencidos. El registro OAuth es anónimo, así que también elimina los clientes
+vencidos. Además, las ventanas de límites vencidas y las solicitudes de
+autorización vencidas sin conexión se eliminan por lotes a medida que se
+acumulan, para que una avalancha de direcciones nuevas no haga crecer la base
+durante todo el día. El registro OAuth es anónimo, así que también elimina los clientes
 registrados sin autorizaciones vigentes que llevan 90 días sin emitir tokens; un
 cliente que vuelva se registra de nuevo. Ejecuta `npm run db:migrate` antes de
 desplegar una versión con migraciones nuevas. La validez se comprueba al acceder y no depende de esa limpieza. La

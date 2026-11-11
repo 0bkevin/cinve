@@ -100,6 +100,7 @@ export function recognizedDestination(redirect: string, publisher?: string) {
 /** Self-service, isolated connections. Approval creates a NEW empty principal;
  * it never grants access to an existing cinema session or browser identity. */
 export class HostedOAuth {
+  private authorizations = 0;
   /** tokenKey: a 32-byte key for signing tokens, the same on every instance; budgets: rate limits (with their key). */
   constructor(readonly pool: Pool, readonly getOrigin: () => string, private readonly clientMetadata: ClientMetadataCache,
     private readonly accounts: ConsentAccounts | undefined, private readonly tokenKey: Buffer, private readonly budgets: ConnectionLinks) {
@@ -280,6 +281,11 @@ export class HostedOAuth {
         send(201, { ...p, client_id: id, client_id_issued_at: Math.floor(Date.now() / 1000) }); return true;
       }
       if (path === '/oauth/authorize' && req.method === 'GET') {
+        // Each authorization start adds a request row. Unbound expired ones
+        // (no connection attached) are dropped as they accumulate; requests
+        // holding a connection or a consumed code are left to cleanup.
+        if (++this.authorizations % 50 === 0) await this.pool.query(`DELETE FROM cinev_oauth_requests WHERE id IN (SELECT id FROM cinev_oauth_requests
+          WHERE expires_at<=now() AND user_id IS NULL LIMIT 500)`).catch(() => {});
         const p = url.searchParams;
         for (const key of p.keys()) if (p.getAll(key).length !== 1) throw new OAuthError('invalid_request');
         const clientId = required(p.get('client_id')), redirect = required(p.get('redirect_uri'));

@@ -1452,3 +1452,21 @@ test('refused and unclear sign-ins take the same minimum time, on links and on c
   assert.equal((await consent.submit({ ...cinema, password: 'WRONG' })).status, 401);
   assert.ok(Date.now() - started >= 290);
 });
+
+test('expired rate-limit windows and unbound authorization requests are pruned as they accumulate', async t => {
+  const f = await fixture(t);
+  await f.pool.query(`INSERT INTO cinev_budgets(key_hash,expires_at,count)
+    SELECT md5(i::text) || md5((i+1)::text), now()-interval '1 second', 1 FROM generate_series(1,150) i`);
+  for (let i = 0; i < 100; i++) await f.links.budget(`prune:${i}`, 1000);
+  assert.equal((await f.pool.query("SELECT count(*)::int AS n FROM cinev_budgets WHERE expires_at<=now()")).rows[0].n, 0);
+  assert.equal((await f.pool.query("SELECT count(*)::int AS n FROM cinev_budgets WHERE expires_at>now()")).rows[0].n, 100, 'live windows stay');
+  const client_id = await register(f.origin);
+  await f.pool.query(`INSERT INTO cinev_oauth_requests(id,app_id,redirect_uri,resource,challenge,csrf_hash,expires_at)
+    SELECT 'old' || i, $1, 'https://assistant.example/callback', 'r', 'c', 'h', now()-interval '1 second' FROM generate_series(1,60) i`, [client_id]);
+  // An expired request holding a connection is cleanup's to decide, never pruned here.
+  await f.pool.query(`INSERT INTO cinev_oauth_requests(id,app_id,redirect_uri,resource,challenge,csrf_hash,expires_at,user_id)
+    VALUES('bound',$1,'https://assistant.example/callback','r','c','h',now()-interval '1 second',$2)`, [client_id, f.alice.id]);
+  for (let i = 0; i < 50; i++) await fetch((await authorizationRequest(f.origin, client_id)).url);
+  const left = (await f.pool.query("SELECT id FROM cinev_oauth_requests WHERE expires_at<=now()")).rows.map(r => r.id);
+  assert.deepEqual(left, ['bound']);
+});

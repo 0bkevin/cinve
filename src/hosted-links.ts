@@ -162,8 +162,20 @@ export class ConnectionLinks {
       await client.query('DELETE FROM cinev_links WHERE user_id=$1 AND provider=$2', [user, provider]);
     });
   }
+  private uses = 0;
+  /**
+   * Every new network creates rate-limit rows, so a flood of fresh addresses
+   * (rotating IPv6 /64s) would grow the table until the daily cleanup.
+   * Remove expired windows as they accumulate, in bounded batches.
+   */
+  private async prune() {
+    if (++this.uses % 100) return;
+    await this.pool.query('DELETE FROM cinev_budgets WHERE key_hash IN (SELECT key_hash FROM cinev_budgets WHERE expires_at<=now() LIMIT 1000)')
+      .catch(() => {}); // Housekeeping never fails a request.
+  }
   /** Charges one use of a fixed window (one minute by default); false once the limit is spent. */
   async budget(key: string, limit: number, windowSeconds = 60) {
+    await this.prune();
     const { rows } = await this.pool.query(`INSERT INTO cinev_budgets(key_hash,expires_at,count)
       VALUES($1,now()+make_interval(secs => $3),1) ON CONFLICT(key_hash) DO UPDATE SET
       count=CASE WHEN cinev_budgets.expires_at<=now() THEN 1 ELSE LEAST(cinev_budgets.count+1,$2+1) END,
