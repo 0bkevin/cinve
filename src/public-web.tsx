@@ -8,34 +8,27 @@ export { servePublicAsset } from './web/assets.js';
 const page = (title: string, content: JSX.Element, options: PageOptions = {}) =>
   renderDocument(<Page title={title} {...options}>{content}</Page>);
 
-/** The message users paste into their assistant, printed as an admission
- *  ticket; site.js reveals the copy button on its tear-off stub. */
+/** The message users paste into their assistant; site.js reveals the copy button. */
 function InstallMessage({ origin }: { origin: string }) {
   return <>
-    <div class="ticket">
-      <div class="ticket-main">
-        <p class="ticket-label">Mensaje para tu asistente</p>
-        <p id="install-message">Instala Cinve siguiendo {origin}/install</p>
-      </div>
-      <div class="ticket-stub">
-        <Button id="copy-install" variant="primary" hidden>{icons.copy()}<span>Copiar mensaje</span></Button>
-        <span class="ticket-admit" aria-hidden="true">Admite uno</span>
-      </div>
+    <div class="install">
+      <p id="install-message">Instala Cinve siguiendo {origin}/install</p>
+      <Button id="copy-install" hidden>{icons.copy()}<span>Copiar</span></Button>
     </div>
     <p id="copy-feedback" class="note" role="status" aria-live="polite"></p>
   </>;
 }
 
-// The hero's auditorium: rows A–G of a 3 + 8 + 3 seat house. The pattern is
-// fixed so the page is the same on every load; one pair in row E is free.
+// The hero's seat map: rows A–G of a 3 + 8 + 3 house, fixed so every load
+// looks the same. On load the seats fill in as taken, leaving one free pair.
 const rows = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
 const taken = new Set(['A1', 'A2', 'A6', 'A7', 'A8', 'B4', 'B5', 'B9', 'B10', 'B13', 'C5', 'C6', 'C7', 'C8', 'C9', 'C12', 'D1', 'D4', 'D5', 'D6',
   'D9', 'D10', 'D11', 'E4', 'E5', 'E6', 'E9', 'E10', 'E11', 'E14', 'F3', 'F6', 'F7', 'F8', 'F9', 'G1', 'G2', 'G6', 'G7', 'G12', 'G13', 'G14']);
 const pair = new Set(['E7', 'E8']);
 const blocks = [[1, 2, 3], [4, 5, 6, 7, 8, 9, 10, 11], [12, 13, 14]];
 
-function Auditorium() {
-  return <div class="seating" role="img" aria-label="Sala de cine vista desde atrás, con dos asientos libres y juntos en la fila E.">
+function SeatMap() {
+  return <div class="seating" role="img" aria-label="Mapa de una sala con dos asientos libres juntos en la fila E.">
     {rows.map(row => <div class="row">
       <span class="row-label">{row}</span>
       {blocks.map(block => <span class="block">
@@ -45,66 +38,32 @@ function Auditorium() {
   </div>;
 }
 
-const questions = [
-  ['Cartelera', '¿Qué películas hay hoy en Caracas?', 'Películas, cines y horarios para elegir una función.'],
-  ['Precios', '¿Cuánto cuesta la entrada en Cinepic?', 'Las tarifas de una función y la caramelería que publique el cine.'],
-  ['Asientos', '¿Quedan dos asientos juntos?', 'El mapa de la sala en Cinex, Cines Unidos y Cinepic antes de comprar.'],
-];
+const questions = ['¿Qué películas hay hoy en Caracas?', '¿Cuánto cuesta la entrada en Cinepic?', '¿Quedan dos asientos juntos a las 7?'];
 
 export function landingPage(origin: string) {
   return page('Consulta de cines en Venezuela', <>
-    <section class="auditorium" aria-labelledby="estreno">
-      <div class="stage">
-        <span class="curtain" data-side="left" aria-hidden="true"></span>
-        <span class="curtain" data-side="right" aria-hidden="true"></span>
-        {/* The screen plays a short exchange with an assistant; the pair of
-            seats it names lights up in the house below when it answers. */}
-        <figure class="screen">
-          <div class="chat">
-            <p class="bubble" data-from="you">¿Qué dan hoy en el Sambil de Caracas?</p>
-            <p class="bubble" data-from="assistant">En Cinex Sambil: <strong>Coyote vs. Acme</strong> a las 7:10 y a las 9:40 pm.</p>
-            <p class="bubble" data-from="you">¿Quedan dos juntos a las 7:10?</p>
-            <p class="bubble" data-from="assistant">Sí: <strong>fila E, asientos 7 y 8</strong>.</p>
-          </div>
-          <figcaption>Ejemplo de conversación con tu asistente</figcaption>
-        </figure>
-        <Auditorium />
-      </div>
-      <h1 id="estreno">La cartelera, en tu chat.</h1>
-      <p class="lead">Pregúntale a tu asistente por las películas, los horarios, los precios y los asientos de Cinex, Cines Unidos y Cinepic. Cinve consulta al cine y te responde en la conversación.</p>
-      <div class="actions">
-        <LinkButton href="#como-usarlo" size="lg">Añadir Cinve a mi asistente</LinkButton>
-        <LinkButton href="#que-puedes-consultar" variant="outline" size="lg">Ver qué puedo preguntar</LinkButton>
-      </div>
+    <section class="hero" aria-labelledby="titulo">
+      <SeatMap />
+      <h1 id="titulo">La cartelera, en tu chat.</h1>
+      <p class="lead">Pregúntale a tu asistente de IA qué películas hay, a qué hora, cuánto cuesta la entrada y qué asientos quedan libres en Cinex, Cines Unidos y Cinepic.</p>
+      <LinkButton href="#empezar" size="lg">Añadir Cinve a mi asistente</LinkButton>
     </section>
-    <section class="section" id="que-puedes-consultar">
-      <h2>Qué puedes preguntar</h2>
-      <p>Dile a tu asistente qué quieres ver y en qué ciudad estás.</p>
-      <ul class="board">
-        {questions.map(([kind, question, detail]) => <li>
-          <span class="board-kind">{kind}</span>
-          <p class="board-question">{question}</p>
-          <p class="board-detail">{detail}</p>
-        </li>)}
-      </ul>
-      <p class="note">La información depende de cada cine. Cinve consulta los datos; no compra entradas ni reserva asientos.</p>
+    <section class="section" id="empezar">
+      <h2>Cómo empezar</h2>
+      <ol class="steps">
+        <li>
+          <p>Copia este mensaje y envíaselo a tu asistente.</p>
+          <InstallMessage origin={origin} />
+        </li>
+        <li><p>Tu asistente añade Cinve y te pide permiso antes. Funciona con asistentes que admiten conexiones MCP. <a href="/install">Hacerlo a mano</a></p></li>
+        <li>
+          <p>Pregunta como siempre:</p>
+          <ul class="asks">{questions.map(question => <li>{question}</li>)}</ul>
+        </li>
+      </ol>
+      <p class="note">Algunos precios piden tu cuenta del cine. Tu asistente te dará un enlace privado para conectarla; la contraseña nunca pasa por el chat.</p>
     </section>
-    <section class="section setup" id="como-usarlo">
-      <div>
-        <h2>Añade Cinve a tu asistente.</h2>
-        <p>Copia este mensaje y envíaselo a tu asistente. Te ayudará a conectar Cinve.</p>
-        <p class="fine">Necesitas un asistente que permita añadir conexiones MCP. Para consultar la cartelera no hace falta crear una cuenta. <a href="/install">Ver instrucciones</a></p>
-      </div>
-      <div><InstallMessage origin={origin} /></div>
-    </section>
-    <section class="section setup">
-      <h2>Conecta tu cuenta del cine cuando haga falta.</h2>
-      <div>
-        <p>Algunos precios requieren una cuenta del cine. Tu asistente te dará un enlace privado para conectarla y luego sigues en el chat.</p>
-        <p class="fine">La contraseña se escribe solo en ese formulario, nunca en el chat. Cinve no guarda tu contraseña.</p>
-      </div>
-    </section>
-    <aside class="project-note" aria-label="Sobre Cinve"><p>Cinve es un proyecto independiente, sin fines de lucro y completamente gratuito. No tiene ninguna alianza ni afiliación con Cinex, Cines Unidos o Cinepic.</p></aside>
+    <aside class="project-note" aria-label="Sobre Cinve"><p>Cinve es gratis e independiente, sin relación con Cinex, Cines Unidos ni Cinepic. Consulta la información; no compra entradas ni reserva asientos.</p></aside>
   </>, { index: true, canonical: origin + '/', script: '/assets/js/site.js' });
 }
 

@@ -14,7 +14,7 @@ if (button && message && feedback) {
       label.textContent = 'Copiado';
       feedback.textContent = 'Mensaje copiado. Pégalo en tu asistente.';
       clearTimeout(reset);
-      reset = window.setTimeout(() => { label.textContent = 'Copiar mensaje'; }, 2500);
+      reset = window.setTimeout(() => { label.textContent = 'Copiar'; }, 2500);
     } catch {
       feedback.textContent = 'Selecciona el mensaje y cópialo para enviarlo a tu asistente.';
     }
