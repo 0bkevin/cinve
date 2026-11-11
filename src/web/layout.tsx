@@ -82,7 +82,7 @@ export function Page({ title, compact, script, index, canonical, children }: Pag
               </div>
               <div>
                 <h2>Proyecto</h2>
-                <a href="/instrucciones">Instrucciones del asistente</a>
+                <a href="/instrucciones">Instrucciones</a>
                 <a href="https://github.com/0bkevin/cinve">Código en GitHub</a>
                 <a href="https://github.com/0bkevin/cinve/issues/new/choose">Reportar un problema</a>
                 <a href="https://github.com/0bkevin/cinve/security/advisories/new">Seguridad</a>

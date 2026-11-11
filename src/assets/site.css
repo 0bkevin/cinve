@@ -70,15 +70,16 @@
 .brand { font: 800 30px/1 var(--font-display); letter-spacing: -0.045em; text-decoration: none; }
 .brand span { color: var(--amber); }
 .site-nav { display: flex; gap: 28px; align-items: center; font-size: 15px; }
-.site-nav a { text-decoration: none; color: var(--dust); }
+.site-nav a { text-decoration: none; color: var(--dust); padding-block: 10px; }
 .site-footer { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 40px 48px; margin-top: 48px; padding: 56px 0 28px; color: var(--dust); font-size: 14px; }
 .site-footer a { text-decoration: none; color: var(--dust); transition: color .15s; }
 .site-footer a:hover { color: var(--cream); }
 .footer-brand { display: grid; gap: 12px; align-content: start; max-width: 340px; }
-.footer-brand .brand { color: var(--cream); font-size: 28px; }
+.footer-brand .brand { color: var(--cream); font-size: 28px; justify-self: start; }
 .footer-brand p { margin: 0; line-height: 1.55; }
 .footer-links { display: flex; gap: 64px; }
-.footer-links div { display: grid; gap: 10px; align-content: start; }
+.footer-links div { display: grid; gap: 2px; align-content: start; }
+.footer-links a { padding-block: 5px; }
 .footer-links h2 { margin: 0 0 4px; font: 600 12px/1 var(--font-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--cream); opacity: .6; }
 .footer-base { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; gap: 16px; padding-top: 24px; font-size: 13px; }
 .footer-base p { margin: 0; font-size: 13px; }
@@ -297,19 +298,27 @@ p a:hover, .note a:hover { text-decoration-color: currentColor; }
 .alert p { font-size: 15px; }
 .fine svg { display: inline; width: 14px; height: 14px; vertical-align: -2px; margin-right: 2px; }
 
-@media (max-width: 900px) {
+/* Side by side, the two hero buttons need about 400px; below 1180px the
+   copy column is narrower than that, so the copy goes under the title. */
+@media (max-width: 1180px) {
   .hero-copy { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+}
+
+@media (max-width: 900px) {
   .notes, .steps { grid-template-columns: minmax(0, 1fr); gap: 20px; }
   .asks, .safeguards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .split { grid-template-columns: minmax(0, 1fr); }
   .split > .section-head { position: static; }
-  .site-nav a:not(.nav-cta) { display: none; }
   .steps > li { display: grid; grid-template-columns: 40px minmax(0, 1fr); align-items: baseline; }
   .steps > li::before { margin: 0; font-size: 24px; }
 }
 
 @media (max-width: 640px) {
   .wrap { width: calc(100% - 32px); }
+  .site-nav a:not(.nav-cta) { display: none; }
+  .footer-links { display: grid; grid-template-columns: auto auto; justify-content: start; gap: 40px; }
+  .consent-actions { flex-direction: column; }
+  .consent-actions .btn { width: 100%; }
   .site-header { height: 64px; }
   .hero { padding: 16px 0 72px; }
   .seating { --gap: 3px; --aisle: 10px; --size: calc((100vw - 120px) / 18); }
