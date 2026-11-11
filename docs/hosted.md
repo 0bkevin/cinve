@@ -28,12 +28,26 @@ operador. El flujo normal es:
 2. Si la conexión MCP aún no está autorizada, el cliente descubre el servidor
    OAuth, se identifica (con un documento de metadatos o mediante registro
    dinámico) y abre la aprobación en el navegador.
-3. El cliente intercambia el código de un solo uso mediante PKCE y repite la
-   llamada.
-4. Cinve devuelve un enlace privado, válido durante diez minutos, para conectar
-   Cinex o Cines Unidos.
-5. El usuario introduce sus credenciales únicamente en ese formulario.
-6. El asistente consulta `get_auth_status` y repite la operación original.
+3. En esa misma página el usuario elige el cine, escribe su correo y su
+   contraseña y pulsa **Conectar**: Cinve inicia sesión en el cine y autoriza
+   al asistente en un solo paso. También puede continuar sin conectar un cine.
+4. El cliente intercambia el código de un solo uso mediante PKCE y repite la
+   llamada. `connect_account` devuelve `connected=true` y el asistente repite
+   la consulta original.
+
+Si la cuenta no se conectó durante la aprobación, o su sesión del cine caducó
+(Cinex, a las 24 horas), `connect_account` devuelve `connected=false` y un
+enlace privado, válido durante diez minutos. El usuario introduce sus
+credenciales únicamente en ese formulario y el asistente repite la consulta.
+
+Solo se ejecuta un inicio de sesión a la vez por solicitud y hay un máximo de
+cinco intentos por solicitud, además de un cupo por dirección IP. Un doble
+envío espera al primero y devuelve al navegador al asistente con un código
+nuevo; el código anterior deja de ser válido.
+
+La sesión del cine conectada durante la aprobación pertenece a la conexión
+nueva solo cuando el cliente canjea el código. Si nunca lo canjea, la limpieza
+diaria elimina esa sesión. Reutilizar el código revoca la conexión y su sesión.
 
 Cada autorización crea una conexión vacía e independiente. No hereda sesiones
 de otros clientes ni del navegador. Autorizar otra aplicación, perder sus tokens

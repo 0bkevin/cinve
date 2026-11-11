@@ -84,9 +84,10 @@ Server name: cinve
 
 Public queries do not require login. For private prices or Cinex concessions,
 call connect_account with the provider. This triggers the client's OAuth browser
-approval when needed, then returns a private cinema-connection link. Show that
-link to the user. After they connect, check get_auth_status and retry the original
-query. Never search the web for a Cinve login page or ask for passwords or tokens
+approval when needed, where the user can sign in to the cinema in the same step.
+If connect_account returns connected=true, retry the original query. Otherwise
+it returns a private cinema-connection link: show that link to the user, and
+after they connect, check get_auth_status and retry the original query. Never search the web for a Cinve login page or ask for passwords or tokens
 in chat. No operator-issued token or local cinema-password login is needed for this hosted flow.
 
 The client must support remote MCP OAuth with PKCE and either a Client ID

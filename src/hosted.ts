@@ -93,7 +93,10 @@ export async function createHostedApp(options: {
       (publicUrl.protocol !== 'https:' && !(options.allowLocal && publicUrl.protocol === 'http:' && publicUrl.hostname === '127.0.0.1'))) throw new Error('CINEV_PUBLIC_URL debe ser un origen HTTPS.');
   if (options.key.length !== 32) throw new Error('Clave de cifrado no válida.');
   let origin = publicUrl.origin;
-  const oauth = new HostedOAuth(options.pool, () => origin, new ClientMetadataCache(options.clientMetadata));
+  const oauth = new HostedOAuth(options.pool, () => origin, new ClientMetadataCache(options.clientMetadata), {
+    authenticate: options.authenticate ?? login,
+    save: (client, user, session) => new EncryptedSessionStore(options.pool, user, options.key).saveInTransaction(client, session),
+  });
   const users = new HostedUsers(options.pool);
   const links = new ConnectionLinks(options.pool);
   // Public cache and in-flight deduplication live for this hosted app. The

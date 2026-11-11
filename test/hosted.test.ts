@@ -562,6 +562,85 @@ test('the cinema-login link names the assistant app the account will be attached
   assert.match(script, /const app = data\.app;/); assert.doesNotMatch(script, /innerHTML/);
 });
 
+async function consentForm(origin: string, client_id: string) {
+  const request = await authorizationRequest(origin, client_id);
+  const page = await fetch(request.url), html = await page.text();
+  const fields = { request_id: html.match(/name="request_id" value="([^"]+)"/)![1], csrf: html.match(/name="csrf" value="([^"]+)"/)![1] };
+  const cookie = page.headers.get('set-cookie')!.split(';')[0];
+  const submit = (data: Record<string, string>, headers: Record<string, string> = { Origin: origin, Cookie: cookie }) =>
+    fetch(origin + '/oauth/authorize', { method: 'POST', redirect: 'manual', headers, body: new URLSearchParams({ ...fields, ...data }) });
+  const exchange = async (location: string) => {
+    const code = new URL(location).searchParams.get('code')!;
+    const response = await form(origin, '/oauth/token', { grant_type: 'authorization_code', client_id, code, code_verifier: request.verifier,
+      resource: origin + '/mcp', redirect_uri: request.params.redirect_uri });
+    return { code, response };
+  };
+  return { html, submit, exchange };
+}
+const cinema = { decision: 'connect', provider: 'cinesunidos', username: 'person@example.test' };
+
+test('the consent page signs in to the cinema in the same step, so the assistant is ready on return', async t => {
+  let calls = 0;
+  const f = await fixture(t, async (...args) => { calls++; return successfulLogin(...args); });
+  const consent = await consentForm(f.origin, await register(f.origin));
+  assert.match(consent.html, /name="username"[^>]*autocomplete="username"/); assert.match(consent.html, /value="connect">Conectar</);
+  // A wrong password re-renders the page with the error and the email, never the password, and issues no code.
+  const failed = await consent.submit({ ...cinema, password: 'WRONG_PASSWORD' });
+  assert.equal(failed.status, 401); assert.equal(failed.headers.get('location'), null);
+  const retry = await failed.text();
+  assert.match(retry, /No se pudo iniciar sesión/); assert.match(retry, /value="person@example\.test"/);
+  assert.match(retry, /<option value="cinesunidos" selected>/); assert.doesNotMatch(retry, /WRONG_PASSWORD/);
+  assert.equal((await f.pool.query('SELECT 1 FROM cinev_sessions')).rowCount, 0);
+  const done = await consent.submit({ ...cinema, password: 'SYNTHETIC_PASSWORD' });
+  assert.equal(done.status, 303); assert.equal(calls, 2);
+  const { response } = await consent.exchange(done.headers.get('location')!);
+  const tokens = await response.json() as { access_token: string };
+  const assistant = await f.client(tokens.access_token);
+  const status = (await assistant.callTool({ name: 'get_auth_status', arguments: {} })).structuredContent as { providers: Array<{ provider: string; status: string }> };
+  assert.equal(status.providers.find(p => p.provider === 'cinesunidos')!.status, 'configured');
+  // The client's automatic retry of connect_account needs no second page.
+  assert.deepEqual((await assistant.callTool({ name: 'connect_account', arguments: { provider: 'cinesunidos' } })).structuredContent, { connected: true });
+  assert.ok(!/SYNTHETIC|person@example/.test(JSON.stringify((await f.pool.query('SELECT ciphertext FROM cinev_sessions')).rows)));
+});
+
+test('consent sign-in is refused without CSRF, rate-limited, and skippable', async t => {
+  let calls = 0;
+  const f = await fixture(t, async (...args) => { calls++; return successfulLogin(...args); });
+  const consent = await consentForm(f.origin, await register(f.origin));
+  for (const headers of [{ Origin: f.origin }, { Origin: 'https://evil.example', Cookie: 'x' }] as Record<string, string>[]) {
+    assert.equal((await consent.submit({ ...cinema, password: 'SYNTHETIC_PASSWORD' }, headers)).status, 403);
+  }
+  assert.equal((await consent.submit({ ...cinema, provider: 'cinepic', password: 'x' })).status, 400);
+  assert.equal(calls, 0, 'nothing reaches the cinema before CSRF and input checks pass');
+  for (let i = 0; i < 5; i++) assert.equal((await consent.submit({ ...cinema, password: 'WRONG' })).status, 401);
+  const limited = await consent.submit({ ...cinema, password: 'SYNTHETIC_PASSWORD' });
+  assert.equal(limited.status, 429); assert.equal(calls, 5); assert.match(await limited.text(), /Demasiados intentos/);
+  // Skipping the cinema still authorizes the assistant, with no account attached.
+  const skipped = await consent.submit({ decision: 'approve' });
+  assert.equal(skipped.status, 303);
+  const { response } = await consent.exchange(skipped.headers.get('location')!);
+  assert.equal(response.status, 200);
+  assert.equal((await f.pool.query('SELECT 1 FROM cinev_sessions')).rowCount, 0);
+});
+
+test('a cinema connected on consent is dropped if the code is never exchanged, and revoked on code replay', async t => {
+  const f = await fixture(t, successfulLogin);
+  const abandoned = await consentForm(f.origin, await register(f.origin));
+  assert.equal((await abandoned.submit({ ...cinema, password: 'SYNTHETIC_PASSWORD' })).status, 303);
+  assert.equal((await f.pool.query('SELECT 1 FROM cinev_sessions')).rowCount, 1);
+  await f.pool.query("UPDATE cinev_oauth_requests SET expires_at=now()-interval '1 second'");
+  await f.links.cleanup();
+  assert.equal((await f.pool.query('SELECT 1 FROM cinev_sessions')).rowCount, 0);
+  const users = (await f.pool.query('SELECT count(*)::int AS n FROM cinev_clients')).rows[0].n;
+  assert.equal(users, 2, 'only the two operator-issued fixture users remain');
+  const replayed = await consentForm(f.origin, await register(f.origin));
+  const done = await replayed.submit({ ...cinema, password: 'SYNTHETIC_PASSWORD' });
+  const location = done.headers.get('location')!;
+  assert.equal((await replayed.exchange(location)).response.status, 200);
+  assert.equal((await replayed.exchange(location)).response.status, 400);
+  assert.equal((await f.pool.query('SELECT 1 FROM cinev_sessions')).rowCount, 0, 'replay revokes the connection and its session');
+});
+
 test('a session the cinema rejects early is dropped, so connect_account offers a new link instead of looping', async t => {
   let upstream = 200;
   const f = await fixture(t, successfulLogin, async () => new Response(upstream === 200 ? '["Caracas"]' : 'denied', { status: upstream }));
@@ -575,6 +654,81 @@ test('a session the cinema rejects early is dropped, so connect_account offers a
   assert.equal((prices.structuredContent as { status: string }).status, 'auth_required');
   const again = (await alice.callTool({ name: 'connect_account', arguments: { provider: 'cinesunidos' } })).structuredContent as { connected: boolean; url?: string };
   assert.equal(again.connected, false); assert.ok(again.url);
+});
+
+test('discarding a rejected session never removes one saved by a reconnection meanwhile', async t => {
+  const f = await fixture(t);
+  const session = (token: string) => ({ version: 1 as const, provider: 'cinesunidos' as const, expires_at: Date.now() + 60000, access_token: token });
+  await f.storeFor(f.alice.id).save(session('OLD'));
+  const inFlight = f.storeFor(f.alice.id);
+  assert.equal((await inFlight.read('cinesunidos'))!.access_token, 'OLD');
+  await f.storeFor(f.alice.id).save(session('NEW'));
+  await inFlight.discardRejected('cinesunidos');
+  assert.equal((await f.storeFor(f.alice.id).read('cinesunidos'))!.access_token, 'NEW');
+  await inFlight.read('cinesunidos'); await inFlight.discardRejected('cinesunidos');
+  assert.equal(await f.storeFor(f.alice.id).read('cinesunidos'), undefined);
+});
+
+test('a double submit signs in once and still sends the browser back to the assistant', async t => {
+  let calls = 0;
+  const slowLogin: typeof login = async (...args) => { calls++; await new Promise(r => setTimeout(r, 400)); return successfulLogin(...args); };
+  const f = await fixture(t, slowLogin);
+  const consent = await consentForm(f.origin, await register(f.origin));
+  const [first, second] = await Promise.all([1, 2].map(() => consent.submit({ ...cinema, password: 'SYNTHETIC_PASSWORD' })));
+  assert.deepEqual([first.status, second.status], [303, 303]);
+  assert.equal(calls, 1, 'the second submit waits for the first sign-in instead of running another');
+  assert.equal((await f.pool.query('SELECT 1 FROM cinev_sessions')).rowCount, 1);
+  // Whichever response the browser kept, exactly one code is current and it carries the connection.
+  const results = [];
+  for (const r of [first, second]) results.push((await consent.exchange(r.headers.get('location')!)).response.status);
+  assert.deepEqual(results.sort(), [200, 400]);
+  assert.equal((await f.pool.query('SELECT 1 FROM cinev_oauth_grants g JOIN cinev_sessions s ON s.user_id=g.user_id')).rowCount, 1);
+  assert.equal((await f.pool.query('SELECT count(*)::int AS n FROM cinev_clients')).rows[0].n, 3, 'no orphaned connection');
+});
+
+test('waiting duplicate submits do not use up the per-address sign-in budget', async t => {
+  let calls = 0;
+  const slowLogin: typeof login = async (...args) => { calls++; await new Promise(r => setTimeout(r, 300)); return successfulLogin(...args); };
+  const f = await fixture(t, slowLogin);
+  const consent = await consentForm(f.origin, await register(f.origin));
+  const many = await Promise.all(Array.from({ length: 25 }, () => consent.submit({ ...cinema, password: 'SYNTHETIC_PASSWORD' })));
+  assert.ok(many.every(r => r.status === 303), `25 duplicate submits: ${many.map(r => r.status).join(',')}`);
+  assert.equal(calls, 1);
+});
+
+test('approving while a cinema sign-in is running wins cleanly, and the attempt cap spans the whole request', async t => {
+  const slowLogin: typeof login = async (...args) => { await new Promise(r => setTimeout(r, 300)); return successfulLogin(...args); };
+  const f = await fixture(t, slowLogin);
+  const consent = await consentForm(f.origin, await register(f.origin));
+  const connecting = consent.submit({ ...cinema, password: 'SYNTHETIC_PASSWORD' });
+  await new Promise(r => setTimeout(r, 50));
+  const approved = await consent.submit({ decision: 'approve' });
+  assert.equal(approved.status, 303);
+  assert.equal((await connecting).status, 400, 'the slower sign-in is discarded, not attached');
+  assert.equal((await f.pool.query('SELECT 1 FROM cinev_sessions')).rowCount, 0);
+  assert.equal((await consent.exchange(approved.headers.get('location')!)).response.status, 200);
+  // Five failed sign-ins per request in total, even when the per-minute budgets reset.
+  const capped = await consentForm(f.origin, await register(f.origin));
+  for (let i = 0; i < 5; i++) {
+    assert.equal((await capped.submit({ ...cinema, password: 'WRONG' })).status, 401);
+    await f.pool.query('DELETE FROM cinev_budgets');
+  }
+  assert.equal((await capped.submit({ ...cinema, password: 'SYNTHETIC_PASSWORD' })).status, 429);
+});
+
+test('cleanup keeps exchanged connections and apps with a pending request', async t => {
+  const f = await fixture(t, successfulLogin);
+  const consent = await consentForm(f.origin, await register(f.origin));
+  const done = await consent.submit({ ...cinema, password: 'SYNTHETIC_PASSWORD' });
+  assert.equal((await consent.exchange(done.headers.get('location')!)).response.status, 200);
+  const pending = await consentForm(f.origin, await register(f.origin));
+  await f.pool.query("UPDATE cinev_oauth_apps SET created_at=now()-interval '200 days', last_used_at=NULL");
+  await f.pool.query("UPDATE cinev_oauth_requests SET expires_at=now()-interval '1 second' WHERE consumed_at IS NOT NULL");
+  await f.links.cleanup();
+  assert.equal((await f.pool.query('SELECT 1 FROM cinev_sessions')).rowCount, 1, 'an exchanged connection survives its request');
+  const ok = await pending.submit({ decision: 'approve' });
+  assert.equal(ok.status, 303, 'an old app with a pending request is not deleted under it');
+  assert.equal((await pending.exchange(ok.headers.get('location')!)).response.status, 200);
 });
 
 test('only a refusal of the session own credentials marks it rejected', async () => {
@@ -599,17 +753,23 @@ test('only a refusal of the session own credentials marks it rejected', async ()
   assert.ok(cinex.rejectedSessions.has('cinex'), 'Cinex reports an ended session with 200 and a body other than "on"');
 });
 
-test('discarding a rejected session never removes one saved by a reconnection meanwhile', async t => {
-  const f = await fixture(t);
-  const session = (token: string) => ({ version: 1 as const, provider: 'cinesunidos' as const, expires_at: Date.now() + 60000, access_token: token });
-  await f.storeFor(f.alice.id).save(session('OLD'));
-  const inFlight = f.storeFor(f.alice.id);
-  assert.equal((await inFlight.read('cinesunidos'))!.access_token, 'OLD');
-  await f.storeFor(f.alice.id).save(session('NEW'));
-  await inFlight.discardRejected('cinesunidos');
-  assert.equal((await f.storeFor(f.alice.id).read('cinesunidos'))!.access_token, 'NEW');
-  await inFlight.read('cinesunidos'); await inFlight.discardRejected('cinesunidos');
-  assert.equal(await f.storeFor(f.alice.id).read('cinesunidos'), undefined);
+test('cleanup never orphans a connection whose request row is locked while it runs', async t => {
+  const f = await fixture(t, successfulLogin);
+  const consent = await consentForm(f.origin, await register(f.origin));
+  assert.equal((await consent.submit({ ...cinema, password: 'SYNTHETIC_PASSWORD' })).status, 303);
+  await f.pool.query("UPDATE cinev_oauth_requests SET expires_at=now()-interval '1 second'");
+  const holder = await f.pool.connect();
+  try {
+    await holder.query('BEGIN');
+    await holder.query('SELECT 1 FROM cinev_oauth_requests FOR UPDATE'); // e.g. a late /oauth/token retry
+    await f.links.cleanup(); // must not block, and must not drop the request while keeping its connection
+    await holder.query('ROLLBACK');
+  } finally { holder.release(); }
+  assert.equal((await f.pool.query('SELECT 1 FROM cinev_oauth_requests')).rowCount, 1, 'kept for the next cleanup');
+  await f.links.cleanup();
+  assert.equal((await f.pool.query('SELECT 1 FROM cinev_sessions')).rowCount, 0);
+  assert.equal((await f.pool.query('SELECT 1 FROM cinev_oauth_requests')).rowCount, 0);
+  assert.equal((await f.pool.query('SELECT count(*)::int AS n FROM cinev_clients')).rows[0].n, 2);
 });
 
 test('every HTML page allows only its own stylesheet, never inline styles', async t => {
@@ -751,7 +911,7 @@ test('clients can identify with a Client ID Metadata Document instead of registe
   assert.equal(metadata.client_id_metadata_document_supported, true);
   const request = await authorizationRequest(f.origin, metadataUrl);
   const page = await (await fetch(request.url)).text();
-  assert.match(page, /Metadata assistant/); assert.match(page, /documento publicado en <strong>assistant\.example<\/strong>/);
+  assert.match(page, /Metadata assistant/); assert.match(page, /publicada por <strong>assistant\.example<\/strong>\. Continúa solo si reconoces ese sitio/);
   assert.doesNotMatch(page, /no puede verificar/, 'a redirect on the publishing site is recognized');
   const callback = await approve(f.origin, request.url);
   const exchange = { grant_type: 'authorization_code', client_id: metadataUrl, code: callback.searchParams.get('code')!,

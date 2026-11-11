@@ -76,7 +76,15 @@ export class ConnectionLinks {
     return rows[0].count <= limit;
   }
   async cleanup() {
-    await this.pool.query('DELETE FROM cinev_oauth_requests WHERE expires_at<=now()');
+    // A cinema connected on the consent page whose code was never exchanged
+    // belongs to nobody: drop its connection (and session) with the request.
+    // Request rows are locked first: an exchange holding one is skipped, and
+    // one that committed is re-checked and kept (consumed_at is now set).
+    await this.pool.query(`DELETE FROM cinev_clients WHERE id IN (SELECT user_id FROM cinev_oauth_requests
+      WHERE user_id IS NOT NULL AND consumed_at IS NULL AND expires_at<=now() FOR UPDATE SKIP LOCKED)`);
+    // A request still holding a connection was skipped above (locked); keep it
+    // so the next cleanup removes both, instead of orphaning the connection.
+    await this.pool.query('DELETE FROM cinev_oauth_requests WHERE expires_at<=now() AND (user_id IS NULL OR consumed_at IS NOT NULL)');
     // Keep consumed refresh tokens until the grant expires to detect replay.
     await this.pool.query("DELETE FROM cinev_oauth_tokens WHERE kind='access' AND expires_at<=now()");
     await this.pool.query(`DELETE FROM cinev_clients c USING cinev_oauth_grants g
@@ -89,7 +97,8 @@ export class ConnectionLinks {
     // registers again; its grants would have expired after 30 days anyway.
     // Runs last and tolerates a deployment that precedes migration 003.
     await this.pool.query(`DELETE FROM cinev_oauth_apps a WHERE COALESCE(a.last_used_at, a.created_at) <= now()-interval '90 days'
-      AND NOT EXISTS (SELECT 1 FROM cinev_oauth_grants g WHERE g.app_id=a.id)`).catch((error: { code?: string }) => {
+      AND NOT EXISTS (SELECT 1 FROM cinev_oauth_grants g WHERE g.app_id=a.id)
+      AND NOT EXISTS (SELECT 1 FROM cinev_oauth_requests r WHERE r.app_id=a.id)`).catch((error: { code?: string }) => {
       if (error?.code !== '42703') throw error; // undefined_column: migration 003 pending.
     });
   }
