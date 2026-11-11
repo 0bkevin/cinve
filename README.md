@@ -12,7 +12,7 @@ asientos publicada por distintos cines venezolanos.
 
 > **Cinve es un proyecto independiente, gratuito y sin fines de lucro.** No está
 > afiliado, asociado, patrocinado ni respaldado por Cinex, Cines Unidos,
-> Cinepic, Supercines ni por ninguna otra cadena de cines. Sus responsables no
+> Cinepic, Supercines, Gran Cine ni por ninguna otra cadena de cines. Sus responsables no
 > reciben pagos, comisiones, contraprestaciones ni beneficios económicos de los
 > cines o proveedores consultados.
 
@@ -25,7 +25,8 @@ cambiar antes de completar una compra.
 - Ciudades, sedes, películas y funciones.
 - Precios de entradas y caramelería cuando el proveedor los publica.
 - Mapas de asientos de Cinex, Cines Unidos y Cinepic.
-- Datos de Cinepic, Cines Unidos, Cinex y Supercines.
+- Datos de Cinepic, Cines Unidos, Cinex, Supercines y Gran Cine (cine de autor,
+  incluidas las salas del Paseo Las Mercedes).
 
 Algunas consultas de Cinex y Cines Unidos requieren que conectes tu cuenta del
 cine. Las credenciales se introducen únicamente en el formulario privado; no se
