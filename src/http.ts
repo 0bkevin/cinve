@@ -110,9 +110,19 @@ export class HttpClient {
   private queues = new Map<string, Waiting[]>();
   private challenged = new Map<string, { until: number; error: DataError }>();
   constructor(private request: typeof fetch = fetch, private timeout = 15000, readonly sessions = new SessionStore()) {}
+  /** Providers whose session a request made with its credentials was refused on. */
+  readonly rejectedSessions = new Set<AuthProviderId>();
   async getAuthenticated(provider: AuthProviderId, url: string): Promise<Page> {
     assertPrivateRead(provider, url);
-    return this.read(url, new URL(url).origin, target => this.sessions.headers(provider, target));
+    try {
+      const page = await this.read(url, new URL(url).origin, target => this.sessions.headers(provider, target));
+      // Cinex answers its session probe with 200 and a body other than "on".
+      if (new URL(url).pathname === '/checklogin.php' && page.body.trim() !== 'on') this.rejectedSessions.add(provider);
+      return page;
+    } catch (error) {
+      if (error instanceof DataError && error.status === 'auth_required') this.rejectedSessions.add(provider);
+      throw error;
+    }
   }
   async get(url: string, ttl = 120000, refresh = false): Promise<Page> {
     const parsed = new URL(url);

@@ -282,7 +282,7 @@ test('server instructions fit client limits in every mode and lead with the core
   const { Client } = await import('@modelcontextprotocol/client');
   const { InMemoryTransport } = await import('@modelcontextprotocol/server');
   const { createServer } = await import('../src/server.js');
-  const accounts = { connect: async () => ({ url: 'https://cinve.example/connect', expires_at: '' }), disconnect: async () => {} };
+  const accounts = { connect: async () => ({ connected: false as const, url: 'https://cinve.example/connect', expires_at: '' }), disconnect: async () => {} };
   for (const [mode, server] of [['local', createServer()], ['hosted', createServer(undefined, accounts)], ['public hosted', createServer(undefined, undefined, true)]] as const) {
     const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
     await server.connect(serverTransport);

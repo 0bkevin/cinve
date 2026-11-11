@@ -1,4 +1,4 @@
-import { authorizationPage, authorizationErrorPage } from './public-web.js';
+import { authorizationPage, authorizationErrorPage, styleSource } from './public-web.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Pool, PoolClient } from 'pg';
@@ -6,6 +6,15 @@ import * as z from 'zod';
 import { digest, lockUser, transaction } from './hosted-store.js';
 import { ConnectionLinks } from './hosted-links.js';
 import { ClientMetadataCache, isClientIdUrl, redirectUri } from './client-metadata.js';
+import { AuthProvider, SessionStore } from './auth.js';
+import type { AuthProviderId, AuthSession, login } from './auth.js';
+
+/** Signs in to a cinema during approval and stores the session for the new connection. */
+export type ConsentAccounts = {
+  authenticate: typeof login;
+  save(client: PoolClient, user: string, session: AuthSession): Promise<void>;
+};
+type ConsentForm = { error?: string; provider?: AuthProviderId; username?: string };
 
 const scope = 'cinve:accounts';
 const secret = () => randomBytes(32).toString('base64url');
@@ -44,11 +53,40 @@ async function revoke(client: PoolClient, user: string) {
   await client.query('DELETE FROM cinev_sessions WHERE user_id=$1', [user]);
 }
 
+/**
+ * A destination Cinve can vouch for: a loopback redirect keeps the code on the
+ * user's own machine, and a metadata-document client's redirect on the site
+ * that published the document is controlled by that site. Anything else (any
+ * registered client with a web redirect) gets a visible warning on consent.
+ */
+export function recognizedDestination(redirect: string, publisher?: string) {
+  const host = new URL(redirect).hostname.toLowerCase();
+  if (['localhost', '127.0.0.1', '[::1]'].includes(host)) return true;
+  if (!publisher) return false;
+  const site = publisher.toLowerCase();
+  return host === site || host.endsWith('.' + site);
+}
+
 /** Self-service, isolated connections. Approval creates a NEW empty principal;
  * it never grants access to an existing cinema session or browser identity. */
 export class HostedOAuth {
   private budgets: ConnectionLinks;
-  constructor(readonly pool: Pool, readonly getOrigin: () => string, private readonly clientMetadata = new ClientMetadataCache()) { this.budgets = new ConnectionLinks(pool); }
+  constructor(readonly pool: Pool, readonly getOrigin: () => string, private readonly clientMetadata = new ClientMetadataCache(),
+    private readonly accounts?: ConsentAccounts) { this.budgets = new ConnectionLinks(pool); }
+  /** The consent page, which can also sign in to a cinema; re-rendered with an error after a failed sign-in. */
+  private consent(res: ServerResponse, status: number, app: { id: string; name: string }, redirect: string, id: string, csrf: string, form: ConsentForm = {}) {
+    // A native form POST inherits this policy. no-referrer makes browsers
+    // send Origin: null, which our same-origin CSRF check correctly rejects.
+    // Keep referrers private across origins, including the assistant callback.
+    res.setHeader('Referrer-Policy', 'same-origin');
+    // Chromium also checks form-action against the POST's redirect target.
+    // Only allow the already-validated callback origin, never arbitrary sites.
+    res.setHeader('Content-Security-Policy', `default-src 'none'; style-src ${styleSource}; font-src 'self'; img-src 'self'; form-action 'self' ${new URL(redirect).origin}; frame-ancestors 'none'; base-uri 'none'`);
+    res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' });
+    const publisher = isClientIdUrl(app.id) ? new URL(app.id).hostname : undefined;
+    res.end(authorizationPage({ app: app.name, destination: new URL(redirect).origin, id, csrf, publisher,
+      recognized: recognizedDestination(redirect, publisher), cinemaLogin: !!this.accounts, ...form }));
+  }
   /**
    * A client_id that is an HTTPS URL is a Client ID Metadata Document: fetch
    * and validate it, then keep an app row so grants and tokens reference it
@@ -62,6 +100,21 @@ export class HostedOAuth {
       ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, redirect_uris=EXCLUDED.redirect_uris RETURNING *`,
       [clientId, metadata.client_name, JSON.stringify(metadata.redirect_uris)]);
     return rows[0];
+  }
+  /** The assistant app an account connection belongs to; undefined for operator-issued access. */
+  async appFor(user: string): Promise<{ name: string; publisher: string | null; verified: boolean } | undefined> {
+    const { rows } = await this.pool.query(`SELECT a.id,a.name,a.redirect_uris FROM cinev_oauth_grants g JOIN cinev_oauth_apps a ON a.id=g.app_id
+      WHERE g.user_id=$1`, [user]);
+    if (!rows[0]) return undefined;
+    const publisher = isClientIdUrl(rows[0].id) ? new URL(rows[0].id).hostname : undefined;
+    // A link can be forwarded to someone else, so loopback earns no trust here:
+    // anyone can register a local app on their own machine. Only a client
+    // identified by its metadata document, redirecting to that same site, is.
+    const verified = !!publisher && (rows[0].redirect_uris as string[]).every(uri => {
+      const host = new URL(uri).hostname.toLowerCase();
+      return host === publisher || host.endsWith('.' + publisher);
+    });
+    return { name: rows[0].name, publisher: publisher ?? null, verified };
   }
   get resource() { return this.getOrigin() + '/mcp'; }
   challenge(invalid = false) {
@@ -95,16 +148,17 @@ export class HostedOAuth {
       const code = required(p.get('code')), verifier = required(p.get('code_verifier'));
       if (!/^[A-Za-z0-9._~-]{43,128}$/.test(verifier)) throw new OAuthError('invalid_grant');
       const result = await transaction(this.pool, async client => {
-        const { rows } = await client.query('SELECT * FROM cinev_oauth_requests WHERE code_hash=$1 FOR UPDATE', [digest(code)]);
+        // Expiry is judged on the database clock, the same one cleanup uses.
+        const { rows } = await client.query('SELECT *, expires_at>clock_timestamp() AS live FROM cinev_oauth_requests WHERE code_hash=$1 FOR UPDATE', [digest(code)]);
         const r = rows[0];
         if (!r || r.app_id !== app || r.resource !== this.resource || r.redirect_uri !== p.get('redirect_uri') ||
-            r.challenge !== createHash('sha256').update(verifier).digest('base64url') || r.expires_at.getTime() <= Date.now()) return undefined;
+            r.challenge !== createHash('sha256').update(verifier).digest('base64url') || !r.live) return undefined;
         if (r.consumed_at) {
           if (r.user_id) { await lockUser(client, r.user_id); await revoke(client, r.user_id); }
           return undefined;
         }
-        const user = randomUUID();
-        await client.query('INSERT INTO cinev_clients(id,token_hash) VALUES($1,$2)', [user, digest(secret())]);
+        const user: string = r.user_id ?? randomUUID();
+        if (!r.user_id) await client.query('INSERT INTO cinev_clients(id,token_hash) VALUES($1,$2)', [user, digest(secret())]);
         await client.query(`INSERT INTO cinev_oauth_grants(user_id,app_id,resource,expires_at) VALUES($1,$2,$3,now()+interval '30 days')`, [user, app, this.resource]);
         await client.query('UPDATE cinev_oauth_requests SET consumed_at=now(),user_id=$2 WHERE id=$1', [r.id, user]);
         return this.tokens(client, user);
@@ -193,43 +247,103 @@ export class HostedOAuth {
         await this.pool.query(`INSERT INTO cinev_oauth_requests(id,app_id,redirect_uri,resource,state,challenge,csrf_hash,expires_at)
           VALUES($1,$2,$3,$4,$5,$6,$7,now()+interval '10 minutes')`, [id, app.id, redirect, this.resource, p.get('state'), p.get('code_challenge'), digest(csrf)]);
         res.setHeader('Set-Cookie', `cinve_approval_${id}=${csrf}; HttpOnly; SameSite=Lax; Path=/oauth/authorize; Max-Age=600${origin.startsWith('https:') ? '; Secure' : ''}`);
-        // A native form POST inherits this policy. no-referrer makes browsers
-        // send Origin: null, which our same-origin CSRF check correctly rejects.
-        // Keep referrers private across origins, including the assistant callback.
-        res.setHeader('Referrer-Policy', 'same-origin');
-        // Chromium also checks form-action against the POST's redirect target.
-        // Only allow the already-validated callback origin, never arbitrary sites.
-        res.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; img-src 'self'; form-action 'self' ${new URL(redirect).origin}; frame-ancestors 'none'; base-uri 'none'`);
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(authorizationPage(app.name, new URL(redirect).origin, id, csrf, isClientIdUrl(clientId) ? new URL(clientId).hostname : undefined));
+        this.consent(res, 200, app, redirect, id, csrf);
         return true;
       }
       if (path === '/oauth/authorize' && req.method === 'POST') {
         if (req.headers.origin !== origin) throw new OAuthError('invalid_request', 403);
         const p = await payload(req) as URLSearchParams;
-        const id = required(p.get('request_id')), csrf = required(p.get('csrf'));
-        if (!/^[a-f0-9]{32}$/.test(id) || !/^[A-Za-z0-9_-]{43}$/.test(csrf) || !['approve', 'deny'].includes(p.get('decision') ?? '')) throw new OAuthError('invalid_request');
+        const id = required(p.get('request_id')), csrf = required(p.get('csrf')), decision = p.get('decision') ?? '';
+        if (!/^[a-f0-9]{32}$/.test(id) || !/^[A-Za-z0-9_-]{43}$/.test(csrf) || !['connect', 'approve', 'deny'].includes(decision) ||
+            (decision === 'connect' && !this.accounts)) throw new OAuthError('invalid_request');
         const cookie = req.headers.cookie?.split(';').map(v => v.trim()).find(v => v.startsWith(`cinve_approval_${id}=`))?.split('=')[1];
         if (cookie !== csrf) throw new OAuthError('invalid_request', 403);
-        const destination = await transaction(this.pool, async client => {
-          const { rows } = await client.query('SELECT * FROM cinev_oauth_requests WHERE id=$1 FOR UPDATE', [id]);
-          const r = rows[0];
-          if (!r || r.csrf_hash !== digest(csrf) || r.expires_at.getTime() <= Date.now() || r.code_hash) throw new OAuthError('invalid_request');
-          const dest = new URL(r.redirect_uri);
-          if (p.get('decision') === 'deny') {
-            await client.query('DELETE FROM cinev_oauth_requests WHERE id=$1', [id]); dest.searchParams.set('error', 'access_denied');
-          } else {
-            const code = secret();
-            await client.query("UPDATE cinev_oauth_requests SET code_hash=$2,expires_at=now()+interval '5 minutes' WHERE id=$1", [id, digest(code)]);
-            dest.searchParams.set('code', code);
+        // Approving and connecting a cinema in one step. The upstream sign-in
+        // never runs inside a transaction; its session is committed together
+        // with the code below, or not at all.
+        let session: AuthSession | undefined, claimed = false;
+        const release = () => this.pool.query('UPDATE cinev_oauth_requests SET busy_until=NULL WHERE id=$1', [id]).catch(() => {});
+        try {
+          if (decision === 'connect') {
+            const info = (await this.pool.query(`SELECT r.app_id,r.redirect_uri,a.name AS app_name FROM cinev_oauth_requests r
+              JOIN cinev_oauth_apps a ON a.id=r.app_id WHERE r.id=$1 AND r.csrf_hash=$2`, [id, digest(csrf)])).rows[0];
+            if (!info) throw new OAuthError('invalid_request');
+            const provider = AuthProvider.safeParse(p.get('provider'));
+            const username = (p.get('username') ?? '').trim(), password = p.get('password') ?? '';
+            const again = (status: number, error: string) => {
+              this.consent(res, status, { id: info.app_id, name: info.app_name }, info.redirect_uri, id, csrf,
+                { error, provider: provider.success ? provider.data : undefined, username: username.slice(0, 320) });
+              return true;
+            };
+            if (!provider.success || !username || username.length > 320 || !password || password.length > 4096) return again(400, 'Revisa el correo y la contraseña.');
+            // One sign-in at a time per request. A second submit (a double
+            // click, or a resubmit while the first is still signing in) waits
+            // for the first: if it succeeds, this response delivers a fresh
+            // code below, because the browser shows only the last response.
+            // Time budget (Vercel stops a request at 90 s; a sign-in may take
+            // 60 s): a sign-in starts only within the first 20 s, and waiting
+            // for another one ends at 75 s. The claim outlives a crashed
+            // process by at most 90 s.
+            for (const started = Date.now(); ;) {
+              const { rows } = Date.now() - started > 20000 ? { rows: [] } : await this.pool.query(`UPDATE cinev_oauth_requests
+                SET busy_until=clock_timestamp()+interval '90 seconds', attempts=attempts+1
+                WHERE id=$1 AND csrf_hash=$2 AND code_hash IS NULL AND expires_at>clock_timestamp() AND attempts<5
+                AND (busy_until IS NULL OR busy_until<=clock_timestamp()) RETURNING id`, [id, digest(csrf)]);
+              if (rows.length) { claimed = true; break; }
+              const r = (await this.pool.query(`SELECT code_hash, attempts, busy_until>clock_timestamp() AS busy,
+                expires_at>clock_timestamp() AS live FROM cinev_oauth_requests WHERE id=$1`, [id])).rows[0];
+              if (!r || !r.live || r.code_hash) break; // The transaction below decides: re-issue or refuse.
+              if (!r.busy && r.attempts >= 5) return again(429, 'Demasiados intentos. Vuelve a tu asistente para empezar de nuevo.');
+              if (Date.now() - started > (r.busy ? 75000 : 20000)) return again(503, 'El cine está tardando en responder. Inténtalo de nuevo.');
+              await new Promise(resolve => setTimeout(resolve, 300));
+            }
+            if (claimed) {
+              // The per-address budget counts sign-ins, not duplicate submits that only wait.
+              if (!await this.budgets.budget(`oauth:login-ip:${ip}`, 20)) return again(429, 'Demasiados intentos. Espera un minuto y vuelve a intentarlo.');
+              const staged = new class extends SessionStore { override async save(value: AuthSession) { session = value; } }();
+              try { await this.accounts!.authenticate(provider.data, username, password, staged); }
+              catch { return again(401, 'No se pudo iniciar sesión. Revisa tus datos o comprueba en la web del cine si pide una verificación adicional.'); }
+              if (!session || session.provider !== provider.data) return again(502, 'El cine no entregó una sesión válida. Inténtalo de nuevo.');
+            }
           }
-          if (r.state !== null) dest.searchParams.set('state', r.state);
-          // RFC 9207 issuer identification prevents authorization-server mix-up.
-          dest.searchParams.set('iss', origin);
-          return dest.href;
-        });
-        res.setHeader('Set-Cookie', `cinve_approval_${id}=; HttpOnly; SameSite=Lax; Path=/oauth/authorize; Max-Age=0${origin.startsWith('https:') ? '; Secure' : ''}`);
-        res.writeHead(303, { Location: destination }); res.end(); return true;
+          const destination = await transaction(this.pool, async client => {
+            const { rows } = await client.query(`SELECT *, expires_at>clock_timestamp() AS live FROM cinev_oauth_requests WHERE id=$1 FOR UPDATE`, [id]);
+            const r = rows[0];
+            if (!r || r.csrf_hash !== digest(csrf) || !r.live || r.consumed_at) throw new OAuthError('invalid_request');
+            // A code already issued for this request and not yet exchanged
+            // (a double submit whose first response the browser dropped):
+            // replace it and send the browser on again. Its connection, if
+            // any, is kept; what a duplicate "Conectar" typed is not used.
+            const reissue = !!r.code_hash;
+            if (reissue && (decision === 'deny' || session)) throw new OAuthError('invalid_request');
+            const dest = new URL(r.redirect_uri);
+            if (decision === 'deny') {
+              await client.query('DELETE FROM cinev_oauth_requests WHERE id=$1', [id]); dest.searchParams.set('error', 'access_denied');
+            } else {
+              const code = secret();
+              // A connected cinema needs its owner now; the grant is still made
+              // only when the code is exchanged with the PKCE verifier.
+              let user: string | null = reissue ? r.user_id : null;
+              if (session) {
+                user = randomUUID();
+                await client.query('INSERT INTO cinev_clients(id,token_hash) VALUES($1,$2)', [user, digest(secret())]);
+                await this.accounts!.save(client, user, session);
+              }
+              // Only a sign-in touches busy_until, so approving keeps working
+              // on a deployment that has not run migration 004 yet.
+              await client.query(`UPDATE cinev_oauth_requests SET code_hash=$2,user_id=$3${claimed ? ',busy_until=NULL' : ''},
+                expires_at=${reissue ? 'expires_at' : "now()+interval '5 minutes'"} WHERE id=$1`, [id, digest(code), user]);
+              dest.searchParams.set('code', code);
+            }
+            if (r.state !== null) dest.searchParams.set('state', r.state);
+            // RFC 9207 issuer identification prevents authorization-server mix-up.
+            dest.searchParams.set('iss', origin);
+            return dest.href;
+          });
+          claimed = false;
+          res.setHeader('Set-Cookie', `cinve_approval_${id}=; HttpOnly; SameSite=Lax; Path=/oauth/authorize; Max-Age=0${origin.startsWith('https:') ? '; Secure' : ''}`);
+          res.writeHead(303, { Location: destination }); res.end(); return true;
+        } finally { if (claimed) await release(); }
       }
       if (path === '/oauth/token' && req.method === 'POST') {
         send(200, await this.exchange(await payload(req) as URLSearchParams)); return true;
