@@ -34,10 +34,25 @@ class AnonymousSessions extends SessionStore {
 }
 
 class HostedService extends CinemaService {
-  constructor(http: HttpClient, catalog: CinexCinemaCatalog) { super(http, catalog); }
+  constructor(private readonly client: HttpClient, catalog: CinexCinemaCatalog, private readonly store?: EncryptedSessionStore) { super(client, catalog); }
+  /**
+   * A cinema can end a session before its stored expiry; drop it so
+   * reconnecting is offered. Only when a request made with the session's own
+   * credentials was refused, never for an unrelated auth_required.
+   */
+  private async rejected(status: string, provider: string) {
+    if (status === 'auth_required' && this.store && (provider === 'cinex' || provider === 'cinesunidos') && this.client.rejectedSessions.has(provider))
+      await this.store.discardRejected(provider).catch(() => {});
+  }
   override async query(op: Operation, q: Query, call?: CallOptions) {
     const result = await super.query(op, q, call);
+    await this.rejected(result.status, q.provider);
     if (result.status === 'auth_required') result.warnings = ['Conecta tu cuenta con connect_account. Introduce tus credenciales solo en el enlace privado, nunca en el chat.'];
+    return result;
+  }
+  override async seats(q: Query, call?: CallOptions) {
+    const result = await super.seats(q, call);
+    await this.rejected(result.status, q.provider);
     return result;
   }
 }
@@ -155,12 +170,15 @@ export async function createHostedApp(options: {
           const refreshes = refreshCalls(parsed);
           if (refreshes && !await links.budget(`refresh:${clientKey}`, 10)) throw new HttpError(429, 'Demasiadas consultas con refresh=true. Repite sin refresh o inténtalo en un minuto.');
           const store = principal ? storeFor(principal.id) : new AnonymousSessions(origin);
-          const service = new HostedService(new HostedHttpClient(options.request ?? fetch, 15000, store, publicHttp), cinexCatalog);
+          const service = new HostedService(new HostedHttpClient(options.request ?? fetch, 15000, store, publicHttp), cinexCatalog,
+            store instanceof EncryptedSessionStore ? store : undefined);
           handler = createMcpHandler(() => createServer(service, principal ? {
             connect: async provider => {
+              // An account connected while authorizing (or earlier) needs no link.
+              if ((await store.status(provider)).status === 'configured') return { connected: true as const };
               if (!await links.budget(`link:${principal.id}`, 12)) throw new Error('Demasiados enlaces. Inténtalo en un minuto.');
               const link = await links.issue(principal.id, principal.tokenHash, provider);
-              return { url: `${origin}/connect#${link.token}`, expires_at: link.expires_at };
+              return { connected: false as const, url: `${origin}/connect#${link.token}`, expires_at: link.expires_at };
             },
             disconnect: async provider => { await store.remove(provider); },
           } : undefined, !principal, origin), { maxSubscriptions: 0, keepAliveMs: 0 });

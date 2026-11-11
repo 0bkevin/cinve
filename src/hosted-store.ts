@@ -51,6 +51,8 @@ export class HostedUsers {
   }
 }
 export class EncryptedSessionStore extends SessionStore {
+  // The exact stored value each provider's session was read from, in this request.
+  private readonly seen = new Map<AuthProviderId, string>();
   constructor(readonly pool: Pool, readonly user: string, private key: Buffer) {
     super();
     if (key.length !== 32) throw new Error('La clave de cifrado debe tener 32 bytes.');
@@ -66,6 +68,7 @@ export class EncryptedSessionStore extends SessionStore {
     const { rows } = await this.pool.query(`SELECT ciphertext FROM cinev_sessions s JOIN cinev_clients c ON c.id=s.user_id
       WHERE s.user_id=$1 AND provider=$2 AND c.revoked_at IS NULL`, [this.user, provider]);
     if (!rows.length) return undefined;
+    this.seen.set(provider, rows[0].ciphertext);
     try {
       const { v, iv, tag, data } = JSON.parse(rows[0].ciphertext);
       if (v !== 1 || ![iv, tag, data].every(s => typeof s === 'string')) throw new Error();
@@ -86,6 +89,17 @@ export class EncryptedSessionStore extends SessionStore {
       if (!await lockUser(client, this.user)) throw new Error('Acceso revocado.');
       await this.saveInTransaction(client, value);
     });
+  }
+  /**
+   * The cinema rejected the session this request read (it expired upstream
+   * before its stored expiry). Forget exactly that value, so connect_account
+   * offers a new link instead of reporting it connected; a session saved
+   * meanwhile by a reconnection, and any pending link, are kept.
+   */
+  async discardRejected(provider: AuthProviderId) {
+    const value = this.seen.get(provider);
+    if (!value) return;
+    await this.pool.query('DELETE FROM cinev_sessions WHERE user_id=$1 AND provider=$2 AND ciphertext=$3', [this.user, provider, value]);
   }
   override async remove(provider: AuthProviderId) {
     await transaction(this.pool, async client => {

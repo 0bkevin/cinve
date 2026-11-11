@@ -63,6 +63,7 @@ const successfulLogin: typeof login = async (provider, username, password, store
 };
 async function link(client: Client) {
   const response = await client.callTool({ name: 'connect_account', arguments: { provider: 'cinesunidos' } });
+  assert.equal((response.structuredContent as { connected: boolean }).connected, false);
   return new URL((response.structuredContent as { url: string }).url).hash.slice(1);
 }
 
@@ -93,6 +94,9 @@ test('hosted MCP authenticates every request; account links are one-use and sess
   const aStatus = JSON.stringify((await alice.callTool({ name: 'get_auth_status', arguments: {} })).structuredContent);
   const bStatus = JSON.stringify((await bob.callTool({ name: 'get_auth_status', arguments: {} })).structuredContent);
   assert.ok(aStatus.includes('configured')); assert.ok(!bStatus.includes('configured')); assert.ok(!aStatus.includes('SYNTHETIC'));
+  // A connected account needs no new link; the assistant just retries its query.
+  assert.deepEqual((await alice.callTool({ name: 'connect_account', arguments: { provider: 'cinesunidos' } })).structuredContent, { connected: true });
+  assert.equal(((await bob.callTool({ name: 'connect_account', arguments: { provider: 'cinesunidos' } })).structuredContent as { connected: boolean }).connected, false);
   const anonymousAuth = (await anonymous.callTool({ name: 'get_auth_status', arguments: {} })).structuredContent as { connection: { mode: string; client_authorized: boolean }; providers: Array<{ status: string }> };
   assert.deepEqual(anonymousAuth.connection, { mode: 'hosted', client_authorized: false });
   assert.ok(anonymousAuth.providers.every(p => p.status === 'client_authorization_required'));
@@ -556,6 +560,56 @@ test('the cinema-login link names the assistant app the account will be attached
   assert.deepEqual((await localLink.json() as { app: unknown }).app, { name: 'Local CLI', publisher: null, verified: false });
   const script = await (await fetch(f.origin + '/app.js')).text();
   assert.match(script, /const app = data\.app;/); assert.doesNotMatch(script, /innerHTML/);
+});
+
+test('a session the cinema rejects early is dropped, so connect_account offers a new link instead of looping', async t => {
+  let upstream = 200;
+  const f = await fixture(t, successfulLogin, async () => new Response(upstream === 200 ? '["Caracas"]' : 'denied', { status: upstream }));
+  const alice = await f.client(f.alice.token);
+  const exchanged = await f.post('/connect/exchange', await link(alice));
+  const { browser_token } = await exchanged.json() as { browser_token: string };
+  assert.equal((await f.post('/connect/login', browser_token, { username: 'person@example.test', password: 'SYNTHETIC_PASSWORD' })).status, 200);
+  assert.deepEqual((await alice.callTool({ name: 'connect_account', arguments: { provider: 'cinesunidos' } })).structuredContent, { connected: true });
+  upstream = 401; // The cinema ended the session long before its stored expiry.
+  const prices = await alice.callTool({ name: 'get_ticket_prices', arguments: { provider: 'cinesunidos', cinema_id: '1', session_id: '1' } });
+  assert.equal((prices.structuredContent as { status: string }).status, 'auth_required');
+  const again = (await alice.callTool({ name: 'connect_account', arguments: { provider: 'cinesunidos' } })).structuredContent as { connected: boolean; url?: string };
+  assert.equal(again.connected, false); assert.ok(again.url);
+});
+
+test('only a refusal of the session own credentials marks it rejected', async () => {
+  const { HttpClient } = await import('../src/http.js');
+  const { SessionStore } = await import('../src/auth.js');
+  const sessions = new class extends SessionStore {
+    override async read() { return { version: 1 as const, provider: 'cinesunidos' as const, expires_at: Date.now() + 60000, access_token: 'T' }; }
+  }();
+  const make = (status: number, body = '{}') => new HttpClient(async () => new Response(body, { status }), 5000, sessions);
+  const seats = 'https://www.cinesunidos.com/api/seats?theaterId=1&showTimeId=2';
+  const publicUrl = 'https://www.cinesunidos.com/api/cities';
+  const ok = make(200); await ok.getAuthenticated('cinesunidos', seats);
+  assert.equal(ok.rejectedSessions.size, 0);
+  const publicDenied = make(401); await publicDenied.get(publicUrl).catch(() => {});
+  assert.equal(publicDenied.rejectedSessions.size, 0, 'a public 401 says nothing about the session');
+  const denied = make(401); await denied.getAuthenticated('cinesunidos', seats).catch(() => {});
+  assert.ok(denied.rejectedSessions.has('cinesunidos'));
+  const cinex = new HttpClient(async () => new Response('off'), 5000, new class extends SessionStore {
+    override async headers() { return { Cookie: 'PHPSESSID=x' }; }
+  }());
+  await cinex.getAuthenticated('cinex', 'https://www.cinex.com.ve/checklogin.php');
+  assert.ok(cinex.rejectedSessions.has('cinex'), 'Cinex reports an ended session with 200 and a body other than "on"');
+});
+
+test('discarding a rejected session never removes one saved by a reconnection meanwhile', async t => {
+  const f = await fixture(t);
+  const session = (token: string) => ({ version: 1 as const, provider: 'cinesunidos' as const, expires_at: Date.now() + 60000, access_token: token });
+  await f.storeFor(f.alice.id).save(session('OLD'));
+  const inFlight = f.storeFor(f.alice.id);
+  assert.equal((await inFlight.read('cinesunidos'))!.access_token, 'OLD');
+  await f.storeFor(f.alice.id).save(session('NEW'));
+  await inFlight.discardRejected('cinesunidos');
+  assert.equal((await f.storeFor(f.alice.id).read('cinesunidos'))!.access_token, 'NEW');
+  await inFlight.read('cinesunidos'); await inFlight.discardRejected('cinesunidos');
+  assert.equal(await f.storeFor(f.alice.id).read('cinesunidos'), undefined);
 });
 
 test('every HTML page allows only its own stylesheet, never inline styles', async t => {
