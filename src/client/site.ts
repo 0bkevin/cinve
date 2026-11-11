@@ -85,3 +85,27 @@ for (const item of document.querySelectorAll<HTMLDetailsElement>('.faq details, 
     slide(item, opening);
   });
 }
+
+// Sample conversation: plays once when it scrolls into view. The HTML holds
+// the finished state, so without JavaScript or with reduced motion nothing
+// is hidden.
+const demo = document.querySelector<HTMLElement>('.demo');
+if (demo && !matchMedia('(prefers-reduced-motion: reduce)').matches && 'IntersectionObserver' in window) {
+  const bubble = demo.querySelector<HTMLElement>('.demo-me')!;
+  const text = bubble.dataset.text ?? '';
+  const wait = (ms: number) => new Promise(done => setTimeout(done, ms));
+  demo.dataset.stage = 'idle';
+  const play = async () => {
+    // Hold the bubble at its finished size (CSSOM, allowed by the CSP).
+    const box = bubble.getBoundingClientRect();
+    bubble.style.width = `${box.width}px`; bubble.style.minHeight = `${box.height}px`;
+    bubble.textContent = ''; demo.dataset.stage = 'typing';
+    for (const char of text) { bubble.textContent += char; await wait(char === ' ' ? 55 : 38); }
+    await wait(350); demo.dataset.stage = 'thinking';
+    await wait(1400); demo.dataset.stage = 'answer';
+  };
+  const watcher = new IntersectionObserver(entries => {
+    if (entries.some(entry => entry.isIntersecting)) { watcher.disconnect(); void play(); }
+  }, { threshold: 0.45 });
+  watcher.observe(demo);
+}

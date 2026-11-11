@@ -482,3 +482,61 @@ button:disabled, .btn:disabled { cursor: not-allowed; }
   .lost-actions .btn { width: 100%; }
 }
 @media (prefers-reduced-motion: reduce) { .lost-row i { animation: none; } }
+
+/* "Qué puedes preguntar": the four examples beside a sample conversation. */
+.ask-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 460px); gap: 40px 64px; align-items: center; }
+.ask-grid .asks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+.demo { margin: 0; display: grid; gap: 12px; }
+.demo-me { justify-self: end; max-width: 320px; min-height: 1.3em; margin: 0; padding: 13px 18px; border-radius: 20px 20px 6px 20px; background: var(--amber); color: #1a0d05; font: 600 17px/1.35 var(--font-sans); }
+.demo-bot { padding: 18px 20px 16px; border-radius: 20px 20px 20px 6px; background: var(--surface); box-shadow: 0 20px 60px rgba(0, 0, 0, .35); }
+.demo-who { display: flex; align-items: center; font-size: 13px; color: var(--dust); }
+.demo-dot { width: 7px; height: 7px; margin-right: 8px; border-radius: 50%; background: var(--amber); }
+.demo-sep { margin: 0 6px; opacity: .7; }
+.demo-bot { position: relative; }
+.demo-thinking { display: none; position: absolute; left: 20px; top: 50px; gap: 5px; }
+.demo .demo-thinking i { width: 7px; height: 7px; aspect-ratio: auto; border-radius: 50%; background: var(--dust); animation: think 1s ease-in-out infinite; }
+.demo .demo-thinking i:nth-child(2) { animation-delay: .15s; } .demo .demo-thinking i:nth-child(3) { animation-delay: .3s; }
+@keyframes think { 0%, 60%, 100% { opacity: .3; translate: 0 0; } 30% { opacity: 1; translate: 0 -4px; } }
+.demo-answer > p { margin: 10px 0 12px; font-size: 16px; color: var(--cream); }
+.demo-map { display: grid; gap: 6px; justify-content: center; }
+.demo-screen { height: 5px; margin: 0 8px 6px 28px; border-radius: 0 0 50% 50% / 0 0 100% 100%; border-top: 2px solid rgba(246, 238, 228, .5); }
+.demo-row { display: flex; align-items: center; gap: 5px; }
+.demo-row b { width: 20px; font-size: 12px; font-weight: 700; color: var(--dust); }
+.demo i { display: inline-block; width: 22px; aspect-ratio: 1 / .86; border-radius: 42% 42% 20% 20% / 52% 52% 24% 24%; }
+.demo i[data-s=free] { background: var(--seat); }
+.demo i[data-s=taken] { background: rgba(246, 238, 228, .1); }
+.demo i[data-s=pair] { background: var(--amber); box-shadow: 0 0 14px rgba(255, 189, 63, .6); }
+.demo-key { display: flex; gap: 16px; margin-top: 12px; font-size: 12px; color: var(--dust); }
+.demo-key span { display: inline-flex; align-items: center; gap: 6px; }
+.demo-key i { width: 12px; box-shadow: none !important; }
+
+/* Played by site.js: data-stage moves idle → typing → thinking → answer. */
+.demo[data-stage=idle] .demo-me { visibility: hidden; }
+/* Text types into a bubble already at its final size, so nothing shifts. */
+.demo[data-stage] .demo-me { text-align: left; }
+.demo[data-stage=idle] .demo-bot, .demo[data-stage=typing] .demo-bot { opacity: 0; translate: 0 8px; }
+.demo-bot { transition: opacity .35s ease, translate .35s ease, background-color .4s ease, box-shadow .4s ease; }
+/* While thinking only the dots show; the card fills in with the answer. */
+.demo[data-stage=thinking] .demo-bot { background-color: transparent; box-shadow: none; }
+.demo[data-stage=typing] .demo-me::after { content: ''; display: inline-block; width: 2px; height: 1.05em; margin-left: 2px; vertical-align: -0.15em; background: currentColor; animation: caret .8s steps(1) infinite; }
+@keyframes caret { 50% { opacity: 0; } }
+.demo[data-stage=thinking] .demo-thinking { display: flex; }
+.demo[data-stage=thinking] .demo-answer { visibility: hidden; }
+.demo[data-stage=answer] .demo-answer > p { animation: unfold .35s ease-out both; }
+.demo[data-stage=answer] .demo-row { animation: row-in .4s ease-out both; }
+.demo[data-stage=answer] .demo-row:nth-child(3) { animation-delay: .08s; } .demo[data-stage=answer] .demo-row:nth-child(4) { animation-delay: .16s; } .demo[data-stage=answer] .demo-row:nth-child(5) { animation-delay: .24s; }
+.demo[data-stage=answer] i[data-s=pair] { animation: light .7s .6s ease-out both; }
+.demo[data-stage=answer] .demo-key { animation: unfold .35s .5s ease-out both; }
+
+@media (max-width: 1000px) {
+  .ask-grid { grid-template-columns: minmax(0, 1fr); }
+  .demo { max-width: 460px; width: 100%; justify-self: center; }
+}
+@media (max-width: 640px) {
+  .demo i { width: calc((100vw - 32px - 40px - 20px - 55px) / 12); max-width: 22px; }
+  .demo-me { font-size: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .demo-thinking i, .demo[data-stage] * { animation: none !important; }
+}

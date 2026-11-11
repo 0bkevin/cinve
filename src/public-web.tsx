@@ -62,6 +62,31 @@ function SeatMap() {
   </div>;
 }
 
+// A sample exchange, played once when it scrolls into view (site.js): the
+// question types itself, the assistant thinks, then answers with a seat map
+// whose only adjacent free seats are the lit pair. Without JavaScript or
+// with reduced motion it shows finished. No titles, prices or times.
+const demoRows = ['x.x.xx.x.x.x', '.x.xx.x.x.xx', 'x.xxx**xx.x.', '.x.x.xx.x.x.'];
+const demoState = { '.': 'free', x: 'taken', '*': 'pair' } as const;
+
+function ChatDemo() {
+  return <figure class="demo" aria-label="Ejemplo: preguntas si quedan dos asientos juntos esta noche y tu asistente responde con el mapa de la sala.">
+    <p class="demo-me" data-text="¿Quedan dos asientos juntos esta noche?">¿Quedan dos asientos juntos esta noche?</p>
+    <div class="demo-bot">
+      <div class="demo-who"><span class="demo-dot"></span>Tu asistente<span class="demo-sep">·</span>con Cinve</div>
+      <div class="demo-thinking" aria-hidden="true"><i></i><i></i><i></i></div>
+      <div class="demo-answer">
+        <p>Sí, en la fila C quedan dos juntos:</p>
+        <div class="demo-map" aria-hidden="true">
+          <div class="demo-screen"></div>
+          {demoRows.map((row, r) => <div class="demo-row"><b>{'ABCD'[r]}</b>{[...row].map(c => <i data-s={demoState[c as keyof typeof demoState]}></i>)}</div>)}
+        </div>
+        <div class="demo-key" aria-hidden="true"><span><i data-s="free"></i>Libre</span><span><i data-s="taken"></i>Ocupado</span><span><i data-s="pair"></i>Juntos</span></div>
+      </div>
+    </div>
+  </figure>;
+}
+
 // What each cinema publishes and whether it needs the visitor's own account.
 type Access = 'open' | 'account' | 'none';
 const accessLabel: Record<Access, string> = { open: 'Sin cuenta', account: 'Con tu cuenta', none: 'No disponible' };
@@ -192,9 +217,12 @@ export function landingPage(origin: string) {
       <header class="section-head">
         <h2 id="preguntar-titulo">Qué puedes preguntar</h2>
       </header>
-      <ul class="asks">
-        {coverage.map(({ topic, ask }) => <li><span class="topic">{topic}</span><span class="ask">“{ask}”</span></li>)}
-      </ul>
+      <div class="ask-grid">
+        <ul class="asks">
+          {coverage.map(({ topic, ask }) => <li><span class="topic">{topic}</span><span class="ask">“{ask}”</span></li>)}
+        </ul>
+        <ChatDemo />
+      </div>
       {/* The per-cinema detail stays one click away; <details> works without JavaScript. */}
       <details class="more" id="cines">
         <summary><span>Ver qué ofrece cada cine</span>{icons.chevronDown()}</summary>
