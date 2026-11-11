@@ -1,10 +1,10 @@
 import { authorizationPage, authorizationErrorPage, styleSource } from './public-web.js';
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Pool, PoolClient } from 'pg';
 import * as z from 'zod';
 import { digest, lockUser, transaction } from './hosted-store.js';
-import { ConnectionLinks } from './hosted-links.js';
+import { ConnectionLinks, cinemaUnavailableMessage, ipv6Block, signInFloor, signInRefusalMessage } from './hosted-links.js';
 import { ClientMetadataCache, isClientIdUrl, redirectUri } from './client-metadata.js';
 import { AuthProvider, SessionStore } from './auth.js';
 import type { AuthProviderId, AuthSession, login } from './auth.js';
@@ -13,6 +13,8 @@ import type { AuthProviderId, AuthSession, login } from './auth.js';
 export type ConsentAccounts = {
   authenticate: typeof login;
   save(client: PoolClient, user: string, session: AuthSession): Promise<void>;
+  /** Minimum time before answering a refused sign-in (see signInFloor). */
+  refusalFloorMs?: number;
 };
 type ConsentForm = { error?: string; provider?: AuthProviderId; username?: string };
 
@@ -25,6 +27,65 @@ const registration = z.object({
   grant_types: z.array(z.enum(['authorization_code', 'refresh_token'])).default(['authorization_code', 'refresh_token']),
   response_types: z.array(z.literal('code')).default(['code']),
 });
+/** Until when (epoch ms) unsigned tokens and links issued before signing are accepted. */
+export type LegacyCutoffs = { access: number; refresh: number; link: number };
+/**
+ * Cutoffs from the moment the first instance began signing (recorded in
+ * cinev_meta, so they follow the real deployment, not a fixed date). Access
+ * tokens and links last at most an hour and refresh tokens their 30-day
+ * grant; a day of margin covers instances of the previous version still
+ * issuing unsigned ones during a rolling deploy. Without that record (a
+ * deployment before migration 006) every legacy token keeps working.
+ */
+export function legacyCutoffs(since: Date | undefined): LegacyCutoffs {
+  if (!since) return { access: Infinity, refresh: Infinity, link: Infinity };
+  const day = 86400000, t = since.getTime();
+  return { access: t + day, refresh: t + 31 * day, link: t + day };
+}
+/** Records (once) and reads when signing began. */
+export async function readLegacyCutoffs(pool: Pool): Promise<LegacyCutoffs> {
+  try {
+    let { rows } = await pool.query(`WITH ins AS (INSERT INTO cinev_meta(key,value) VALUES('token_signing_since',now()) ON CONFLICT (key) DO NOTHING RETURNING value)
+      SELECT value FROM ins UNION ALL SELECT value FROM cinev_meta WHERE key='token_signing_since'`);
+    // A concurrent first insert wins the conflict after this statement's
+    // snapshot was taken, so neither branch saw a row: read it again.
+    if (!rows.length) ({ rows } = await pool.query("SELECT value FROM cinev_meta WHERE key='token_signing_since'"));
+    if (!rows.length) throw new Error('No se pudo registrar el inicio de la firma de tokens.');
+    return legacyCutoffs(rows[0].value);
+  } catch (error) {
+    if ((error as { code?: string }).code === '42P01') return legacyCutoffs(undefined); // Migration 006 pending.
+    throw error;
+  }
+}
+type TokenPrefix = 'cva_' | 'cvr_' | 'cvc_';
+// The prefix is part of the signed text, so an access signature never validates a refresh token.
+const tokenMac = (key: Buffer, prefix: TokenPrefix, id: string) => createHmac('sha256', key).update(prefix + id).digest('base64url');
+const signedToken = (key: Buffer, prefix: TokenPrefix) => { const id = secret(); return `${prefix}${id}.${tokenMac(key, prefix, id)}`; };
+/**
+ * Which kind of token this is, judged in memory: 'signed' when its HMAC is
+ * valid, 'legacy' for the unsigned format before the cutoff, and undefined
+ * otherwise. Only these reach the database, so a flood of forged tokens
+ * costs no queries.
+ */
+function tokenFormat(prefix: TokenPrefix, cutoff: number, token: string, key: Buffer, now: number): 'signed' | 'legacy' | undefined {
+  if (!token.startsWith(prefix)) return undefined;
+  const signed = token.slice(prefix.length).match(/^([A-Za-z0-9_-]{43})\.([A-Za-z0-9_-]{43})$/);
+  if (signed) return timingSafeEqual(Buffer.from(signed[2]), Buffer.from(tokenMac(key, prefix, signed[1]))) ? 'signed' : undefined;
+  return /^[A-Za-z0-9_-]{43}$/.test(token.slice(prefix.length)) && now < cutoff ? 'legacy' : undefined;
+}
+/**
+ * Authorization codes are signed like tokens (cvc_<id>.<mac>); codes issued
+ * before signing had no prefix and last five minutes.
+ */
+export function codeFormat(code: string, key: Buffer, legacyUntil = Infinity, now = Date.now()): 'signed' | 'legacy' | undefined {
+  if (code.startsWith('cvc_')) return tokenFormat('cvc_', 0, code, key, now) === 'signed' ? 'signed' : undefined;
+  return /^[A-Za-z0-9_-]{43}$/.test(code) && now < legacyUntil ? 'legacy' : undefined;
+}
+/** Per-instance memory limits the hosted app applies before database work (see hosted.ts). */
+export type LocalAdmission = { credential(id: string): boolean; network(): boolean };
+/** legacyUntil: when unsigned tokens stop being accepted (Infinity: still accepted). */
+export const accessTokenFormat = (token: string, key: Buffer, legacyUntil = Infinity, now = Date.now()) => tokenFormat('cva_', legacyUntil, token, key, now);
+export const refreshTokenFormat = (token: string, key: Buffer, legacyUntil = Infinity, now = Date.now()) => tokenFormat('cvr_', legacyUntil, token, key, now);
 class OAuthError extends Error {
   constructor(readonly error: string, readonly status = 400) { super(error); }
 }
@@ -70,9 +131,37 @@ export function recognizedDestination(redirect: string, publisher?: string) {
 /** Self-service, isolated connections. Approval creates a NEW empty principal;
  * it never grants access to an existing cinema session or browser identity. */
 export class HostedOAuth {
-  private budgets: ConnectionLinks;
-  constructor(readonly pool: Pool, readonly getOrigin: () => string, private readonly clientMetadata = new ClientMetadataCache(),
-    private readonly accounts?: ConsentAccounts) { this.budgets = new ConnectionLinks(pool); }
+  private authorizations = 0;
+  // Submits of one approval waiting for its sign-in (a double click) in this
+  // instance, per request and per network: a bound on database polling.
+  private waiters = new Map<string, number>();
+  private cutoffs?: Promise<LegacyCutoffs>;
+  private cutoffsUntil = Infinity;
+  /**
+   * The legacy cutoffs, read once per instance and retried after a failure.
+   * "Not recorded yet" (migration 006 pending) is kept for a minute only, so
+   * running the migration takes effect without a restart.
+   */
+  legacy(): Promise<LegacyCutoffs> {
+    if (this.cutoffs && Date.now() >= this.cutoffsUntil) this.cutoffs = undefined;
+    return this.cutoffs ??= readLegacyCutoffs(this.pool).then(cutoffs => {
+      this.cutoffsUntil = cutoffs.access === Infinity ? Date.now() + 60000 : Infinity;
+      return cutoffs;
+    }, error => { this.cutoffs = undefined; throw error; });
+  }
+  /**
+   * Whether a token has an acceptable format. Only a legacy-format token
+   * needs the cutoff, so signed and forged ones never cause a query.
+   */
+  private async acceptable(kind: 'access' | 'refresh', token: string) {
+    const format = (kind === 'access' ? accessTokenFormat : refreshTokenFormat)(token, this.tokenKey);
+    return format === 'legacy' ? Date.now() < (await this.legacy())[kind] : !!format;
+  }
+  /** tokenKey: a 32-byte key for signing tokens, the same on every instance; budgets: rate limits (with their key). */
+  constructor(readonly pool: Pool, readonly getOrigin: () => string, private readonly clientMetadata: ClientMetadataCache,
+    private readonly accounts: ConsentAccounts | undefined, private readonly tokenKey: Buffer, private readonly budgets: ConnectionLinks) {
+    if (tokenKey.length !== 32) throw new Error('Clave de firma no válida.');
+  }
   /** The consent page, which can also sign in to a cinema; re-rendered with an error after a failed sign-in. */
   private consent(res: ServerResponse, status: number, app: { id: string; name: string }, redirect: string, id: string, csrf: string, form: ConsentForm = {}) {
     // A native form POST inherits this policy. no-referrer makes browsers
@@ -121,7 +210,7 @@ export class HostedOAuth {
     return `Bearer resource_metadata="${this.getOrigin()}/.well-known/oauth-protected-resource/mcp", scope="${scope}"${invalid ? ', error="invalid_token"' : ''}`;
   }
   async authenticate(token: string) {
-    if (!/^cva_[A-Za-z0-9_-]{43}$/.test(token)) return undefined;
+    if (!await this.acceptable('access', token)) return undefined;
     const { rows } = await this.pool.query(`SELECT c.id,c.token_hash FROM cinev_oauth_tokens t
       JOIN cinev_oauth_grants g ON g.user_id=t.user_id JOIN cinev_clients c ON c.id=t.user_id
       WHERE t.token_hash=$1 AND t.kind='access' AND t.expires_at>clock_timestamp()
@@ -129,7 +218,7 @@ export class HostedOAuth {
     return rows[0] ? { id: rows[0].id as string, tokenHash: rows[0].token_hash as string } : undefined;
   }
   private async tokens(client: PoolClient, user: string) {
-    const access = 'cva_' + secret(), refresh = 'cvr_' + secret();
+    const access = signedToken(this.tokenKey, 'cva_'), refresh = signedToken(this.tokenKey, 'cvr_');
     await client.query(`INSERT INTO cinev_oauth_tokens(token_hash,user_id,kind,expires_at) VALUES
       ($1,$3,'access',now()+interval '1 hour'),
       ($2,$3,'refresh',(SELECT expires_at FROM cinev_oauth_grants WHERE user_id=$3))`, [digest(access), digest(refresh), user]);
@@ -139,7 +228,14 @@ export class HostedOAuth {
   private async touch(app: string) {
     await this.pool.query('UPDATE cinev_oauth_apps SET last_used_at=now() WHERE id=$1', [app]).catch(() => {});
   }
-  private async exchange(p: URLSearchParams) {
+  /**
+   * Runs after every check that needs no database, so malformed or forged
+   * requests cost nothing, and before the first query. A signed code or
+   * refresh token is single-use (a replay revokes the connection) and cannot
+   * be forged, so it is limited by its own id in memory and never by what
+   * others on its network do; an unsigned one is charged to the network.
+   */
+  private async exchange(p: URLSearchParams, admit: (signedId?: string) => Promise<void>) {
     const app = required(p.get('client_id'));
     if (p.get('resource') !== this.resource) throw new OAuthError('invalid_target');
     if (p.has('client_secret')) throw new OAuthError('invalid_client');
@@ -147,6 +243,9 @@ export class HostedOAuth {
     if (grant === 'authorization_code') {
       const code = required(p.get('code')), verifier = required(p.get('code_verifier'));
       if (!/^[A-Za-z0-9._~-]{43,128}$/.test(verifier)) throw new OAuthError('invalid_grant');
+      const format = codeFormat(code, this.tokenKey);
+      if (!format || (format === 'legacy' && Date.now() >= (await this.legacy()).access)) throw new OAuthError('invalid_grant');
+      await admit(format === 'signed' ? code.slice(0, 47) : undefined);
       const result = await transaction(this.pool, async client => {
         // Expiry is judged on the database clock, the same one cleanup uses.
         const { rows } = await client.query('SELECT *, expires_at>clock_timestamp() AS live FROM cinev_oauth_requests WHERE code_hash=$1 FOR UPDATE', [digest(code)]);
@@ -165,17 +264,22 @@ export class HostedOAuth {
       });
       if (!result) throw new OAuthError('invalid_grant');
       await this.touch(app);
+      // Signing begins with the first signed token: record it (once per instance).
+      await this.legacy().catch(() => {});
       return result;
     }
     if (grant === 'refresh_token') {
       const token = required(p.get('refresh_token'));
+      if (!await this.acceptable('refresh', token)) throw new OAuthError('invalid_grant'); // Forged: no database work.
       if (p.has('scope') && p.get('scope') !== scope) throw new OAuthError('invalid_scope');
+      await admit(refreshTokenFormat(token, this.tokenKey) === 'signed' ? token.slice(0, 47) : undefined);
       const result = await transaction(this.pool, async client => {
         const find = () => client.query(`SELECT t.*,g.app_id,g.resource,g.expires_at AS grant_expiry FROM cinev_oauth_tokens t
           JOIN cinev_oauth_grants g ON g.user_id=t.user_id WHERE t.token_hash=$1 AND t.kind='refresh'`, [digest(token)]);
         const candidate = (await find()).rows[0];
         if (!candidate || candidate.app_id !== app || candidate.resource !== this.resource || !await lockUser(client, candidate.user_id)) return undefined;
         const r = (await find()).rows[0];
+        if (!r) return undefined; // Removed by cleanup or revocation meanwhile.
         if (r.used_at) { await revoke(client, r.user_id); return undefined; }
         if (r.expires_at.getTime() <= Date.now() || r.grant_expiry.getTime() <= Date.now()) return undefined;
         await client.query('UPDATE cinev_oauth_tokens SET used_at=now() WHERE token_hash=$1', [digest(token)]);
@@ -187,7 +291,7 @@ export class HostedOAuth {
     }
     throw new OAuthError('unsupported_grant_type');
   }
-  async handle(req: IncomingMessage, res: ServerResponse, ip: string): Promise<boolean> {
+  async handle(req: IncomingMessage, res: ServerResponse, ip: string, local?: LocalAdmission): Promise<boolean> {
     const origin = this.getOrigin(), url = new URL(req.url!, origin), path = url.pathname;
     const metadata = ['/.well-known/oauth-protected-resource', '/.well-known/oauth-protected-resource/mcp', '/.well-known/oauth-authorization-server'];
     if (!metadata.includes(path) && !['/oauth/register', '/oauth/authorize', '/oauth/token', '/oauth/revoke'].includes(path)) return false;
@@ -218,31 +322,53 @@ export class HostedOAuth {
         });
         return true;
       }
-      // Charge the shared quota only for requests the caller's own quota admits;
-      // otherwise one address could exhaust OAuth for every other user.
-      if (!await this.budgets.budget(`oauth:${ip}`, 60) || !await this.budgets.budget('oauth:global', 600)) throw new OAuthError('temporarily_unavailable', 429);
+      // Per network (and IPv6 /48), then a service-wide quota charged only when
+      // the caller's own admits the request, so one network cannot spend it.
+      // The shared quota applies only where new rows are created (registration
+      // and starting an authorization): refreshing, exchanging a code or
+      // revoking never depends on what other networks do.
+      type Quota = { key: string; limit: number };
+      // own: an extra per-network quota checked before the shared one, so a
+      // single network can never spend the shared quota by itself.
+      const admit = async (options: { own?: Quota; shared?: Quota } = {}) => {
+        const block = ipv6Block(ip);
+        if (!await this.budgets.budget(`oauth:${ip}`, 60) || (block && !await this.budgets.budget(`oauth:${block}`, 240)) ||
+            (options.own && !await this.budgets.budget(options.own.key, options.own.limit)) ||
+            (options.shared && !await this.budgets.budget(options.shared.key, options.shared.limit))) throw new OAuthError('temporarily_unavailable', 429);
+      };
+      const tooMany = () => new OAuthError('temporarily_unavailable', 429);
       if (path === '/oauth/register' && req.method === 'POST') {
-        if (!await this.budgets.budget(`oauth:register:${ip}`, 10)) throw new OAuthError('temporarily_unavailable', 429);
+        if (local && !local.network()) throw tooMany();
         const parsed = registration.safeParse(await payload(req, true));
         if (!parsed.success || !parsed.data.grant_types.includes('authorization_code') || !parsed.data.response_types.includes('code')) throw new OAuthError('invalid_client_metadata');
+        // Registrations are rare (once per installed client) and each adds a row kept up to 90 days.
+        await admit({ own: { key: `oauth:register:${ip}`, limit: 10 }, shared: { key: 'oauth:register:global', limit: 60 } });
         const p = parsed.data, id = 'cvapp_' + secret();
         await this.pool.query('INSERT INTO cinev_oauth_apps(id,name,redirect_uris) VALUES($1,$2,$3)', [id, p.client_name, JSON.stringify(p.redirect_uris)]);
         send(201, { ...p, client_id: id, client_id_issued_at: Math.floor(Date.now() / 1000) }); return true;
       }
       if (path === '/oauth/authorize' && req.method === 'GET') {
+        if (local && !local.network()) throw tooMany();
+        // Each authorization start adds a request row. Unbound expired ones
+        // (no connection attached) are dropped as they accumulate; requests
+        // holding a connection or a consumed code are left to cleanup.
+        if (++this.authorizations % 50 === 0) await this.pool.query(`DELETE FROM cinev_oauth_requests WHERE id IN (SELECT id FROM cinev_oauth_requests
+          WHERE expires_at<=now() AND user_id IS NULL LIMIT 500)`).catch(() => {});
         const p = url.searchParams;
         for (const key of p.keys()) if (p.getAll(key).length !== 1) throw new OAuthError('invalid_request');
-        const clientId = required(p.get('client_id'));
-        const app = isClientIdUrl(clientId) ? await this.metadataApp(clientId, ip)
-          : (await this.pool.query('SELECT * FROM cinev_oauth_apps WHERE id=$1', [clientId])).rows[0];
-        const redirect = required(p.get('redirect_uri'));
-        // Never redirect errors to an unvalidated client URI.
-        if (!app || !app.redirect_uris.includes(redirect)) throw new OAuthError('invalid_request');
+        const clientId = required(p.get('client_id')), redirect = required(p.get('redirect_uri'));
+        // Checks that need no database come first. Errors are rendered here and
+        // never redirected, so their order does not matter to the client.
         if (p.get('response_type') !== 'code') throw new OAuthError('unsupported_response_type');
         if (p.get('resource') !== this.resource) throw new OAuthError('invalid_target');
         if (p.has('scope') && p.get('scope') !== scope) throw new OAuthError('invalid_scope');
         if (p.get('code_challenge_method') !== 'S256' || !/^[A-Za-z0-9_-]{43}$/.test(p.get('code_challenge') ?? '')) throw new OAuthError('invalid_request');
         if ((p.get('state')?.length ?? 0) > 2048) throw new OAuthError('invalid_request');
+        await admit({ shared: { key: 'oauth:global', limit: 600 } });
+        const app = isClientIdUrl(clientId) ? await this.metadataApp(clientId, ip)
+          : (await this.pool.query('SELECT * FROM cinev_oauth_apps WHERE id=$1', [clientId])).rows[0];
+        // Never redirect errors to an unvalidated client URI.
+        if (!app || !app.redirect_uris.includes(redirect)) throw new OAuthError('invalid_request');
         const id = randomBytes(16).toString('hex'), csrf = secret();
         await this.pool.query(`INSERT INTO cinev_oauth_requests(id,app_id,redirect_uri,resource,state,challenge,csrf_hash,expires_at)
           VALUES($1,$2,$3,$4,$5,$6,$7,now()+interval '10 minutes')`, [id, app.id, redirect, this.resource, p.get('state'), p.get('code_challenge'), digest(csrf)]);
@@ -251,17 +377,30 @@ export class HostedOAuth {
         return true;
       }
       if (path === '/oauth/authorize' && req.method === 'POST') {
-        if (req.headers.origin !== origin) throw new OAuthError('invalid_request', 403);
-        const p = await payload(req) as URLSearchParams;
-        const id = required(p.get('request_id')), csrf = required(p.get('csrf')), decision = p.get('decision') ?? '';
+        // Junk (no valid approval cookie) is counted against its network; a
+        // browser holding its request's cookie never meets a network limit.
+        const junk = (status = 400) => { local?.network(); return new OAuthError('invalid_request', status); };
+        if (req.headers.origin !== origin) throw junk(403);
+        const p = await payload(req).catch(error => { local?.network(); throw error; }) as URLSearchParams;
+        const id = p.get('request_id') ?? '', csrf = p.get('csrf') ?? '', decision = p.get('decision') ?? '';
         if (!/^[a-f0-9]{32}$/.test(id) || !/^[A-Za-z0-9_-]{43}$/.test(csrf) || !['connect', 'approve', 'deny'].includes(decision) ||
-            (decision === 'connect' && !this.accounts)) throw new OAuthError('invalid_request');
+            (decision === 'connect' && !this.accounts)) throw junk();
         const cookie = req.headers.cookie?.split(';').map(v => v.trim()).find(v => v.startsWith(`cinve_approval_${id}=`))?.split('=')[1];
-        if (cookie !== csrf) throw new OAuthError('invalid_request', 403);
+        if (cookie !== csrf) throw junk(403);
+        // A first-party cookie that marks this browser as having connected a
+        // cinema here before: the proof that exempts its owner from what
+        // others do (see admitSignIn). Issued anew on every successful sign-in.
+        const known = req.headers.cookie?.split(';').map(v => v.trim()).find(v => v.startsWith('cinve_device='))?.split('=')[1];
+        const device = known && /^[A-Za-z0-9_-]{43}$/.test(known) ? known : undefined;
+        // No network quota: only a browser holding this request's approval
+        // cookie gets here, so approvals are bounded by authorization starts
+        // (limited above), and cinema sign-ins have their own limits. Others
+        // on a shared address therefore cannot block someone's approval.
         // Approving and connecting a cinema in one step. The upstream sign-in
         // never runs inside a transaction; its session is committed together
         // with the code below, or not at all.
-        let session: AuthSession | undefined, claimed = false;
+        let session: AuthSession | undefined, claimed = false, fresh: string | undefined;
+        const waiting: string[] = [];
         const release = () => this.pool.query('UPDATE cinev_oauth_requests SET busy_until=NULL WHERE id=$1', [id]).catch(() => {});
         try {
           if (decision === 'connect') {
@@ -295,15 +434,43 @@ export class HostedOAuth {
               if (!r || !r.live || r.code_hash) break; // The transaction below decides: re-issue or refuse.
               if (!r.busy && r.attempts >= 5) return again(429, 'Demasiados intentos. Vuelve a tu asistente para empezar de nuevo.');
               if (Date.now() - started > (r.busy ? 75000 : 20000)) return again(503, 'El cine está tardando en responder. Inténtalo de nuevo.');
+              if (!waiting.length) {
+                // A few duplicate submits (double clicks) wait for the first; a flood does not.
+                if ((this.waiters.get(`request:${id}`) ?? 0) >= 8 || (this.waiters.get(`network:${ip}`) ?? 0) >= 16)
+                  return again(429, 'Ya se está iniciando sesión con esta solicitud. Espera unos segundos.');
+                for (const key of [`request:${id}`, `network:${ip}`]) { this.waiters.set(key, (this.waiters.get(key) ?? 0) + 1); waiting.push(key); }
+              }
               await new Promise(resolve => setTimeout(resolve, 300));
             }
             if (claimed) {
               // The per-address budget counts sign-ins, not duplicate submits that only wait.
-              if (!await this.budgets.budget(`oauth:login-ip:${ip}`, 20)) return again(429, 'Demasiados intentos. Espera un minuto y vuelve a intentarlo.');
+              // Proof of ownership: a cookie this browser received after an earlier successful sign-in here.
+              const subject = { network: ip, provider: provider.data, username, proofs: device ? [`browser:${device}`] : [] };
+              const refusal = await this.budgets.admitSignIn(subject);
+              if (refusal) {
+                // The sign-in never ran: give back the request's attempt.
+                await this.pool.query('UPDATE cinev_oauth_requests SET attempts=GREATEST(attempts-1,0) WHERE id=$1', [id]);
+                return again(429, signInRefusalMessage[refusal]);
+              }
               const staged = new class extends SessionStore { override async save(value: AuthSession) { session = value; } }();
+              const started = Date.now();
               try { await this.accounts!.authenticate(provider.data, username, password, staged); }
-              catch { return again(401, 'No se pudo iniciar sesión. Revisa tus datos o comprueba en la web del cine si pide una verificación adicional.'); }
+              catch (error) {
+                if (await this.budgets.signInError(subject, error) === 'unavailable') {
+                  // Nothing was tested: the request keeps its attempt too.
+                  await this.pool.query('UPDATE cinev_oauth_requests SET attempts=GREATEST(attempts-1,0) WHERE id=$1', [id]);
+                  return again(503, cinemaUnavailableMessage);
+                }
+                await signInFloor(started, this.accounts!.refusalFloorMs);
+                return again(401, 'No se pudo iniciar sesión. Revisa tus datos o comprueba en la web del cine si pide una verificación adicional.');
+              }
+              // Not a refusal of the credentials, so it is not counted as a failure.
               if (!session || session.provider !== provider.data) return again(502, 'El cine no entregó una sesión válida. Inténtalo de nuevo.');
+              // A fresh device id on every success: an id planted in this
+              // browser beforehand (for example by a sibling subdomain) never
+              // becomes a proof for this account.
+              fresh = secret();
+              await this.budgets.signInSucceeded({ ...subject, proofs: [`browser:${fresh}`] });
             }
           }
           const destination = await transaction(this.pool, async client => {
@@ -320,7 +487,7 @@ export class HostedOAuth {
             if (decision === 'deny') {
               await client.query('DELETE FROM cinev_oauth_requests WHERE id=$1', [id]); dest.searchParams.set('error', 'access_denied');
             } else {
-              const code = secret();
+              const code = signedToken(this.tokenKey, 'cvc_');
               // A connected cinema needs its owner now; the grant is still made
               // only when the code is exchanged with the PKCE verifier.
               let user: string | null = reissue ? r.user_id : null;
@@ -341,16 +508,30 @@ export class HostedOAuth {
             return dest.href;
           });
           claimed = false;
-          res.setHeader('Set-Cookie', `cinve_approval_${id}=; HttpOnly; SameSite=Lax; Path=/oauth/authorize; Max-Age=0${origin.startsWith('https:') ? '; Secure' : ''}`);
+          const secure = origin.startsWith('https:') ? '; Secure' : '';
+          res.setHeader('Set-Cookie', [`cinve_approval_${id}=; HttpOnly; SameSite=Lax; Path=/oauth/authorize; Max-Age=0${secure}`,
+            ...(fresh ? [`cinve_device=${fresh}; HttpOnly; SameSite=Lax; Path=/oauth/authorize; Max-Age=${30 * 86400}${secure}`] : [])]);
           res.writeHead(303, { Location: destination }); res.end(); return true;
-        } finally { if (claimed) await release(); }
+        } finally {
+          for (const key of waiting) { const left = this.waiters.get(key)! - 1; if (left) this.waiters.set(key, left); else this.waiters.delete(key); }
+          if (claimed) await release();
+        }
       }
       if (path === '/oauth/token' && req.method === 'POST') {
-        send(200, await this.exchange(await payload(req) as URLSearchParams)); return true;
+        send(200, await this.exchange(await payload(req) as URLSearchParams, async signedId => {
+          if (signedId === undefined) { if (local && !local.network()) throw tooMany(); await admit(); }
+          else if (local && !local.credential(signedId)) throw tooMany();
+        })); return true;
       }
       if (path === '/oauth/revoke' && req.method === 'POST') {
         const p = await payload(req) as URLSearchParams;
         const token = required(p.get('token')), app = required(p.get('client_id'));
+        // RFC 7009: an invalid token is answered like a revoked one, here without database work.
+        if (!await this.acceptable('access', token) && !await this.acceptable('refresh', token)) { send(200, {}); return true; }
+        // Like a refresh: a signed token is limited by its own id, an unsigned one by its network.
+        if (accessTokenFormat(token, this.tokenKey) === 'signed' || refreshTokenFormat(token, this.tokenKey) === 'signed') {
+          if (local && !local.credential(token.slice(0, 47))) throw tooMany();
+        } else { if (local && !local.network()) throw tooMany(); await admit(); }
         await transaction(this.pool, async client => {
           const { rows } = await client.query(`SELECT t.user_id FROM cinev_oauth_tokens t JOIN cinev_oauth_grants g ON g.user_id=t.user_id
             WHERE t.token_hash=$1 AND g.app_id=$2 AND g.resource=$3`, [digest(token), app, this.resource]);

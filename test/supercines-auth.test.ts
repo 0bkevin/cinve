@@ -5,7 +5,7 @@ import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CookieJar } from 'tough-cookie';
-import { SessionStore, login } from '../src/auth.js';
+import { SessionStore, login, CredentialsRejected, CinemaUnavailable } from '../src/auth.js';
 import { HttpClient } from '../src/http.js';
 import { CinemaService } from '../src/service.js';
 import { DataError, today } from '../src/core.js';
@@ -57,14 +57,32 @@ test('Supercines login posts the site form once, saves only cookies, and sends t
     await assert.rejects(sessions.headers('supercines', url), DataError);
 });
 
-test('a refused Supercines login stores nothing and leaks neither the password nor the reply', async t => {
+test('a refused Supercines login is CredentialsRejected, stores nothing and leaks neither the password nor the reply', async t => {
   const sessions = await store(t);
+  // A Laravel validation 422 and a 200 with status:false are both the cinema evaluating
+  // and refusing the credentials: each must be CredentialsRejected (charged, never refunded
+  // as an outage), so an attacker cannot reclaim sign-in attempts against Supercines.
   const replies = [() => new Response(JSON.stringify({ message: 'PRIVATE_REASON SYNTHETIC_PASSWORD' }), { status: 422 }), () => new Response(JSON.stringify({ status: false, message: 'PRIVATE_REASON' }))];
   for (const reply of replies) {
     await assert.rejects(login('supercines', 'person@example.test', 'SYNTHETIC_PASSWORD', sessions, async input =>
       new URL(String(input)).pathname === '/cartelera' ? new Response('<input type="hidden" name="_token" value="FORMTOKEN0000000000000000000000000000000">', { headers: { 'set-cookie': 'supercines_session=GUEST; Path=/' } }) : reply()),
-    e => e instanceof Error && /Supercines no aceptó el login/.test(e.message) && !/SYNTHETIC_PASSWORD|PRIVATE_REASON/.test(e.message));
+    e => e instanceof CredentialsRejected && !/SYNTHETIC_PASSWORD|PRIVATE_REASON/.test((e as Error).message));
   }
+  assert.equal(await sessions.read('supercines'), undefined);
+});
+
+test('a Supercines outage before and during submission is CinemaUnavailable, not a credential verdict', async t => {
+  const sessions = await store(t);
+  const form = () => new Response('<input type="hidden" name="_token" value="FORMTOKEN0000000000000000000000000000000">', { headers: { 'set-cookie': 'supercines_session=GUEST; Path=/' } });
+  // The form page itself is down: credentials never left the client.
+  await assert.rejects(login('supercines', 'person@example.test', 'SYNTHETIC_PASSWORD', sessions,
+    async () => new Response('', { status: 503 })),
+    e => e instanceof CinemaUnavailable && !/SYNTHETIC_PASSWORD/.test((e as Error).message));
+  // A Cloudflare challenge on the submission's first hop stopped it before the login.
+  await assert.rejects(login('supercines', 'person@example.test', 'SYNTHETIC_PASSWORD', sessions, async input =>
+    new URL(String(input)).pathname === '/cartelera' ? form()
+      : new Response('', { status: 403, headers: { 'cf-mitigated': 'challenge' } })),
+    e => e instanceof CinemaUnavailable);
   assert.equal(await sessions.read('supercines'), undefined);
 });
 

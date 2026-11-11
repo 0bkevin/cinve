@@ -8,7 +8,29 @@ import { load } from 'cheerio';
 import * as z from 'zod';
 import { DataError } from './core.js';
 
-class LoginError extends Error {}
+/**
+ * A sign-in that did not complete; its message is safe to show. A plain
+ * LoginError is ambiguous: the cinema may have evaluated the credentials
+ * (an error after they were sent), so it says nothing about them.
+ */
+export class LoginError extends Error {
+  constructor(message: string, readonly status?: number) { super(message); }
+}
+/** The cinema evaluated the credentials and refused them (or demanded a step Cinve cannot complete). */
+export class CredentialsRejected extends LoginError {}
+/** The credentials never reached the cinema: it failed, or changed its login flow, before that step. */
+export class CinemaUnavailable extends LoginError {}
+/**
+ * A firewall challenge (cf-mitigated: challenge) stopped a request at the
+ * cinema's edge. firstHop: it was the first request of its read, so for the
+ * credential submission the credentials provably never reached the login.
+ */
+class ChallengeError extends LoginError {
+  constructor(readonly firstHop: boolean) { super('El cine exige un desafío anti-bots y no admite el inicio de sesión automatizado.', 403); }
+}
+// Answers to the credential submission that mean the cinema refused it. 429
+// (the cinema throttling Cinve) and 5xx are outages, not verdicts.
+const refusalStatuses = new Set([400, 401, 403, 422]);
 
 export const AuthProvider = z.enum(['cinex', 'cinesunidos', 'supercines']);
 export type AuthProviderId = z.infer<typeof AuthProvider>;
@@ -147,7 +169,11 @@ export class LoginHttp {
           if (body && next.origin !== new URL(url).origin) throw new Error('No se reenvían credenciales entre orígenes.');
           url = next.href; continue;
         }
-        if (!r.ok) { await r.body?.cancel(); throw new LoginError(`El login respondió HTTP ${r.status}.`); }
+        if (!r.ok) {
+          await r.body?.cancel();
+          if (r.status === 403 && r.headers.get('cf-mitigated')?.toLowerCase() === 'challenge') throw new ChallengeError(step === 0);
+          throw new LoginError(`El login respondió HTTP ${r.status}.`, r.status);
+        }
         const reader = r.body?.getReader(); if (!reader) throw new Error('Respuesta de login vacía.');
         const chunks: Uint8Array[] = []; let size = 0;
         while (true) { const { done, value } = await reader.read(); if (done) break;
@@ -164,20 +190,34 @@ export class LoginHttp {
 export async function login(provider: AuthProviderId, username: string, password: string, store = new SessionStore(), request: typeof fetch = fetch) {
   AuthProvider.parse(provider);
   const http = new LoginHttp(provider, request);
+  // Whether the credentials have been submitted: errors before that cannot
+  // reflect on them, and errors after it may.
+  let sent = false;
+  const submit = async (url: string, init: RequestInit) => {
+    sent = true;
+    try { return await http.read(url, init); } catch (e) {
+      // A challenge on the submission itself stopped it before the login: an
+      // outage. One on a later hop (a redirect after the cinema accepted the
+      // password) is unclear, never an outage, which would reveal the password.
+      if (e instanceof ChallengeError) throw e.firstHop ? new CinemaUnavailable(e.message) : new LoginError(e.message);
+      if (e instanceof LoginError && e.status !== undefined && refusalStatuses.has(e.status)) throw new CredentialsRejected('El cine rechazó el login.');
+      throw e;
+    }
+  };
   try {
     if (provider === 'cinex') {
       const base = 'https://www.cinex.com.ve';
       await http.read(`${base}/`);
       const form = new FormData(); form.set('username', username); form.set('password', password);
-      const r = await http.read(`${base}/assets/php/validatelogin.php`, { method: 'POST', body: form,
+      const r = await submit(`${base}/assets/php/validatelogin.php`, { method: 'POST', body: form,
         headers: { Origin: base, Referer: `${base}/`, 'X-Requested-With': 'XMLHttpRequest' } });
       let data; try { data = JSON.parse(r.body); } catch { throw new LoginError('Cinex no aceptó la solicitud de login.'); }
-      if (data.result !== 'OK') throw new LoginError('Cinex no aceptó el login. Revisa las credenciales en su sitio.');
+      if (data.result !== 'OK') throw new CredentialsRejected('Cinex no aceptó el login. Revisa las credenciales en su sitio.');
       if ((await http.read(`${base}/checklogin.php`)).body.trim() !== 'on') throw new LoginError('Cinex no estableció una sesión válida.');
       await store.save({ version: 1, provider, expires_at: Date.now() + 24 * 3600000, cookie_jar: JSON.stringify(await http.jar.serialize()) });
       return { provider, authenticated: true, profile_update_requested: data.usuario_dataupdate !== 'S' };
     }
-    if (provider === 'supercines') return await supercinesLogin(http, username, password, store);
+    if (provider === 'supercines') return await supercinesLogin(http, username, password, store, submit);
     const base = 'https://www.cinesunidos.com';
     const csrf = JSON.parse((await http.read(`${base}/api/auth/csrf`)).body).csrfToken;
     if (typeof csrf !== 'string' || !csrf) throw new LoginError('Cines Unidos no entregó CSRF de login.');
@@ -192,8 +232,8 @@ export async function login(provider: AuthProviderId, username: string, password
     const fields = new URLSearchParams();
     loginForm.find('input[type=hidden][name]').each((_, el) => { fields.set($(el).attr('name')!, $(el).attr('value') ?? ''); });
     fields.set('username', username); fields.set('password', password); fields.set('login', 'Sign In');
-    const callback = await http.read(target.href, { method: 'POST', body: fields });
-    if (new URL(callback.url).origin !== base) throw new LoginError('Login incompleto: credenciales rechazadas o verificación adicional requerida.');
+    const callback = await submit(target.href, { method: 'POST', body: fields });
+    if (new URL(callback.url).origin !== base) throw new CredentialsRejected('Login incompleto: credenciales rechazadas o verificación adicional requerida.');
     const data = JSON.parse((await http.read(`${base}/api/auth/session`)).body);
     if (typeof data.access_token !== 'string') throw new LoginError('Cines Unidos no entregó una sesión autenticada.');
     // Only inspect expiry to bound local reuse; the upstream API validates the token itself.
@@ -204,8 +244,9 @@ export async function login(provider: AuthProviderId, username: string, password
     return { provider, authenticated: true, profile_update_requested: false };
   } catch (e) {
     // Never surface provider HTML, personal data, request objects, or credential-bearing URLs.
-    if (e instanceof LoginError) throw e;
-    throw new LoginError('No se pudo completar el login HTTP. Revisa la conexión o inicia sesión en el sitio para comprobar pasos adicionales.');
+    if (e instanceof CredentialsRejected || e instanceof CinemaUnavailable) throw e;
+    const message = e instanceof LoginError ? e.message : 'No se pudo completar el login HTTP. Revisa la conexión o inicia sesión en el sitio para comprobar pasos adicionales.';
+    throw sent ? new LoginError(message) : new CinemaUnavailable(message);
   }
 }
 
@@ -215,23 +256,21 @@ export async function login(provider: AuthProviderId, username: string, password
  * only the resulting cookies are stored. Accounts created with Google have no
  * password and cannot use this flow.
  */
-async function supercinesLogin(http: LoginHttp, username: string, password: string, store: SessionStore) {
+async function supercinesLogin(http: LoginHttp, username: string, password: string, store: SessionStore,
+  submit: (url: string, init: RequestInit) => Promise<{ url: string; body: string }>) {
   const base = 'https://supercines.com.ve';
   const page = await http.read(`${base}/cartelera`);
   const token = page.body.match(/<input type="hidden" name="_token" value="([A-Za-z0-9]{20,128})"/)?.[1]
     ?? page.body.match(/<meta\s+name="csrf-token"\s+content="([A-Za-z0-9]{20,128})"/)?.[1];
   if (!token) throw new LoginError('Supercines no mostró su formulario de login.');
-  let reply;
-  try {
-    reply = await http.read(`${base}/do-login`, { method: 'POST',
-      body: new URLSearchParams({ _token: token, email: username, password, urlActual: `${base}/cartelera` }),
-      headers: { 'X-CSRF-TOKEN': token, 'X-Requested-With': 'XMLHttpRequest', Accept: 'application/json', Origin: base, Referer: `${base}/cartelera` } });
-  } catch (e) {
-    if (e instanceof LoginError) throw new LoginError('Supercines no aceptó el login. Revisa el correo y la contraseña en su sitio (las cuentas creadas con Google no tienen contraseña).');
-    throw e;
-  }
+  // Submit the credentials through the classifier: a refusal is CredentialsRejected,
+  // a challenge or transport failure on this hop is an outage, never a verdict.
+  const reply = await submit(`${base}/do-login`, { method: 'POST',
+    body: new URLSearchParams({ _token: token, email: username, password, urlActual: `${base}/cartelera` }),
+    headers: { 'X-CSRF-TOKEN': token, 'X-Requested-With': 'XMLHttpRequest', Accept: 'application/json', Origin: base, Referer: `${base}/cartelera` } });
   let data; try { data = JSON.parse(reply.body); } catch { throw new LoginError('Supercines no aceptó la solicitud de login.'); }
-  if (data?.status !== true) throw new LoginError('Supercines no aceptó el login. Revisa el correo y la contraseña en su sitio.');
+  // A 200 with status:false is Laravel evaluating the credentials and refusing them.
+  if (data?.status !== true) throw new CredentialsRejected('Supercines no aceptó el login. Revisa el correo y la contraseña en su sitio (las cuentas creadas con Google no tienen contraseña).');
   const cookies = await http.jar.getCookies(`${base}/`);
   const session = cookies.find(c => c.key === 'supercines_session');
   if (!session || !cookies.some(c => c.key === 'XSRF-TOKEN')) throw new LoginError('Supercines no estableció una sesión válida.');

@@ -42,7 +42,55 @@ enlace privado, válido durante diez minutos. El usuario introduce sus
 credenciales únicamente en ese formulario y el asistente repite la consulta.
 
 Solo se ejecuta un inicio de sesión a la vez por solicitud y hay un máximo de
-cinco intentos por solicitud, además de un cupo por dirección IP. Un doble
+cinco intentos por solicitud. Hasta ocho envíos repetidos de una misma
+aprobación (dieciséis por red) esperan al primero; el resto se rechaza. Para que Cinve no pueda usarse para probar
+credenciales en los cines, los inicios de sesión de la aprobación y de los
+enlaces comparten estos límites:
+
+- por red (una IPv4 o un prefijo IPv6 /64): 20 intentos por minuto; tras 100
+  fallos en un día solo queda un carril lento de un intento por minuto, así que
+  quien comparte la dirección espera, pero nunca queda bloqueado todo el día. Cada
+  /48 de IPv6 admite además 60 intentos por minuto y, tras 300 fallos diarios,
+  dos por minuto;
+- por cuenta del cine: 5 intentos cada 15 minutos desde todas las redes. El
+  correo se normaliza (NFKC, sin caracteres invisibles, de control ni espacios,
+  sin tildes, sin distinguir mayúsculas, con letras como ł, ø o æ reducidas a
+  l, o y ae, y cualquier otro carácter no ASCII agrupado), así que sus variantes
+  comparten el límite;
+- en todo el servicio: con 300 fallos en 15 minutos, se rechazan las redes y
+  los /48 con fallos recientes, y cada red solo puede tener un intento (dos por
+  /48) cada 15 minutos.
+
+El dueño de una cuenta que ya la conectó en los últimos 30 días tiene solo su
+propio cupo de 5 intentos cada 15 minutos, y lo que hagan otros (los topes de
+la red, el modo de ataque global o los intentos contra la cuenta) no lo bloquea.
+La prueba de que es el dueño no es su dirección, sino algo que solo él tiene:
+en un enlace, la conexión de Cinve con la que conectó la cuenta antes; en la
+aprobación, una cookie propia de Cinve (`cinve_device`, HttpOnly, 30 días) que
+su navegador recibe tras un inicio de sesión correcto, con un valor nuevo cada
+vez, para que un valor plantado de antemano en el navegador nunca sirva de
+prueba. Así nadie puede usar ni detectar esa excepción. Un inicio correcto no reinicia ningún contador. Cada
+cupo se cobra de forma atómica, y si un límite rechaza el intento se devuelve
+lo ya cobrado, también los intentos del enlace y de la aprobación.
+
+Solo cuenta como fallo un rechazo del cine: Cinex responde que el login no es
+válido, Cines Unidos devuelve su formulario de acceso, o el envío de las
+credenciales recibe HTTP 400, 401, 403 o 422. Si el cine falla antes de recibir
+las credenciales (también si su firewall frena con un desafío anti-bots el
+propio envío), Cinve responde que el cine no está disponible (503), no cuenta el
+fallo y devuelve el intento a la cuenta, al enlace y a la aprobación. Un desafío
+en un paso posterior se trata como un error posterior al envío. Un error posterior al envío
+(tiempo de espera, 429 o 5xx) solo cuenta para los topes diarios de la red, no
+para el modo de ataque global, y se responde igual que un rechazo, para no
+revelar si la contraseña era correcta. Por la misma razón, un rechazo y un error
+posterior al envío se responden en múltiplos de dos segundos desde el intento,
+para que el tiempo de respuesta tampoco lo revele.
+
+Las claves de todos los límites (que nombran direcciones IP y correos de cuentas
+del cine) se guardan solo como HMAC-SHA256 con una subclave derivada de
+`CINEV_ENCRYPTION_KEY`, así que no se pueden confirmar calculando el resumen
+de una dirección o un correo conocidos, y caducan como mucho en un día. Recomendamos añadir además reglas de límite de
+solicitudes en el firewall de Vercel para `/oauth/authorize` y `/connect/login`. Un doble
 envío espera al primero y devuelve al navegador al asistente con un código
 nuevo; el código anterior deja de ser válido.
 
@@ -147,17 +195,58 @@ de acceso duran una hora; los tokens de renovación rotan en cada uso dentro de
 una autorización absoluta de 30 días. Reutilizar un token de renovación o un
 código consumido revoca la conexión para contener una posible repetición.
 
-Los tokens opacos se guardan únicamente como resúmenes SHA-256. Las sesiones de
+Los tokens opacos se guardan únicamente como resúmenes SHA-256. Los tokens de
+acceso y de renovación llevan además una firma HMAC-SHA256 con una subclave
+derivada (HKDF) de `CINEV_ENCRYPTION_KEY`: un token falsificado se rechaza en
+memoria, sin consultar la base (también al revocarlo), y uno válido se sigue
+comprobando en ella para respetar su vencimiento, su revocación y la detección
+de reutilización. Los tokens y enlaces sin firma emitidos antes de este cambio
+se aceptan durante un tiempo limitado desde que la primera instancia empezó a
+firmar, momento que queda registrado en `cinev_meta` (migración 006): un día
+para tokens de acceso y enlaces y 31 días para tokens de renovación. Así la
+transición sigue al despliegue real; mientras no se ejecute la migración 006,
+se siguen aceptando. Vercel cambia de despliegue de forma atómica. Si vuelves a
+una versión anterior a la firma, los clientes renuevan sus tokens solos, pero
+un enlace de conexión emitido en los últimos diez minutos deja de valer y el
+usuario debe pedir otro. Las sesiones de
 cine se cifran con AES-256-GCM y se vinculan criptográficamente a su propietario
-y proveedor. El registro, la aprobación y la emisión de tokens tienen límites
-persistentes por IP y globales. El límite global solo se consume cuando la IP
-todavía tiene cupo, para que una sola dirección no agote el servicio para todos.
+y proveedor. Los códigos de autorización y los tokens de acceso y de renovación llevan firma.
+Las comprobaciones que no necesitan la base (formato del cuerpo, firma,
+parámetros, cookie de aprobación) se hacen antes de cobrar cualquier cupo, así
+que una solicitud malformada o falsificada no cuesta nada. Después:
+
+- iniciar una autorización y registrar un cliente tienen cupos por red y por
+  prefijo IPv6 /48, y un cupo global (600 y 60 por minuto) que se consume solo
+  cuando la red todavía tiene el suyo, así que una sola red nunca lo agota;
+- canjear un código firmado, renovar con un token firmado o revocarlo se
+  limitan por la propia credencial, de un solo uso, y nunca por lo que hagan
+  otros en la misma red;
+- aprobar no tiene cupo de red: exige la cookie de una solicitud que el
+  navegador inició, y el inicio de sesión del cine tiene sus propios límites.
+
+Antes de cualquier consulta a la base, cada instancia aplica en memoria un
+primer filtro. Las páginas estáticas (`/`, `/connect`) nunca se limitan. Las
+solicitudes sin un token firmado admiten 600 por minuto por red y 2400 por
+prefijo IPv6 /48, y 30 credenciales sin firma rechazadas por minuto por red.
+Los tokens de acceso y los enlaces de conexión llevan firma, así que no se
+pueden falsificar: donde se usan (`/mcp` y `/connect/*`), cada uno vigente tiene
+su propio cupo (600 por minuto), con topes de 3000 por minuto por red y 6000
+por /48 para quien emita muchos, y el tráfico basura de otros en una dirección
+compartida (NAT de operador) nunca los detiene. Uno revocado o usado no tiene
+cupo propio. Un
+token o enlace firmado que ya falló (revocado, vencido o usado) se rechaza
+desde memoria durante una hora, y un token sin firma que funcionó hace poco no
+se detiene por los fallos ajenos. Los límites persistentes en PostgreSQL siguen
+siendo los que valen entre instancias.
 
 En `/mcp`, cada conexión admite hasta 120 solicitudes por minuto y cuatro
 simultáneas; el proceso admite 32 simultáneas. La plaza se reserva antes de leer
 el cuerpo, que debe llegar completo en diez segundos. Las llamadas con
 `refresh: true` evitan la caché pública compartida y pueden generar varias
-lecturas al proveedor, por lo que tienen un cupo propio de diez por minuto.
+lecturas al proveedor, por lo que tienen un cupo propio de diez por minuto y uno global de 120 por
+minuto. Los cupos por dirección agrupan IPv6 por su prefijo /64, porque un solo
+usuario suele disponer de un bloque así de direcciones; IPv4 se cuenta por
+dirección.
 
 `/mcp` admite solicitudes desde cualquier origen web, porque la autorización es
 solo mediante token Bearer y nunca usa cookies; la comprobación exacta de `Host`
@@ -193,14 +282,19 @@ reanudación que el protocolo 2026-07-28 eliminó.
    node --env-file=.env.production.local --import tsx scripts/migrate-neon.ts
    ```
 
-5. Despliega y verifica la salud del proceso:
+5. Limita el coste de un ataque de saturación: fija un tamaño máximo de cómputo
+   (autoscaling) en Neon y añade en el firewall de Vercel reglas de límite de
+   solicitudes por IP para `/mcp`, `/oauth/*` y `/connect/*`. Así el tráfico
+   abusivo se descarta en el borde, antes de ejecutar la función.
+
+6. Despliega y verifica la salud del proceso:
 
    ```sh
    vercel --prod
    curl https://<dominio>/health
    ```
 
-6. Prueba `/mcp` por separado para cubrir base de datos y protocolo. Comprueba
+7. Prueba `/mcp` por separado para cubrir base de datos y protocolo. Comprueba
    consultas reales desde la infraestructura publicada: que un proveedor
    responda desde tu equipo no garantiza que responda desde Vercel.
 
@@ -244,7 +338,10 @@ guardar una sesión después de cancelar, reemplazar, vencer o revocar el enlace
 Ante una caída de la base, las operaciones protegidas fallan de forma cerrada.
 
 Una tarea diaria autenticada elimina sesiones, enlaces, límites y objetos OAuth
-vencidos. El registro OAuth es anónimo, así que también elimina los clientes
+vencidos. Además, las ventanas de límites vencidas y las solicitudes de
+autorización vencidas sin conexión se eliminan por lotes a medida que se
+acumulan, para que una avalancha de direcciones nuevas no haga crecer la base
+durante todo el día. El registro OAuth es anónimo, así que también elimina los clientes
 registrados sin autorizaciones vigentes que llevan 90 días sin emitir tokens; un
 cliente que vuelva se registra de nuevo. Ejecuta `npm run db:migrate` antes de
 desplegar una versión con migraciones nuevas. La validez se comprueba al acceder y no depende de esa limpieza. La

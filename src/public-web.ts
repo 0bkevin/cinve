@@ -25,7 +25,7 @@ export function setSecurityHeaders(res: ServerResponse, https: boolean) {
   res.setHeader('Cache-Control', 'no-store'); res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Content-Security-Policy', `default-src 'none'; script-src 'self'; style-src ${styleSource}; font-src 'self'; img-src 'self'; connect-src 'self'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'`);
-  if (https) res.setHeader('Strict-Transport-Security', 'max-age=31536000');
+  if (https) res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
 }
 
 export function publicPage(title: string, content: string, options: { compact?: boolean; script?: string; index?: boolean; canonical?: string } = {}) {
