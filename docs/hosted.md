@@ -45,23 +45,30 @@ cinco intentos por solicitud. Para que Cinve no pueda usarse para probar
 credenciales en los cines, los inicios de sesión de la aprobación y de los
 enlaces comparten estos límites:
 
-- por red (una IPv4 o un prefijo IPv6 /64): 20 intentos por minuto y 100 fallos
-  por día; cada /48 de IPv6 admite además 60 intentos por minuto y 300 fallos
-  por día;
+- por red (una IPv4 o un prefijo IPv6 /64): 20 intentos por minuto; tras 100
+  fallos en un día solo queda un carril lento de un intento por minuto, así que
+  quien comparte la dirección espera, pero nunca queda bloqueado todo el día. Cada
+  /48 de IPv6 admite además 60 intentos por minuto y, tras 300 fallos diarios,
+  dos por minuto;
 - por cuenta del cine: 5 intentos cada 15 minutos desde todas las redes. El
-  correo se normaliza (NFKC, sin caracteres invisibles ni espacios, sin tildes,
-  sin distinguir mayúsculas), así que sus variantes comparten el límite;
+  correo se normaliza (NFKC, sin caracteres invisibles, de control ni espacios,
+  sin tildes, sin distinguir mayúsculas, con letras como ł, ø o æ reducidas a
+  l, o y ae, y cualquier otro carácter no ASCII agrupado), así que sus variantes
+  comparten el límite;
 - en todo el servicio: con 300 fallos en 15 minutos, se rechazan las redes y
   los /48 con fallos recientes, y cada red solo puede tener un intento (dos por
-  /48) cada 15 minutos, reservado de forma atómica.
+  /48) cada 15 minutos.
 
-Una cuenta que ya inició sesión desde una red en los últimos 30 días tiene en
-esa red solo su propio cupo de 5 intentos cada 15 minutos: lo que hagan otros
-(los topes de la red, el modo de ataque global o los intentos contra la cuenta
-desde otras redes) no puede bloquear a su dueño, por ejemplo detrás de un NAT
-de operador. Un inicio correcto no reinicia ningún contador, para que no se
-pueda deducir. Si un límite rechaza el intento, este no consume los intentos
-del enlace ni de la aprobación.
+El dueño de una cuenta que ya la conectó en los últimos 30 días tiene solo su
+propio cupo de 5 intentos cada 15 minutos, y lo que hagan otros (los topes de
+la red, el modo de ataque global o los intentos contra la cuenta) no lo bloquea.
+La prueba de que es el dueño no es su dirección, sino algo que solo él tiene:
+en un enlace, la conexión de Cinve con la que conectó la cuenta antes; en la
+aprobación, una cookie propia de Cinve (`cinve_device`, HttpOnly, 30 días) que
+su navegador recibe tras un inicio de sesión correcto. Así nadie puede usar ni
+detectar esa excepción. Un inicio correcto no reinicia ningún contador. Cada
+cupo se cobra de forma atómica, y si un límite rechaza el intento se devuelve
+lo ya cobrado, también los intentos del enlace y de la aprobación.
 
 Solo cuenta como fallo un rechazo del cine: Cinex responde que el login no es
 válido, Cines Unidos devuelve su formulario de acceso, o el envío de las

@@ -300,7 +300,8 @@ export async function createHostedApp(options: {
         // Claim first: a duplicate submit that only finds the link busy uses no sign-in attempt.
         if (!await links.claim(token)) throw new HttpError(429, 'Conexión en uso o vencida. Pide un enlace nuevo.');
         claimed = true;
-        const subject: SignInSubject = { network: ip, provider: connection.provider, username: data.username };
+        // Proof of ownership: the Cinve connection this account was connected through before.
+        const subject: SignInSubject = { network: ip, provider: connection.provider, username: data.username, proofs: [`principal:${connection.user}`] };
         const refusal = await links.admitSignIn(subject);
         if (refusal) { refund = true; throw new HttpError(429, signInRefusalMessage[refusal]); }
         let stagedSession: AuthSession | undefined;

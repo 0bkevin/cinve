@@ -369,6 +369,11 @@ export class HostedOAuth {
             (decision === 'connect' && !this.accounts)) throw junk();
         const cookie = req.headers.cookie?.split(';').map(v => v.trim()).find(v => v.startsWith(`cinve_approval_${id}=`))?.split('=')[1];
         if (cookie !== csrf) throw junk(403);
+        // A first-party cookie that marks this browser as having connected a
+        // cinema here before: the proof that exempts its owner from what
+        // others do (see admitSignIn). Created on the first successful sign-in.
+        const known = req.headers.cookie?.split(';').map(v => v.trim()).find(v => v.startsWith('cinve_device='))?.split('=')[1];
+        const device = known && /^[A-Za-z0-9_-]{43}$/.test(known) ? known : secret();
         // No network quota: only a browser holding this request's approval
         // cookie gets here, so approvals are bounded by authorization starts
         // (limited above), and cinema sign-ins have their own limits. Others
@@ -414,7 +419,8 @@ export class HostedOAuth {
             }
             if (claimed) {
               // The per-address budget counts sign-ins, not duplicate submits that only wait.
-              const subject = { network: ip, provider: provider.data, username };
+              // Proof of ownership: a cookie this browser received after an earlier successful sign-in here.
+              const subject = { network: ip, provider: provider.data, username, proofs: [`browser:${device}`] };
               const refusal = await this.budgets.admitSignIn(subject);
               if (refusal) {
                 // The sign-in never ran: give back the request's attempt.
@@ -473,7 +479,9 @@ export class HostedOAuth {
             return dest.href;
           });
           claimed = false;
-          res.setHeader('Set-Cookie', `cinve_approval_${id}=; HttpOnly; SameSite=Lax; Path=/oauth/authorize; Max-Age=0${origin.startsWith('https:') ? '; Secure' : ''}`);
+          const secure = origin.startsWith('https:') ? '; Secure' : '';
+          res.setHeader('Set-Cookie', [`cinve_approval_${id}=; HttpOnly; SameSite=Lax; Path=/oauth/authorize; Max-Age=0${secure}`,
+            ...(session ? [`cinve_device=${device}; HttpOnly; SameSite=Lax; Path=/oauth/authorize; Max-Age=${30 * 86400}${secure}`] : [])]);
           res.writeHead(303, { Location: destination }); res.end(); return true;
         } finally { if (claimed) await release(); }
       }

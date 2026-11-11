@@ -13,14 +13,20 @@ export const signInLimits = {
   accountAttempts: 5, accountWindowSeconds: 900,
   globalFailures: 300, recentWindowSeconds: 900,
   strainedPerNetwork: 1, strainedPerBlock: 2,
+  slowPerNetwork: 1, slowPerBlock: 2,
   knownSeconds: 30 * 86400,
 };
-/** network: a rate-limit network (rateLimitNetwork); username as typed (see accountName). */
-export type SignInSubject = { network: string; provider: AuthProviderId; username: string };
+/**
+ * network: a rate-limit network (rateLimitNetwork); username as typed (see
+ * accountName). proofs: identifiers only the account's owner holds (the Cinve
+ * connection that connected it before, a cookie in their browser), which
+ * earn the known-owner exemption; an address never does.
+ */
+export type SignInSubject = { network: string; provider: AuthProviderId; username: string; proofs?: string[] };
 export type SignInRefusal = 'account' | 'network' | 'strained';
 export const signInRefusalMessage: Record<SignInRefusal, string> = {
   account: 'Demasiados intentos para esta cuenta. Espera 15 minutos o comprueba tus datos en la web del cine.',
-  network: 'Demasiados intentos desde tu red. Espera unos minutos y vuelve a intentarlo.',
+  network: 'Demasiados intentos desde tu red. Espera un minuto y vuelve a intentarlo.',
   strained: 'Demasiados intentos fallidos en Cinve en este momento. Espera 15 minutos y vuelve a intentarlo.',
 };
 /**
@@ -46,15 +52,19 @@ const globalFailures = 'signin-fail:global';
  * characters and whitespace, strip combining marks and fold case. Merging
  * more names than the cinema does only makes the limit stricter.
  */
+// Letters accent-insensitive collations equate with Latin ones but Unicode does not decompose.
+const foldedLetters: Record<string, string> = { æ: 'ae', œ: 'oe', ø: 'o', ł: 'l', đ: 'd', ð: 'd', þ: 'th', ħ: 'h', ŧ: 't', ŋ: 'n', ĸ: 'k' };
 export function accountName(username: string) {
-  return username.normalize('NFKC').replace(/[\p{Default_Ignorable_Code_Point}\s]/gu, '')
-    .normalize('NFD').replace(/\p{M}/gu, '').toUpperCase().toLowerCase();
+  return username.normalize('NFKC').replace(/[\p{Default_Ignorable_Code_Point}\p{Cc}\s]/gu, '')
+    .normalize('NFD').replace(/\p{M}/gu, '').toUpperCase().toLowerCase()
+    .replace(/[æœøłđðþħŧŋĸ]/g, c => foldedLetters[c])
+    // Anything else outside ASCII shares one placeholder (stricter, never looser).
+    .replace(/[^\x20-\x7e]/g, '*');
 }
 const account = (s: SignInSubject) => `${s.provider}:${accountName(s.username)}`;
 const accountKey = (s: SignInSubject) => `signin:account:${account(s)}`;
-// An account that signed in from this network before: its owner's usual network.
-const knownKey = (s: SignInSubject) => `signin:known:${account(s)}:${s.network}`;
-const pairKey = (s: SignInSubject) => `signin:pair:${account(s)}:${s.network}`;
+const knownKey = (s: SignInSubject, proof: string) => `signin:known:${account(s)}:${proof}`;
+const pairKey = (s: SignInSubject, proof: string) => `signin:pair:${account(s)}:${proof}`;
 /** The /48 an IPv6 /64 rate-limit network belongs to; undefined for IPv4. Catches rotation across a larger IPv6 allocation. */
 export function ipv6Block(network: string) {
   return network.endsWith('::/64') ? network.split(':').slice(0, 3).join(':') + '::/48' : undefined;
@@ -203,6 +213,10 @@ export class ConnectionLinks {
   }
   // The per-account budget each admitted attempt was charged to, for a refund.
   private charged = new WeakMap<SignInSubject, string>();
+  /** Gives back one use of each window (a charge that turned out not to be needed). */
+  private async refund(keys: string[]) {
+    if (keys.length) await this.pool.query('UPDATE cinev_budgets SET count=GREATEST(count-1,0) WHERE key_hash=ANY($1) AND expires_at>now()', [keys.map(key => this.keyHash(key))]);
+  }
   /**
    * Admission for one cinema sign-in, from the consent page or a connection
    * link (connections are self-service, so per-connection limits alone would
@@ -210,38 +224,49 @@ export class ConnectionLinks {
    * is refused, or undefined. Every admitted attempt must be reported with
    * signInError or signInSucceeded, passing the same subject object.
    *
-   * - A known pair (this account signed in from this network within 30
-   *   days) is its owner's usual network: it has only its own budget of 5
-   *   attempts per 15 minutes, so nothing others do (network caps, strained
-   *   mode, guesses at the account from elsewhere) locks the owner out, and
-   *   an attacker sharing that network is still bounded per account.
+   * - A known owner (this account signed in within 30 days with one of the
+   *   subject's proofs) has only their own budget of 5 attempts per 15
+   *   minutes: nothing others do (network caps, strained mode, guesses at
+   *   the account) locks them out, and nobody without the proof can use or
+   *   observe the exemption.
    * - Otherwise, per network (an IPv4 address or IPv6 /64) and per IPv6
-   *   /48: attempts per minute and failures per day; and per cinema account
-   *   5 attempts per 15 minutes from all networks together, reserved
-   *   atomically so parallel guesses cannot overshoot.
+   *   /48: attempts per minute; past the daily failure cap only a slow lane
+   *   of one attempt per minute (two per /48), so first-time users behind a
+   *   shared address are slowed, never locked out for the day. Per cinema
+   *   account: 5 attempts per 15 minutes from all networks together.
    * - Service-wide failures: past the threshold ("strained"), networks or
-   *   /48s with a recent failure are refused, and each may hold only one
-   *   attempt (two per /48) per 15 minutes, reserved atomically. Successful
-   *   sign-ins have no global cap.
+   *   /48s with a recent failure are refused, and each may hold one attempt
+   *   (two per /48) per 15 minutes. Successful sign-ins have no global cap.
+   *
+   * Every charge is atomic, and a refusal gives back the charges made before
+   * it, so a refused attempt spends nothing (a strained slot included).
    */
   async admitSignIn(subject: SignInSubject): Promise<SignInRefusal | undefined> {
-    const keys = failureKeys(subject.network), L = signInLimits;
-    const [known, day, recent, global, blockDay = 0, blockRecent = 0] = await this.counts([knownKey(subject), keys.day, keys.recent, globalFailures,
-      ...(keys.block ? [keys.blockDay!, keys.blockRecent!] : [])]);
-    if (known > 0) {
-      if (!await this.budget(pairKey(subject), L.accountAttempts, L.accountWindowSeconds)) return 'account';
-      this.charged.set(subject, pairKey(subject));
+    const keys = failureKeys(subject.network), L = signInLimits, proofs = subject.proofs ?? [];
+    const [day, recent, global, blockDay = 0, blockRecent = 0, ...known] = await this.counts([keys.day, keys.recent, globalFailures,
+      ...(keys.block ? [keys.blockDay!, keys.blockRecent!] : [0, 0].map((_, i) => `signin:none:${i}`)), ...proofs.map(proof => knownKey(subject, proof))]);
+    const owner = proofs.find((_, i) => known[i] > 0);
+    if (owner !== undefined) {
+      if (!await this.budget(pairKey(subject, owner), L.accountAttempts, L.accountWindowSeconds)) return 'account';
+      this.charged.set(subject, pairKey(subject, owner));
       return undefined;
     }
-    if (day >= L.networkFailuresPerDay || blockDay >= L.blockFailuresPerDay) return 'network';
+    const charged: string[] = [];
+    const charge = async (key: string, limit: number, windowSeconds = 60) => {
+      if (!await this.budget(key, limit, windowSeconds)) return false;
+      charged.push(key); return true;
+    };
+    const refuse = async (reason: SignInRefusal) => { await this.refund(charged); return reason; };
     if (global >= L.globalFailures) {
       if (recent > 0 || blockRecent > 0) return 'strained';
-      if (!await this.budget(`signin:strained:${subject.network}`, L.strainedPerNetwork, L.recentWindowSeconds) ||
-          (keys.block && !await this.budget(`signin:strained:${keys.block}`, L.strainedPerBlock, L.recentWindowSeconds))) return 'strained';
+      if (!await charge(`signin:strained:${subject.network}`, L.strainedPerNetwork, L.recentWindowSeconds) ||
+          (keys.block && !await charge(`signin:strained:${keys.block}`, L.strainedPerBlock, L.recentWindowSeconds))) return refuse('strained');
     }
-    if (!await this.budget(`oauth:login-ip:${subject.network}`, L.networkPerMinute)) return 'network';
-    if (keys.block && !await this.budget(`signin:block:${keys.block}`, L.blockPerMinute)) return 'network';
-    if (!await this.budget(accountKey(subject), L.accountAttempts, L.accountWindowSeconds)) return 'account';
+    if (day >= L.networkFailuresPerDay && !await charge(`signin:slow:${subject.network}`, L.slowPerNetwork)) return refuse('network');
+    if (blockDay >= L.blockFailuresPerDay && !await charge(`signin:slow:${keys.block}`, L.slowPerBlock)) return refuse('network');
+    if (!await charge(`oauth:login-ip:${subject.network}`, L.networkPerMinute)) return refuse('network');
+    if (keys.block && !await charge(`signin:block:${keys.block}`, L.blockPerMinute)) return refuse('network');
+    if (!await charge(accountKey(subject), L.accountAttempts, L.accountWindowSeconds)) return refuse('account');
     this.charged.set(subject, accountKey(subject));
     return undefined;
   }
@@ -277,11 +302,12 @@ export class ConnectionLinks {
     return 'refused';
   }
   /**
-   * Correct credentials: remember this account and network as a known pair.
+   * Correct credentials: remember the owner's proofs for this account.
    * Nothing is cleared, so a success cannot be observed through the limits.
    */
   async signInSucceeded(subject: SignInSubject) {
-    await this.record([[knownKey(subject), signInLimits.knownSeconds]]);
+    const proofs = subject.proofs ?? [];
+    if (proofs.length) await this.record(proofs.map(proof => [knownKey(subject, proof), signInLimits.knownSeconds] as [string, number]));
   }
   async cleanup() {
     // A cinema connected on the consent page whose code was never exchanged

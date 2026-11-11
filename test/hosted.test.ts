@@ -579,7 +579,7 @@ async function consentForm(origin: string, client_id: string) {
       resource: origin + '/mcp', redirect_uri: request.params.redirect_uri });
     return { code, response };
   };
-  return { html, submit, exchange };
+  return { html, submit, exchange, cookie };
 }
 const cinema = { decision: 'connect', provider: 'cinesunidos', username: 'person@example.test' };
 
@@ -974,7 +974,7 @@ test('connection-link sign-ins are charged to the network, and failures and succ
   accept = true;
   assert.equal((await f.post('/connect/login', await browser(), { username: 'person@example.test', password: 'SYNTHETIC_PASSWORD' })).status, 200);
   assert.equal(await count('signin:account:cinesunidos:person@example.test'), 2, 'a success clears nothing, so it cannot be observed');
-  assert.equal(await count('signin:known:cinesunidos:person@example.test:127.0.0.1'), 1, 'it marks the account and network as known');
+  assert.equal(await count(`signin:known:cinesunidos:person@example.test:principal:${f.alice.id}`), 1, 'it marks the connection as the account\'s owner');
   assert.equal(await count('signin-fail:day:127.0.0.1'), 1, 'a success never clears network failures');
 });
 
@@ -986,9 +986,10 @@ test('one cinema account gets five attempts per 15 minutes, from any network and
   assert.ok(admitted.filter(Boolean).every(r => r === 'account'));
   assert.equal(await f.links.admitSignIn(account('other@example.test', 9)), undefined);
   assert.equal(await f.links.admitSignIn({ ...account('victim@example.test', 9), provider: 'cinesunidos' }), undefined, 'accounts are per cinema');
-  await f.links.signInSucceeded(account('VICTIM@example.test', 0));
-  assert.equal(await f.links.admitSignIn(account('victim@example.test', 0)), undefined, 'the owner\'s known network is not locked out');
-  assert.equal(await f.links.admitSignIn(account('victim@example.test', 10)), 'account', 'a success does not reopen the account to others');
+  await f.links.signInSucceeded({ ...account('VICTIM@example.test', 0), proofs: ['principal:owner'] });
+  assert.equal(await f.links.admitSignIn({ ...account('victim@example.test', 10), proofs: ['principal:owner'] }), undefined, 'the owner is not locked out, from any network');
+  assert.equal(await f.links.admitSignIn(account('victim@example.test', 0)), 'account', 'a success does not reopen the account to others, even on its network');
+  assert.equal(await f.links.admitSignIn({ ...account('victim@example.test', 0), proofs: ['principal:someone-else'] }), 'account');
 });
 
 test('under a broad failing attack only networks without recent failures may sign in', async t => {
@@ -1012,9 +1013,13 @@ test('networks have daily failure limits, and IPv6 /64s also share their /48', a
   const fill = (key: string, count: number, interval = '1 day') =>
     f.pool.query(`INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '${interval}',$2)`, [f.links.keyHash(key), count]);
   await fill('signin-fail:day:203.0.113.5', 100);
-  assert.equal(await f.links.admitSignIn(subject('203.0.113.5', 'a@example.test')), 'network');
+  // Past the daily cap only a slow lane remains: one attempt per minute.
+  assert.equal(await f.links.admitSignIn(subject('203.0.113.5', 'a@example.test')), undefined);
+  assert.equal(await f.links.admitSignIn(subject('203.0.113.5', 'a2@example.test')), 'network');
   await fill('signin-fail:day:2001:0db8:0001::/48', 300);
-  assert.equal(await f.links.admitSignIn(subject('2001:db8:1:7::1', 'b@example.test')), 'network', 'a fresh /64 in a failing /48');
+  assert.equal(await f.links.admitSignIn(subject('2001:db8:1:7::1', 'b@example.test')), undefined);
+  assert.equal(await f.links.admitSignIn(subject('2001:db8:1:8::1', 'b2@example.test')), undefined, 'two per /48');
+  assert.equal(await f.links.admitSignIn(subject('2001:db8:1:9::1', 'b3@example.test')), 'network', 'a fresh /64 in a failing /48');
   assert.equal(await f.links.admitSignIn(subject('2001:db8:2:7::1', 'c@example.test')), undefined);
   await fill('signin:block:2001:0db8:0003::/48', 60, '1 minute');
   assert.equal(await f.links.admitSignIn(subject('2001:db8:3:9::1', 'd@example.test')), 'network', 'per-minute /48 attempts');
@@ -1390,17 +1395,30 @@ test('strained mode reserves one attempt per network and two per /48, even in pa
   assert.equal(await f.links.admitSignIn(subject('2001:0db8:00ac:0001::/64', 99)), undefined, 'another /48');
 });
 
-test('an account\'s known network is exempt from network caps and strained mode, but not from its own budget', async t => {
+test('a proven owner is exempt from network caps and strained mode, but not from their own budget', async t => {
   const f = await fixture(t);
-  const { digest: _ } = await import('../src/hosted-store.js');
-  const shared = '190.202.1.1', owner = { network: shared, provider: 'cinex' as const, username: 'owner@example.test' };
+  const shared = '190.202.1.1', owner = { network: shared, provider: 'cinex' as const, username: 'owner@example.test', proofs: ['browser:owner-cookie'] };
   await f.links.signInSucceeded(owner);
   const fill = (key: string, count: number) => f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 day',$2)", [f.links.keyHash(key), count]);
   await fill(`signin-fail:day:${shared}`, 100); await fill(`signin-fail:recent:${shared}`, 5); await fill('signin-fail:global', 300);
   await fill(`oauth:login-ip:${shared}`, 21); await fill('signin:account:cinex:owner@example.test', 5);
-  assert.equal(await f.links.admitSignIn({ ...owner, username: 'other@example.test' }), 'network', 'others on the shared address are held back');
+  // Without the owner's proof, the same account on the same network is held back: the exemption cannot be used or observed.
+  assert.equal(await f.links.admitSignIn({ ...owner, proofs: [] }), 'strained');
+  assert.equal(await f.links.admitSignIn({ ...owner, proofs: ['browser:attacker'] }), 'strained');
+  assert.equal(await f.links.admitSignIn({ ...owner, username: 'other@example.test' }), 'strained', 'the proof is per account');
   for (let i = 0; i < 5; i++) assert.equal(await f.links.admitSignIn({ ...owner }), undefined, `owner attempt ${i + 1}`);
-  assert.equal(await f.links.admitSignIn({ ...owner }), 'account', 'the pair still has its own budget');
+  assert.equal(await f.links.admitSignIn({ ...owner }), 'account', 'the owner still has their own budget');
+});
+
+test('a refused attempt gives back what it charged, so it cannot spend a strained slot', async t => {
+  const f = await fixture(t);
+  await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '15 minutes',300),($2,now()+interval '15 minutes',5)",
+    [f.links.keyHash('signin-fail:global'), f.links.keyHash('signin:account:cinex:locked@example.test')]);
+  const network = '198.51.100.123';
+  assert.equal(await f.links.admitSignIn({ network, provider: 'cinex', username: 'locked@example.test' }), 'account');
+  assert.equal(await f.links.admitSignIn({ network, provider: 'cinex', username: 'newcomer@example.test' }), undefined, 'the slot is still free');
+  const left = await f.pool.query('SELECT count FROM cinev_budgets WHERE key_hash=$1', [f.links.keyHash(`oauth:login-ip:${network}`)]);
+  assert.equal(left.rows[0].count, 1, 'only the admitted attempt was charged to the network');
 });
 
 test('every spelling of one email shares its account limit', async t => {
@@ -1408,6 +1426,9 @@ test('every spelling of one email shares its account limit', async t => {
   const { accountName } = await import('../src/hosted-links.js');
   const variants = ['Owner@Example.com', 'ówner@example.com', 'ｏwner@example.com', 'o\u200Bwner@example.com', ' OWNER@EXAMPLE.COM '];
   assert.deepEqual(new Set(variants.map(accountName)), new Set(['owner@example.com']));
+  for (const [a, b] of [['carłos@x.com', 'carlos@x.com'], ['mæva@x.com', 'maeva@x.com'], ['jøse@x.com', 'jose@x.com'], ['điana@x.com', 'diana@x.com'],
+    ['straße@x.de', 'strasse@x.de'], ['a\u0000b@x.com', 'ab@x.com']]) assert.equal(accountName(a), accountName(b), `${a} ~ ${b}`);
+  assert.equal(accountName('数@x.com'), accountName('字@x.com'), 'other non-ASCII letters share one placeholder (stricter)');
   const results = [];
   for (const [i, username] of [...variants, 'owner@example.com'].entries()) results.push(await f.links.admitSignIn({ network: `203.0.113.${i}`, provider: 'cinex', username }));
   assert.deepEqual(results, [undefined, undefined, undefined, undefined, undefined, 'account']);
@@ -1613,4 +1634,33 @@ test('refused sign-ins are answered in fixed time steps, also when the cinema is
     const total = Date.now() - started;
     assert.ok(total >= expected - 5 && total < expected + 80, `took ${took} ms: answered at ${total} ms, expected ${expected}`);
   }
+});
+
+test('a concurrent double submit on a link runs one sign-in and charges the account once', async t => {
+  let calls = 0;
+  const slow: typeof login = async (...args) => { calls++; await new Promise(r => setTimeout(r, 300)); throw new Error('refused'); };
+  const f = await fixture(t, slow);
+  const client = await f.client(f.alice.token);
+  const browser = ((await (await f.post('/connect/exchange', await link(client))).json()) as { browser_token: string }).browser_token;
+  const submit = () => f.post('/connect/login', browser, { username: 'person@example.test', password: 'x' }).then(r => r.status);
+  const statuses = await Promise.all([submit(), submit()]);
+  assert.deepEqual(statuses.sort(), [401, 429]);
+  assert.equal(calls, 1);
+  assert.equal((await f.pool.query('SELECT count FROM cinev_budgets WHERE key_hash=$1', [f.links.keyHash('signin:account:cinesunidos:person@example.test')])).rows[0].count, 1);
+});
+
+test('the consent page remembers its owner\'s browser after a successful sign-in', async t => {
+  const f = await fixture(t, successfulLogin);
+  const first = await consentForm(f.origin, await register(f.origin));
+  const done = await first.submit({ ...cinema, password: 'SYNTHETIC_PASSWORD' });
+  assert.equal(done.status, 303);
+  const device = done.headers.getSetCookie().find(c => c.startsWith('cinve_device='));
+  assert.match(device ?? '', /^cinve_device=[A-Za-z0-9_-]{43}; HttpOnly; SameSite=Lax; Path=\/oauth\/authorize; Max-Age=2592000/);
+  // The network's attempts are spent: a stranger is held back, the returning owner's browser is not.
+  await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 minute',21) ON CONFLICT(key_hash) DO UPDATE SET count=21",
+    [f.links.keyHash('oauth:login-ip:127.0.0.1')]);
+  const stranger = await consentForm(f.origin, await register(f.origin));
+  assert.equal((await stranger.submit({ ...cinema, password: 'SYNTHETIC_PASSWORD' })).status, 429);
+  const again = await consentForm(f.origin, await register(f.origin));
+  assert.equal((await again.submit({ ...cinema, password: 'SYNTHETIC_PASSWORD' }, { Origin: f.origin, Cookie: `${again.cookie}; ${device!.split(';')[0]}` })).status, 303);
 });
