@@ -147,7 +147,7 @@ const faq: [string, string][] = [
 ];
 
 export function landingPage(origin: string) {
-  return page('Consulta de cines en Venezuela', <>
+  return page('Cartelera, precios y asientos de cines en Venezuela', <>
     <section class="hero" aria-labelledby="titulo">
       <figure class="house">
         <SeatMap />
@@ -278,7 +278,8 @@ export function installationPage(origin: string) {
       <p class="note">Reinicia tu asistente si no ve Cinve enseguida. Luego pregúntale qué películas hay en tu ciudad.</p>
     </section>
     <p class="note"><a href="/instrucciones">Ver qué instrucciones recibe tu asistente</a></p>
-  </>, { compact: true, script: '/assets/js/site.js' });
+  </>, { compact: true, script: '/assets/js/site.js', index: true, canonical: origin + '/install',
+    description: 'Añade Cinve a Claude Code, Codex, OpenCode, Antigravity, Hermes u OpenClaw con un mensaje o un comando.' });
 }
 
 /** One instruction text, exactly as the assistant receives it. */
@@ -301,7 +302,8 @@ export function instructionsPage(origin: string) {
       <Prompt title="Para autorizar la conexión">{hostedAuthInstructions(origin)}</Prompt>
     </details>
     <p class="note">La guía de instalación que sigue tu asistente está en <a href="/install?format=text">/install</a>. El código de estas instrucciones es público en <a href="https://github.com/0bkevin/cinve">GitHub</a>.</p>
-  </>, { compact: true });
+  </>, { compact: true, index: true, canonical: origin + '/instrucciones',
+    description: 'Las instrucciones exactas que Cinve envía a tu asistente, publicadas tal cual.' });
 }
 
 type Consent = { app: string; destination: string; id: string; csrf: string; publisher?: string; recognized: boolean;

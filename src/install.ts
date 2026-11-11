@@ -150,6 +150,8 @@ export function serveInstall(req: IncomingMessage, res: ServerResponse, publicUr
   const guide = browser ? installationPage(publicUrl) : installGuide(publicUrl);
   if (browser) res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Vary', 'Accept');
+  // The plain-text guide and the HTML page are one document for search.
+  res.setHeader('Link', `<${new URL('/install', publicUrl).href}>; rel="canonical"`);
   res.writeHead(200);
   res.end(req.method === 'HEAD' ? undefined : guide);
   return true;

@@ -26,3 +26,13 @@ test('the instructions page shows the exact text the MCP server sends', () => {
   const html = instructionsPage('https://cinve.example');
   for (const mode of [{ publicHosted: true }, { accounts: true }]) assert.ok(html.includes(escapeHtml(serverInstructions(mode))));
 });
+
+test('public pages are indexable with their own canonical and description; private ones are not', () => {
+  const origin = 'https://cinve.example';
+  for (const [html, path] of [[landingPage(origin), '/'], [installationPage(origin), '/install'], [instructionsPage(origin), '/instrucciones']] as const) {
+    assert.match(html, /<meta name="robots" content="index,follow/);
+    assert.ok(html.includes(`<link rel="canonical" href="${origin}${path}"`), path);
+  }
+  assert.notEqual(installationPage(origin).match(/name="description" content="([^"]+)"/)![1], landingPage(origin).match(/name="description" content="([^"]+)"/)![1]);
+  for (const html of [loginPage(), authorizationErrorPage()]) assert.match(html, /<meta name="robots" content="noindex,nofollow"/);
+});
