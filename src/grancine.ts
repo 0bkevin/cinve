@@ -4,6 +4,7 @@ import { DataError, folded, requireArg, today } from './core.js';
 import type { DataItem, Operation, Query } from './core.js';
 import type { ReadContext } from './http.js';
 import { clock, titled } from './parsers.js';
+import { fanOut } from './fanout.js';
 
 /**
  * Gran Cine (grancine.net), the art-house circuit that programmes the
@@ -101,8 +102,11 @@ export function parseGranCineVenuePage(html: string, venue: Venue, date: string,
   return { items, published: true, address };
 }
 
-const venueLimit = 12, budgetMs = 45000, workers = 2;
+// Budget counted from the start of the call (directory read included); a
+// venue page starts only while one read (15 s) still fits.
+const venueLimit = 12, budgetMs = 60000, readMs = 15000, workers = 2;
 async function showtimes(q: Query, c: ReadContext, listing = false): Promise<Showtime[]> {
+  const deadline = Date.now() + budgetMs;
   const date = q.date ?? today();
   const all = await venues(c);
   let work: Venue[];
@@ -120,25 +124,19 @@ async function showtimes(q: Query, c: ReadContext, listing = false): Promise<Sho
     work = work.slice(0, venueLimit);
   }
   const items: Showtime[] = [], failed: string[] = [], unpublished: string[] = [];
-  const deadline = Date.now() + budgetMs;
-  let next = 0, done = 0, firstError: unknown;
-  const worker = async () => {
-    while (next < work.length && Date.now() < deadline) {
-      const venue = work[next++];
-      try {
-        const page = parseGranCineVenuePage(await c.get(`${GC}/sedes/sede.php?${new URLSearchParams({ slug: venue.id, fecha: date })}`, 600000), venue, date, c);
-        if (!page.published) unpublished.push(venue.name);
-        items.push(...page.items.filter(s => !q.movie_id || s.movie_id === q.movie_id));
-        done++;
-      } catch (error) { failed.push(venue.name); firstError ??= error; }
-      c.progress(`Gran Cine: ${done + failed.length} de ${work.length} salas leídas.`);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(workers, work.length) }, worker));
-  const skipped = work.slice(next).map(v => v.name);
+  let steps = 0;
+  const { done, failures, skipped: left, stopped } = await fanOut(work, async venue => {
+    try {
+      const page = parseGranCineVenuePage(await c.get(`${GC}/sedes/sede.php?${new URLSearchParams({ slug: venue.id, fecha: date })}`, 600000), venue, date, c);
+      if (!page.published) unpublished.push(venue.name);
+      items.push(...page.items.filter(s => !q.movie_id || s.movie_id === q.movie_id));
+    } catch (error) { failed.push(venue.name); throw error; }
+  }, { deadline, minRemainingMs: readMs, workers, onStep: () => c.progress(`Gran Cine: ${++steps} de ${work.length} salas leídas.`) });
+  const skipped = left.map(v => v.name);
+  const firstError = stopped ?? failures[0];
   if (unpublished.length) c.warnings.push(`Gran Cine aún no publica la programación de esa fecha (publica unos 20 días desde hoy) para: ${unpublished.join(', ')}.`);
   if (failed.length) { c.partial = true; c.warnings.push(`No se pudo leer la programación de Gran Cine en: ${failed.join(', ')}.`); }
-  if (skipped.length) { c.partial = true; c.warnings.push(`Se agotó el tiempo antes de leer: ${skipped.join(', ')}; consulta su cinema_id.`); }
+  if (skipped.length) { c.partial = true; c.warnings.push(stopped ? `Gran Cine rechazó o no respondió a varias consultas seguidas; no se leyó: ${skipped.join(', ')}.` : `Se agotó el tiempo antes de leer: ${skipped.join(', ')}; consulta su cinema_id.`); }
   if (!done) throw firstError ?? new DataError('unavailable', 'Se agotó el tiempo de consulta de Gran Cine.');
   const partners = [...new Set(work.filter(v => hostedBy[v.id] && items.some(s => s.cinema_id === v.id)).map(v => hostedBy[v.id]))];
   if (partners.length) c.warnings.push(`En salas de ${partners.join(' y ')}, Gran Cine lista solo los títulos de su circuito; la programación completa de esas salas está en ese proveedor.`);

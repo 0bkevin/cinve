@@ -3,6 +3,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CinemaService } from '../src/service.js';
 import { HttpClient, assertPublicForm, assertPublicRead } from '../src/http.js';
+import { HostedHttpClient } from '../src/hosted-http.js';
+import { SessionStore } from '../src/auth.js';
+import { fanOut } from '../src/fanout.js';
+import { DataError } from '../src/core.js';
 import { inputSchema } from '../src/server.js';
 import { EmptySessionStore } from './fixtures.js';
 
@@ -37,13 +41,14 @@ const fare = (id: number, name: string, a: string, b: string, shown: string) => 
 <div class="col-md-3 text-end d-none d-md-block"><h6 class=" mb-0 ">Bs. ${shown}</h6></div></div>`;
 const fares = `<div id="seleccionboletos" class="p-5 card mb-3"><input type="hidden" id="espectaculo" value="10" />` +
   fare(77, 'BOLETO GENERAL 2D', '86.00', '3971.29', '4,057.29') + fare(79, 'TERCERA EDAD 2D', '43.00', '2211.05', '9,999.00') + '</div>';
-const candy = `<button class="btn" data-filtro="1" onclick="flitraCarameleria('1')">Individuales</button>
+const candy = `<button class="btn" data-filtro="1" onclick="flitraCarameleria('1')">Individuales</button><div class="row" id="carameleria-products">
 <div class="categos cat_1"><div class="card"><div class="product-img-container"><img src="storage/image/productos/a.jpeg"></div>
 <div class="card-body" data-id="90" data-nombre="AGUA MINERAL   " data-precio="1713.08" data-stock="2"><h6>AGUA</h6></div></div></div>
-<div class="categos cat_1"><div class="card"><div class="card-body" data-id="91" data-nombre="SIN PRECIO" data-precio=""></div></div></div>`;
+<div class="categos cat_1"><div class="card"><div class="card-body" data-id="91" data-nombre="SIN PRECIO" data-precio=""></div></div></div></div>`;
 
 type Call = { method: string; path: string; body: string; cookie: string; token: string };
-function provider(options: { expireOnce?: boolean } = {}) {
+type Options = { expireOnce?: boolean; staleToken?: string; scheduleStatus?: number; scheduleBody?: string; fareRedirect?: boolean; delayMs?: number };
+function fetcherFor(options: Options = {}) {
   const calls: Call[] = [];
   let sessions = 0, expired = false;
   const fetcher: typeof fetch = async (input, init) => {
@@ -59,17 +64,25 @@ function provider(options: { expireOnce?: boolean } = {}) {
     if (call.method !== 'POST') throw new Error(`Unexpected ${call.method} ${call.path}`);
     if (!call.token.startsWith('TOKEN') || !call.cookie.includes('supercines_session=')) return new Response('', { status: 419 });
     if (options.expireOnce && !expired) { expired = true; return new Response('', { status: 419 }); }
+    if (options.staleToken && call.token === options.staleToken) return new Response('', { status: 419 });
+    if (options.delayMs) await new Promise(resolve => setTimeout(resolve, options.delayMs));
     const form = new URLSearchParams(call.body);
     if (call.path === '/dame_empresas') return new Response(JSON.stringify(directory));
     if (call.path === '/api/app/cartelera/list') return new Response(JSON.stringify(billboard));
     if (call.path === '/listCartelerafecha') {
+      if (options.scheduleStatus) return new Response('', { status: options.scheduleStatus });
+      if (options.scheduleBody !== undefined) return new Response(options.scheduleBody);
       if (form.get('id') === '3991') return new Response(schedule3991);
       return new Response('', { status: 302, headers: { location: SC } });
     }
-    if (call.path === '/listBoletos') return new Response(fares);
+    if (call.path === '/listBoletos') return options.fareRedirect ? new Response('', { status: 302, headers: { location: SC } }) : new Response(fares);
     if (call.path === '/listCarameleria') return new Response(candy);
     throw new Error(`Unexpected POST ${call.path}`);
   };
+  return { calls, fetcher };
+}
+function provider(options: Options = {}) {
+  const { calls, fetcher } = fetcherFor(options);
   return { calls, service: new CinemaService(new HttpClient(fetcher, 15000, new EmptySessionStore())) };
 }
 
@@ -172,4 +185,84 @@ test('Supercines seat maps are reported as not implemented', async () => {
   const result = await service.seats({ provider: 'supercines', cinema_id: '7', session_id: '100' });
   assert.equal(result.status, 'unavailable');
   assert.equal(calls.length, 0);
+});
+
+test('hosted calls share one Supercines visitor session, cache and request limit', async () => {
+  const { calls, fetcher } = fetcherFor();
+  const shared = new HttpClient(fetcher, 15000, new EmptySessionStore());
+  // hosted.ts builds one HostedHttpClient per MCP request over a shared public client.
+  const call = () => new CinemaService(new HostedHttpClient(fetcher, 15000, new SessionStore(), shared));
+  await call().query('showtimes', { provider: 'supercines', cinema_id: '7', date: '2026-11-11' });
+  const cold = calls.length;
+  await call().query('showtimes', { provider: 'supercines', cinema_id: '7', date: '2026-11-11' });
+  assert.equal(calls.filter(c => c.path === '/cartelera').length, 1);
+  assert.equal(calls.length, cold, 'a second hosted call is served from the shared cache');
+});
+
+test('titles without functions that day are cached like schedules', async () => {
+  const { service, calls } = provider();
+  await service.query('showtimes', { provider: 'supercines', cinema_id: '7', date: '2026-11-11' });
+  const cold = calls.length;
+  const warm = await service.query('showtimes', { provider: 'supercines', cinema_id: '7', date: '2026-11-11' });
+  assert.equal(calls.length, cold);
+  assert.equal(warm.status, 'available');
+});
+
+test('a redirect outside the schedule route is a failure, not an empty result', async () => {
+  const { service } = provider({ fareRedirect: true });
+  const result = await service.query('prices', { provider: 'supercines', cinema_id: '7', movie_id: '3991', session_id: '100', date: '2026-11-11' });
+  assert.equal(result.status, 'unavailable');
+});
+
+test('fares read no billboard and carry no schedule warnings', async () => {
+  const { service, calls } = provider();
+  const result = await service.query('prices', { provider: 'supercines', cinema_id: '7', movie_id: '3991', session_id: '100', date: '2026-11-11' });
+  assert.equal(calls.filter(c => c.path === '/api/app/cartelera/list').length, 0);
+  assert.ok(!result.warnings.some(w => /madrugada|desactivada/.test(w)));
+});
+
+test('a rate limit or an outage stops the schedule fan-out', async () => {
+  for (const [status, expected] of [[429, 'rate_limited'], [503, 'error']] as const) {
+    const { service, calls } = provider({ scheduleStatus: status });
+    const result = await service.query('showtimes', { provider: 'supercines', date: '2026-11-11', city: 'Maracay' });
+    assert.equal(result.status, expected);
+    // Two workers: at most the reads already in flight, plus the third
+    // consecutive failure for an outage; never the whole queue.
+    assert.ok(calls.filter(c => c.path === '/listCartelerafecha').length <= 3, `${status}: ${calls.length} reads`);
+    // After a 429 the origin is not asked again while the cooldown lasts.
+    if (status === 429) {
+      const before = calls.length;
+      assert.equal((await service.query('cinemas', { provider: 'supercines' })).status, 'available');
+      const again = await service.query('showtimes', { provider: 'supercines', date: '2026-11-12', movie_id: '3991' });
+      assert.equal(again.status, 'rate_limited');
+      assert.equal(calls.length, before);
+    }
+  }
+});
+
+test('changed Supercines markup fails visibly instead of returning empty lists', async () => {
+  const schedule = await provider({ scheduleBody: '<div class="nuevo"></div>' }).service.query('showtimes', { provider: 'supercines', movie_id: '3991', date: '2026-11-11' });
+  assert.equal(schedule.status, 'error');
+});
+
+test('an expired visitor session is renewed once for concurrent reads', async () => {
+  const { service, calls } = provider({ staleToken: 'TOKEN100000000000000000000000000000000000', delayMs: 5 });
+  // The first session's token is refused for every read after it is issued.
+  const results = await Promise.all([
+    service.query('showtimes', { provider: 'supercines', movie_id: '3991', date: '2026-11-11' }),
+    service.query('concessions', { provider: 'supercines', cinema_id: '7' }),
+  ]);
+  assert.ok(results.every(r => r.status === 'available'), JSON.stringify(results.map(r => [r.status, r.warnings])));
+  assert.equal(calls.filter(c => c.path === '/cartelera').length, 2);
+});
+
+test('fan-out starts a read only while a whole read still fits before the deadline', async () => {
+  const started: number[] = [];
+  const result = await fanOut([1, 2, 3, 4], async n => { started.push(n); await new Promise(r => setTimeout(r, 30)); },
+    { deadline: Date.now() + 50, minRemainingMs: 30, workers: 2 });
+  assert.deepEqual(started, [1, 2]);
+  assert.deepEqual(result.skipped, [3, 4]);
+  const refused = await fanOut([1, 2, 3, 4, 5], async () => { throw new DataError('rate_limited', 'x'); }, { deadline: Date.now() + 1000, minRemainingMs: 0, workers: 2 });
+  assert.equal(refused.failures.length, 2);
+  assert.equal(refused.skipped.length, 3);
 });

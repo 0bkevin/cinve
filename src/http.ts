@@ -5,7 +5,8 @@ import { SessionStore, assertPrivateRead } from './auth.js';
 import type { AuthProviderId } from './auth.js';
 
 export type EvidenceSource = z.infer<typeof Source>;
-type Page = { body: string; source: EvidenceSource };
+/** empty: the provider confirmed it has no data for this request (cacheable, unlike an error). */
+type Page = { body: string; source: EvidenceSource; empty?: true };
 type CacheEntry = { page: Page; expires: number; bytes: number; startedAt: number; keys: Set<string> };
 type Waiting = { start: () => boolean; cancel: () => void };
 type RefreshState = { keys: Set<string> };
@@ -18,6 +19,15 @@ const cacheEntries = 512, cacheBytesLimit = 64 * 1024 * 1024;
 // within seconds. Remember it per origin so later public reads fail fast (or
 // take an adapter's documented fallback) instead of being refused again.
 const challengeMemoryMs = 10 * 60 * 1000;
+// After HTTP 429, wait as the provider asks (Retry-After, at most the
+// challenge memory) or a minute, so a fan-out or a retrying client does not
+// keep sending requests the provider already refused.
+const rateLimitDefaultMs = 60 * 1000;
+function retryAfterMs(response: Response): number {
+  const value = response.headers.get('retry-after')?.trim() ?? '';
+  const seconds = /^\d{1,6}$/.test(value) ? Number(value) * 1000 : Date.parse(value) - Date.now();
+  return Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds, challengeMemoryMs) : rateLimitDefaultMs;
+}
 const hosts = new Set(['www.cinex.com.ve', 'www.cinesunidos.com', 'gateway.cinesunidos.com', 'cinepiccandelaria.com', 'cinepicvip.com', 'apifront.cinexo.com.ar', 'api.cinexo.com.ar', 'supercines.com.ve', 'www.grancine.net']);
 /**
  * Supercines serves its schedule, fares and concessions only to form POSTs
@@ -230,10 +240,14 @@ export class HttpClient {
     return task;
   }
   private formSessions = new Map<string, Promise<FormSession>>();
-  /** One anonymous visitor session per origin, shared by concurrent reads. */
-  private formSession(origin: string, renew: boolean): Promise<FormSession> {
+  /**
+   * One anonymous visitor session per origin, shared by concurrent reads.
+   * stale: the session a caller found expired or refused. Only the first such
+   * caller opens a replacement; the others share it.
+   */
+  private formSession(origin: string, stale?: Promise<FormSession>): Promise<FormSession> {
     const current = this.formSessions.get(origin);
-    if (current && !renew) return current.then(session => session.expires > Date.now() ? session : this.formSession(origin, true));
+    if (current && current !== stale) return current.then(session => session.expires > Date.now() ? session : this.formSession(origin, current));
     const opened = this.readSessionPage(origin);
     this.formSessions.set(origin, opened);
     opened.catch(() => { if (this.formSessions.get(origin) === opened) this.formSessions.delete(origin); });
@@ -249,8 +263,11 @@ export class HttpClient {
     return { cookies, token, expires: Date.now() + formSessionMs };
   }
   private async readForm(url: string, key: string, body: string, origin: string, refresh: boolean): Promise<Page> {
+    const started = Date.now();
+    let used: Promise<FormSession> | undefined;
     for (let attempt = 0; ; attempt++) {
-      const session = await this.formSession(origin, attempt > 0);
+      used = this.formSession(origin, used);
+      const session = await used;
       try {
         const page = await this.read(url, origin, undefined, refresh, undefined, {
           method: 'POST', body,
@@ -261,10 +278,12 @@ export class HttpClient {
           },
           onResponse: response => sessionCookies(response, session.cookies),
         });
-        return { body: page.body, source: { ...page.source, url: key } };
+        return { ...page, source: { ...page.source, url: key } };
       } catch (error) {
         // One renewal: the upstream session may have expired before ours.
-        if (error instanceof FormTokenExpired && attempt === 0) continue;
+        // A refused token answers at once; renew only while the call has
+        // not already spent a read's time, so one read stays near 2 × timeout.
+        if (error instanceof FormTokenExpired && attempt === 0 && Date.now() - started < this.timeout / 3) continue;
         throw error;
       }
     }
@@ -428,15 +447,24 @@ export class HttpClient {
       if (response.status >= 300 && response.status < 400) {
         const destination = response.headers.get('location'); cancelBody(response.body);
         const redirect = destination ? new URL(destination, url) : undefined;
-        // Supercines sends a listing with no data for the request (a title
-        // with no functions on that date) to its home page.
-        if (form?.method === 'POST' && redirect?.origin === origin && redirect.pathname === '/' && !redirect.search) throw new DataError('empty', 'El proveedor no devolvió datos para esta consulta (redirigió a su portada).');
+        // Supercines sends a schedule request for a title with no functions
+        // on that date (a presale before release, an unknown title) to its
+        // home page: a cacheable "no data", not a failure. Other routes
+        // redirected anywhere remain unavailable.
+        if (form?.method === 'POST' && new URL(url).pathname === '/listCartelerafecha' && redirect?.origin === origin && redirect.pathname === '/' && !redirect.search) {
+          return { body: '', empty: true, source: { url, fetched_at: new Date().toISOString(), cached: false } };
+        }
         if (authorize && redirect?.origin === origin && /^\/(?:clearsession\.html|api\/auth\/signin|login)(?:\/|$)/.test(redirect.pathname)) throw new DataError('auth_required', 'El proveedor redirigió al login; conecta de nuevo tu cuenta en la terminal local.');
         throw new DataError('unavailable', 'El proveedor redirigió la consulta; no se siguió el destino.');
       }
       if (!response.ok) {
         const status = response.status === 401 ? 'auth_required' : response.status === 403 ? 'blocked' : response.status === 429 ? 'rate_limited' : response.status === 404 ? 'unavailable' : 'error';
         cancelBody(response.body);
+        if (response.status === 429 && !authorize) {
+          const error = new DataError('rate_limited', `El proveedor limitó las consultas en ${new URL(url).hostname} (HTTP 429); Cinve espera antes de volver a consultarlo.`);
+          this.challenged.set(origin, { until: Date.now() + retryAfterMs(response), error });
+          throw error;
+        }
         // An interactive anti-bot challenge is an explicit refusal of automated
         // clients. Report it as such; Cinve never tries to solve or evade it.
         if (response.status === 403 && response.headers.get('cf-mitigated')?.toLowerCase() === 'challenge') {
@@ -598,11 +626,15 @@ export class ReadContext {
   }
   /** A public listing read sent as a form POST; see HttpClient.post. */
   async form(url: string, fields: Record<string, string>, ttl?: number): Promise<string> {
+    return (await this.formPage(url, fields, ttl)).body;
+  }
+  /** Like form(), keeping the provider's confirmation that it has no data (empty). */
+  async formPage(url: string, fields: Record<string, string>, ttl?: number): Promise<Page> {
     assertPublicForm(url, fields);
     this.checkCancelled();
     const page = await this.http.post(url, fields, ttl, this.refresh);
     if (!this.sources.some(s => s.url === page.source.url)) this.sources.push(page.source);
-    return page.body;
+    return page;
   }
   async formJson(url: string, fields: Record<string, string>, ttl?: number): Promise<unknown> {
     try { return JSON.parse(await this.form(url, fields, ttl)); }
