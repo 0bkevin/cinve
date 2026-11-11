@@ -109,7 +109,7 @@ p a:hover, .note a:hover { text-decoration-color: currentColor; }
 }
 /* The screen: a thin lit arc, not a wall of white. */
 .screen {
-  position: relative; height: calc(var(--curve) + 10px); margin: 0 calc(var(--aisle) * 0.6) max(calc(var(--size) * 0.9), 22px) calc(14px + var(--gap) + var(--aisle) * 0.6);
+  position: relative; justify-self: stretch; height: calc(var(--curve) + 10px); margin: 0 calc(var(--aisle) * 0.6) max(calc(var(--size) * 0.9), 22px);
   border-bottom: 2px solid rgba(246, 238, 228, 0.85); border-radius: 0 0 50% 50% / 0 0 100% 100%;
   box-shadow: 0 10px 28px -10px rgba(246, 238, 228, 0.45);
 }
@@ -119,6 +119,10 @@ p a:hover, .note a:hover { text-decoration-color: currentColor; }
 }
 .row { display: flex; align-items: center; gap: var(--gap); animation: row-in 0.6s calc(var(--r) * 70ms) ease-out both; }
 .row-label { width: 14px; font: 600 clamp(9px, 1vw, 13px)/1 var(--font-sans); color: var(--dust); text-align: center; }
+/* Row letters hang outside the seats, so the seats and the screen above
+   them are centred on the page at every width. */
+.seating { justify-items: center; }
+.row-label { margin-left: calc(-14px - var(--gap)); }
 .seat {
   --k: 0; --s: 0;
   width: var(--size); aspect-ratio: 1 / 0.86; border-radius: 42% 42% 20% 20% / 52% 52% 24% 24%;
@@ -348,7 +352,10 @@ details.more[data-closing] > summary .chevron { transform: none; }
   .consent-actions .btn { width: 100%; }
   .site-header { height: 64px; }
   .hero { padding: 16px 0 72px; }
-  .seating { --gap: 3px; --aisle: 10px; --size: calc((100vw - 120px) / 18); }
+  /* Phones: 20 seats, 19 gaps and two aisles fill the content width (100vw
+     minus the 16px gutters), with a little slack for the seats' tilt, and
+     never grow past the desktop size just above this breakpoint. */
+  .seating { --gap: 3px; --aisle: 10px; --size: min(16px, calc((100vw - 112px) / 20)); }
   .legend { gap: 8px 14px; font-size: 12px; }
   .legend i { width: 13px; }
   .hero .btn { width: 100%; }
