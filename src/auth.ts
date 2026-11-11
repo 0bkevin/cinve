@@ -32,12 +32,14 @@ class ChallengeError extends LoginError {
 // (the cinema throttling Cinve) and 5xx are outages, not verdicts.
 const refusalStatuses = new Set([400, 401, 403, 422]);
 
-export const AuthProvider = z.enum(['cinex', 'cinesunidos']);
+export const AuthProvider = z.enum(['cinex', 'cinesunidos', 'supercines']);
 export type AuthProviderId = z.infer<typeof AuthProvider>;
+/** Providers whose website session is a cookie jar (the others use a bearer token). */
+const cookieSession = (p: AuthProviderId) => p === 'cinex' || p === 'supercines';
 export const Session = z.object({
   version: z.literal(1), provider: AuthProvider, expires_at: z.number().int().positive().max(8.64e15),
   cookie_jar: z.string().max(100000).optional(), access_token: z.string().min(1).max(16000).regex(/^[A-Za-z0-9._~+\/-]+=*$/).optional(),
-}).strict().refine(s => s.provider === 'cinex' ? !!s.cookie_jar && !s.access_token : !!s.access_token && !s.cookie_jar);
+}).strict().refine(s => cookieSession(s.provider) ? !!s.cookie_jar && !s.access_token : !!s.access_token && !s.cookie_jar);
 export type AuthSession = z.infer<typeof Session>;
 const loginHint = (p: AuthProviderId) => `Ejecuta npm run login -- ${p} en una terminal local. No envíes contraseñas al agente.`;
 
@@ -55,7 +57,7 @@ export class SessionStore {
         if (!stat.isFile() || stat.size > 128 * 1024 || (stat.mode & 0o077) || (process.getuid && stat.uid !== process.getuid())) throw new Error();
         const session = Session.parse(JSON.parse(await handle.readFile('utf8')));
         if (session.provider !== p) throw new Error();
-        if (p === 'cinex') CookieJar.deserializeSync(session.cookie_jar!);
+        if (cookieSession(p)) CookieJar.deserializeSync(session.cookie_jar!);
         return session;
       } finally { await handle.close(); }
     } catch (e) {
@@ -95,6 +97,17 @@ export class SessionStore {
     const s = await this.read(p);
     if (!s || s.expires_at <= Date.now()) throw new DataError('auth_required', loginHint(p));
     if (p === 'cinesunidos') return { Authorization: `Bearer ${s.access_token}`, xChannel: 'www' };
+    if (p === 'supercines') {
+      // Laravel accepts the session's own XSRF-TOKEN cookie, echoed in a
+      // header, as the form token: no page read is needed per request, and
+      // an ended session answers 419 instead of silently reading as a guest.
+      try {
+        const jar = CookieJar.deserializeSync(s.cookie_jar!), cookies = await jar.getCookies(url);
+        const xsrf = cookies.find(c => c.key === 'XSRF-TOKEN')?.value;
+        if (!xsrf || !cookies.some(c => c.key === 'supercines_session')) throw new Error();
+        return { Cookie: await jar.getCookieString(url), 'X-XSRF-TOKEN': decodeURIComponent(xsrf), 'X-Requested-With': 'XMLHttpRequest' };
+      } catch { throw new DataError('auth_required', loginHint(p)); }
+    }
     try {
       const cookie = await CookieJar.deserializeSync(s.cookie_jar!).getCookieString(url);
       if (!cookie) throw new Error();
@@ -109,6 +122,12 @@ export function assertPrivateRead(p: AuthProviderId, value: string) {
   const expected = ['/boletos.php', '/boletosdev.php'].includes(u.pathname) ? ['cinemaid', 'sessionid'] : u.pathname === '/concesiones.php' ? ['cinemaid'] : [];
   const params = [...u.searchParams];
   const cinexParams = params.length === expected.length && expected.every(key => u.searchParams.getAll(key).length === 1 && /^[A-Za-z0-9_-]{1,100}$/.test(u.searchParams.get(key) ?? ''));
+  if (p === 'supercines') {
+    // The only read made with a Supercines account: the fare list of one
+    // function (its fields are checked by assertPublicForm).
+    if (!safe || u.hostname !== 'supercines.com.ve' || u.pathname !== '/listBoletos' || u.search) throw new DataError('error', 'Ruta autenticada no permitida.');
+    return;
+  }
   const route = p === 'cinesunidos'
     ? (u.hostname === 'www.cinesunidos.com' && u.pathname === '/api/seats' && params.length === 2 && ['theaterId', 'showTimeId'].every(key => u.searchParams.getAll(key).length === 1 && /^[A-Za-z0-9_-]{1,100}$/.test(u.searchParams.get(key) ?? ''))) || (u.hostname === 'gateway.cinesunidos.com' && /^\/tickets\/www\/theaters\/[\w-]+\/sessions\/[\w-]+\/$/.test(u.pathname) && !u.search)
     : u.hostname === 'www.cinex.com.ve' && ['/checklogin.php', '/boletos.php', '/boletosdev.php', '/asientosdev.php', '/concesiones.php'].includes(u.pathname) && cinexParams;
@@ -122,7 +141,7 @@ export class LoginHttp {
   constructor(private provider: AuthProviderId, private request: typeof fetch = fetch) {}
   private allowed(value: string) {
     const u = new URL(value);
-    const hosts = this.provider === 'cinex' ? ['www.cinex.com.ve'] : ['www.cinesunidos.com', 'keycloak.cinesunidos.com'];
+    const hosts = this.provider === 'cinex' ? ['www.cinex.com.ve'] : this.provider === 'supercines' ? ['supercines.com.ve'] : ['www.cinesunidos.com', 'keycloak.cinesunidos.com'];
     if (u.protocol !== 'https:' || u.port || u.username || u.password || !hosts.includes(u.hostname)) throw new Error('Destino de autenticación no permitido.');
     return u;
   }
@@ -198,6 +217,7 @@ export async function login(provider: AuthProviderId, username: string, password
       await store.save({ version: 1, provider, expires_at: Date.now() + 24 * 3600000, cookie_jar: JSON.stringify(await http.jar.serialize()) });
       return { provider, authenticated: true, profile_update_requested: data.usuario_dataupdate !== 'S' };
     }
+    if (provider === 'supercines') return await supercinesLogin(http, username, password, store);
     const base = 'https://www.cinesunidos.com';
     const csrf = JSON.parse((await http.read(`${base}/api/auth/csrf`)).body).csrfToken;
     if (typeof csrf !== 'string' || !csrf) throw new LoginError('Cines Unidos no entregó CSRF de login.');
@@ -228,4 +248,38 @@ export async function login(provider: AuthProviderId, username: string, password
     const message = e instanceof LoginError ? e.message : 'No se pudo completar el login HTTP. Revisa la conexión o inicia sesión en el sitio para comprobar pasos adicionales.';
     throw sent ? new LoginError(message) : new CinemaUnavailable(message);
   }
+}
+
+/**
+ * Supercines (Laravel): the site's own login form. Email and password go
+ * only to supercines.com.ve, with the form token of the page that showed it;
+ * only the resulting cookies are stored. Accounts created with Google have no
+ * password and cannot use this flow.
+ */
+async function supercinesLogin(http: LoginHttp, username: string, password: string, store: SessionStore) {
+  const base = 'https://supercines.com.ve';
+  const page = await http.read(`${base}/cartelera`);
+  const token = page.body.match(/<input type="hidden" name="_token" value="([A-Za-z0-9]{20,128})"/)?.[1]
+    ?? page.body.match(/<meta\s+name="csrf-token"\s+content="([A-Za-z0-9]{20,128})"/)?.[1];
+  if (!token) throw new LoginError('Supercines no mostró su formulario de login.');
+  let reply;
+  try {
+    reply = await http.read(`${base}/do-login`, { method: 'POST',
+      body: new URLSearchParams({ _token: token, email: username, password, urlActual: `${base}/cartelera` }),
+      headers: { 'X-CSRF-TOKEN': token, 'X-Requested-With': 'XMLHttpRequest', Accept: 'application/json', Origin: base, Referer: `${base}/cartelera` } });
+  } catch (e) {
+    if (e instanceof LoginError) throw new LoginError('Supercines no aceptó el login. Revisa el correo y la contraseña en su sitio (las cuentas creadas con Google no tienen contraseña).');
+    throw e;
+  }
+  let data; try { data = JSON.parse(reply.body); } catch { throw new LoginError('Supercines no aceptó la solicitud de login.'); }
+  if (data?.status !== true) throw new LoginError('Supercines no aceptó el login. Revisa el correo y la contraseña en su sitio.');
+  const cookies = await http.jar.getCookies(`${base}/`);
+  const session = cookies.find(c => c.key === 'supercines_session');
+  if (!session || !cookies.some(c => c.key === 'XSRF-TOKEN')) throw new LoginError('Supercines no estableció una sesión válida.');
+  // The session cookie's own expiry (Laravel's session lifetime), at most a day.
+  const cookieExpiry = session.expiryTime() ?? Infinity;
+  const expires = Math.min(Number.isFinite(cookieExpiry) ? cookieExpiry : Date.now() + 2 * 3600000, Date.now() + 24 * 3600000);
+  if (expires <= Date.now()) throw new LoginError('La sesión de Supercines ya expiró.');
+  await store.save({ version: 1, provider: 'supercines', expires_at: expires, cookie_jar: JSON.stringify(await http.jar.serialize()) });
+  return { provider: 'supercines' as const, authenticated: true, profile_update_requested: false };
 }

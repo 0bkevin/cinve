@@ -87,3 +87,21 @@ export function requiredText(row: Obj, key: string): string {
   if (!value) throw new DataError('error', `Campo obligatorio ausente: ${key}.`);
   return value;
 }
+
+/** Title case for upstream names in capitals ("LA GRANJA", "PUERTO CABELLO"). */
+export function titled(value: string): string {
+  // Articles stay capitalized: they are part of place names (Las Mercedes, La Granja).
+  const small = new Set(['de', 'del', 'y', 'e']);
+  return value.toLowerCase().replace(/\s+/g, ' ').trim().split(' ')
+    // "(EL CERRITO)" → "(El Cerrito)": capitalize past leading punctuation.
+    .map((word, i) => i > 0 && small.has(word) ? word : word.replace(/^([^\p{L}\p{N}]*)(\p{L})/u, (_, lead: string, first: string) => lead + first.toUpperCase())).join(' ');
+}
+/** 12-hour clock to 24-hour: "5:40 PM" or "7:00 p.m." → "17:40", "19:00". */
+export function clock(value: string): string | undefined {
+  const m = value.trim().match(/^(\d{1,2}):(\d{2})\s*([AaPp])\.?\s*[Mm]\.?$/);
+  if (!m) return;
+  const hour = Number(m[1]), minute = Number(m[2]);
+  if (hour < 1 || hour > 12 || minute > 59) return;
+  const h = (hour % 12) + (/[Pp]/.test(m[3]) ? 12 : 0);
+  return `${String(h).padStart(2, '0')}:${m[2]}`;
+}
