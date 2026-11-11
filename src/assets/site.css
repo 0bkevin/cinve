@@ -248,11 +248,12 @@ p a:hover, .note a:hover { text-decoration-color: currentColor; }
 .faq summary .plus { flex-shrink: 0; width: 20px; height: 20px; color: var(--amber); transition: transform 0.25s ease; }
 .faq details[open] summary .plus { transform: rotate(45deg); }
 .faq details > p { margin: 0; padding: 0 20px 20px; font-size: 16px; }
-/* Answers slide open and closed. Browsers without ::details-content
-   (older Safari and Firefox) simply open and close instantly. */
-.faq { interpolate-size: allow-keywords; }
-.faq details::details-content { block-size: 0; opacity: 0; overflow: hidden; transition: block-size 0.3s ease, opacity 0.25s ease, content-visibility 0.3s allow-discrete; }
-.faq details[open]::details-content { block-size: auto; opacity: 1; }
+/* site.js animates the height; the answer stays open until it has collapsed. */
+.faq details { overflow: hidden; transition: background-color 0.3s ease; }
+.faq details[data-closing] { background: transparent; }
+.faq details[data-closing] summary .plus { transform: none; }
+/* Basecoat transitions every details' content; it fights the script above. */
+.faq details::details-content { transition: none; }
 
 /* Closing: what Cinve is, and where to see or improve it. */
 .closing { padding: 112px 0 120px; text-align: center; display: grid; justify-items: center; }
@@ -345,7 +346,7 @@ p a:hover, .note a:hover { text-decoration-color: currentColor; }
   html { scroll-behavior: auto; }
   .row, .seat[data-state=taken], .seat[data-state=pair] { animation: none; }
   .board tbody :is(th, td) { transition: none; }
-  .more > summary .chevron, .more[open] > .board-scroll, .faq details, .faq details::details-content, .faq summary .plus { transition: none; animation: none; }
+  .more > summary .chevron, .more[open] > .board-scroll, .faq details, .faq summary .plus { transition: none; animation: none; }
   .spinner { animation-duration: 2.4s; }
 }
 
