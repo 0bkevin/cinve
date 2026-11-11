@@ -2,6 +2,8 @@
 // answer. Both are fixed so every load looks the same, and both use the same
 // seat states (styled by [data-state] in site.css).
 import { h } from '../jsx.js';
+import { catalog } from '../content.js';
+import type { Locale } from '../locale.js';
 
 // . free  x taken  ? not confirmed  * the free pair
 const seatStates = { '.': 'free', x: 'taken', '?': 'unknown', '*': 'pair' } as const;
@@ -20,9 +22,10 @@ const house: [row: string, seats: string][] = [
   ['G', '..x.xx.xx.xx..????'],
 ];
 
-export function SeatMap() {
-  return <div class="seating" role="img" aria-label="Ejemplo de mapa de una sala: quedan dos asientos libres juntos en el centro de la fila E.">
-    <div class="screen"><span>Pantalla</span></div>
+export function SeatMap({ locale = 'es' }: { locale?: Locale }) {
+  const text = catalog(locale).landing.demo;
+  return <div class="seating" role="img" aria-label={text.seatMap}>
+    <div class="screen"><span>{text.screen}</span></div>
     {house.map(([row, seats]) => <div class="row">
       <span class="row-label">{row}</span>
       {states(seats).map(state => <span class="seat" data-state={state}></span>)}
@@ -38,19 +41,20 @@ const demoRows = ['x.x.xx.x.x.x', '.x.xx.x.x.xx', 'x.xxx**xx.x.', '.x.x.xx.x.x.'
  *  question types itself, the assistant thinks, then answers with a seat map.
  *  Without JavaScript or with reduced motion it shows finished. No titles,
  *  prices or times, so nothing is invented. */
-export function ChatDemo() {
-  return <figure class="demo" aria-label="Ejemplo: preguntas si quedan dos asientos juntos esta noche y tu asistente responde con el mapa de la sala.">
-    <p class="demo-me" data-text="¿Quedan dos asientos juntos esta noche?">¿Quedan dos asientos juntos esta noche?</p>
+export function ChatDemo({ locale = 'es' }: { locale?: Locale }) {
+  const text = catalog(locale).landing.demo;
+  return <figure class="demo" aria-label={text.figure}>
+    <p class="demo-me" data-text={text.question}>{text.question}</p>
     <div class="demo-bot">
-      <div class="demo-who"><span class="demo-dot"></span>Tu asistente<span class="demo-sep">·</span>con Cinve</div>
+      <div class="demo-who"><span class="demo-dot"></span>{text.assistant}<span class="demo-sep">·</span>{text.withCinve}</div>
       <div class="demo-thinking" aria-hidden="true"><i></i><i></i><i></i></div>
       <div class="demo-answer">
-        <p>Sí, en la fila C quedan dos juntos:</p>
+        <p>{text.yes}</p>
         <div class="demo-map" aria-hidden="true">
           <div class="demo-screen"></div>
           {demoRows.map((row, r) => <div class="demo-row"><b>{'ABCD'[r]}</b>{states(row).map(state => <i data-state={state}></i>)}</div>)}
         </div>
-        <div class="demo-key" aria-hidden="true"><span><i data-state="free"></i>Libre</span><span><i data-state="taken"></i>Ocupado</span><span><i data-state="pair"></i>Juntos</span></div>
+        <div class="demo-key" aria-hidden="true"><span><i data-state="free"></i>{text.free}</span><span><i data-state="taken"></i>{text.taken}</span><span><i data-state="pair"></i>{text.pair}</span></div>
       </div>
     </div>
   </figure>;

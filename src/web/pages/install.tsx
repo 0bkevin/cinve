@@ -2,16 +2,15 @@ import { h, Fragment } from '../jsx.js';
 import { renderPage } from '../layout.js';
 import { InstallMessage } from '../components/copy.js';
 import { AppPicker } from '../components/assistants.js';
+import { catalog } from '../content.js';
+import { localeUrl, type Locale } from '../locale.js';
 
-export const installationPage = (origin: string) => renderPage('Cómo usar Cinve', <>
-  <h1>Cinve en tu asistente.</h1>
-  <p class="lead">Envía este mensaje a tu asistente y él se encarga del resto:</p>
-  <InstallMessage origin={origin} />
-  <section class="manual" aria-labelledby="mano">
-    <h2 id="mano">Si prefieres añadirlo a mano</h2>
-    <AppPicker endpoint={`${origin}/mcp`} labelledBy="mano" />
-    <p class="note">Reinicia tu asistente si no ve Cinve enseguida. Luego pregúntale qué películas hay en tu ciudad.</p>
-  </section>
-  <p class="note"><a href="/instrucciones">Ver qué instrucciones recibe tu asistente</a></p>
-</>, { compact: true, script: '/assets/js/site.js', index: true, canonical: origin + '/install',
-  description: 'Añade Cinve a Claude Code, Codex, OpenCode, Antigravity, Hermes u OpenClaw con un mensaje o un comando.' });
+export const installationPage = (origin: string, locale: Locale = 'es') => {
+  const c = catalog(locale).install;
+  const canonical = new URL(locale === 'en' ? '/install?lang=en' : '/install', origin).href;
+  return renderPage(c.title, <>
+    <h1>{c.heading}</h1><p class="lead">{c.lead}</p><InstallMessage origin={origin} locale={locale} />
+    <section class="manual" aria-labelledby="mano"><h2 id="mano">{c.manual}</h2><AppPicker endpoint={`${origin}/mcp`} labelledBy="mano" locale={locale} /><p class="note">{c.restart}</p></section>
+    <p class="note"><a href={localeUrl('/instrucciones', locale)}>{c.instructionsLink}</a></p>
+  </>, { locale, path: '/install', compact: true, script: '/assets/js/site.js', index: true, canonical, description: c.description });
+};

@@ -1,4 +1,15 @@
-import type { ServerResponse } from 'node:http';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import { resolveLocale } from './locale.js';
+
+/** Append rather than overwrite: /install also varies by representation. */
+export function pageLocale(req: IncomingMessage, res: ServerResponse) {
+  const vary = String(res.getHeader('Vary') ?? '').split(',').map(value => value.trim()).filter(Boolean);
+  if (!vary.some(value => value.toLowerCase() === 'accept-language')) vary.push('Accept-Language');
+  res.setHeader('Vary', vary.join(', '));
+  const locale = resolveLocale(new URL(req.url ?? '/', 'https://cinve.invalid'), req.headers['accept-language']);
+  res.setHeader('Content-Language', locale);
+  return locale;
+}
 
 /** For pages that are the same for everyone (/, /install, /instrucciones):
  *  the CDN may cache them briefly; private pages keep no-store. */

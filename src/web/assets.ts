@@ -14,6 +14,7 @@ const assets: Record<string, Asset> = {
   '/assets/bricolage-grotesque.woff2': { file: new URL('../assets/bricolage-grotesque.woff2', import.meta.url), type: 'font/woff2' },
   '/assets/instrument-sans.woff2': { file: new URL('../assets/instrument-sans.woff2', import.meta.url), type: 'font/woff2' },
   '/og.png': { file: new URL('../assets/og.png', import.meta.url), type: 'image/png' },
+  '/og-en.png': { file: new URL('../assets/og-en.png', import.meta.url), type: 'image/png' },
   '/assets/logos/claudecode.svg': { file: new URL('../assets/logos/claudecode.svg', import.meta.url), type: 'image/svg+xml', compress: true },
   '/assets/logos/codex.png': { file: new URL('../assets/logos/codex.png', import.meta.url), type: 'image/png' },
   '/assets/logos/opencode.svg': { file: new URL('../assets/logos/opencode.svg', import.meta.url), type: 'image/svg+xml', compress: true },

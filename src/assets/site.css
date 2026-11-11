@@ -71,6 +71,9 @@
 .brand span { color: var(--amber); }
 .site-nav { display: flex; gap: 28px; align-items: center; font-size: 15px; }
 .site-nav a { text-decoration: none; color: var(--dust); padding-block: 10px; }
+.language-switch { display: inline-flex; gap: 5px; align-items: center; white-space: nowrap; color: var(--dust); font-size: 13px; }
+.site-nav .language-switch a { padding-block: 6px; }
+.language-switch a[aria-current="page"] { color: var(--foreground); }
 .site-footer { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 40px 48px; margin-top: 48px; padding: 56px 0 28px; color: var(--dust); font-size: 14px; }
 .site-footer a { text-decoration: none; color: var(--dust); transition: color .15s; }
 .site-footer a:hover { color: var(--cream); }
@@ -346,6 +349,7 @@ details.more[data-closing] > summary .chevron { transform: none; }
   .manual .snippet .btn { align-self: flex-end; }
   .wrap { width: calc(100% - 32px); }
   .site-nav a:not(.nav-cta) { display: none; }
+  .site-nav .language-switch a { display: inline; }
   /* Small screens keep the desktop order (brand left, two titled link
      columns right) with tighter spacing. */
   .site-footer { gap: 32px 28px; padding: 40px 0 24px; }
