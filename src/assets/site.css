@@ -335,6 +335,9 @@ details.more[data-closing] > summary .chevron { transform: none; }
 }
 
 @media (max-width: 640px) {
+  /* Phones: the assistant chips fill an even grid instead of ragged rows. */
+  ul.works-with { display: grid; grid-template-columns: repeat(auto-fill, minmax(136px, 1fr)); gap: 8px; }
+  ul.works-with li { padding-right: 10px; font-size: 13.5px; gap: 8px; }
   .board tbody { grid-template-columns: minmax(0, 1fr); }
   /* .manual raises specificity above the base .snippet rules, which come later in the file. */
   .manual .snippet { flex-direction: column; align-items: stretch; gap: 0; padding: 6px 6px 6px 14px; }
