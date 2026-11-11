@@ -25,6 +25,14 @@ for mode in ['paste', 'separate', 'cancel', 'sigterm']:
             elif mode == 'cancel': os.write(master, b'PARTIAL_SECRET\x03')
             else:
                 os.write(master, b'PARTIAL_SECRET')
+                # Let the reader absorb the secret in raw (no-echo) mode before
+                # signaling. Otherwise SIGTERM can race input delivery on a
+                # loaded host: the handler restores the terminal and the line
+                # discipline echoes the still-queued half-typed secret. A real
+                # echo would still land in `output` and fail the assertion.
+                settle = time.monotonic() + 0.75
+                while time.monotonic() < settle:
+                    if select.select([master], [], [], 0.05)[0]: output.extend(os.read(master, 8192))
                 child.terminate()
         wait_for(b'ACCEPTED' if mode in ['paste', 'separate'] else b'CANCELLED')
         child.wait(timeout=5)
