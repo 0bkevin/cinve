@@ -21,10 +21,9 @@ export const vendored: [string, string, string][] = [
   ['@fontsource-variable/bricolage-grotesque', 'LICENSE', 'BricolageGrotesque-LICENSE.txt'],
   ['@fontsource-variable/instrument-sans', 'files/instrument-sans-latin-wght-normal.woff2', 'instrument-sans.woff2'],
   ['@fontsource-variable/instrument-sans', 'LICENSE', 'InstrumentSans-LICENSE.txt'],
-  // Assistant logos for the landing page (CC0 paths; the marks belong to their owners).
+  // Claude Code's logo (CC0 path; the mark belongs to Anthropic). The other
+  // assistant logos come from their owners; see src/assets/logos/SOURCES.md.
   ['simple-icons', 'icons/claudecode.svg', 'logos/claudecode.svg'],
-  ['simple-icons', 'icons/opencode.svg', 'logos/opencode.svg'],
-  ['simple-icons', 'icons/googlegemini.svg', 'logos/googlegemini.svg'],
   ['simple-icons', 'LICENSE.md', 'logos/SimpleIcons-LICENSE.md'],
 ];
 

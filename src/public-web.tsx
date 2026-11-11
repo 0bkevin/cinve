@@ -1,8 +1,8 @@
-import { readFileSync } from 'node:fs';
 import type { ServerResponse } from 'node:http';
-import { h, Fragment, raw, renderDocument } from './web/jsx.js';
+import { h, Fragment, renderDocument } from './web/jsx.js';
 import { Page, type PageOptions } from './web/layout.js';
 import { Alert, Button, Card, LinkButton, icons } from './web/ui.js';
+import { assetUrl } from './web/assets.js';
 import { serverInstructions } from './agent-instructions.js';
 import { hostedAuthInstructions } from './hosted-auth-guidance.js';
 import { seatInstructions } from './seat-guidance.js';
@@ -83,18 +83,28 @@ function Coverage() {
   </table></div>;
 }
 
-// Assistants Cinve works with. Logos come from Simple Icons (vendored and
-// checked byte for byte); apps it has no logo for show their initial.
-const logo = (file: string) => raw(readFileSync(new URL(`./assets/logos/${file}.svg`, import.meta.url), 'utf8')
-  .replace(/<title>.*?<\/title>/, '').replace('<svg ', '<svg aria-hidden="true" focusable="false" '));
-const assistants: [string, ReturnType<typeof raw> | undefined][] = [
-  ['Claude Code', logo('claudecode')], ['Codex', undefined], ['OpenCode', logo('opencode')], ['Gemini', logo('googlegemini')],
-  ['Antigravity', undefined], ['Hermes', undefined], ['OpenClaw', undefined],
+// Assistants Cinve works with, with each one's documented way to add a remote
+// MCP server (sources in src/assets/logos/SOURCES.md and each tool's docs or
+// --help). Codex is configured in config.toml because some versions of
+// `codex mcp add` start an optional login at once.
+type Assistant = { name: string; logo: string; how: string; setup: (endpoint: string) => string; file?: string };
+const assistants: Assistant[] = [
+  { name: 'Claude Code', logo: '/assets/logos/claudecode.svg', how: 'Ejecuta en tu terminal:', setup: url => `claude mcp add --transport http cinve ${url}` },
+  { name: 'Codex', logo: '/assets/logos/codex.png', how: 'Añade esto a', file: '~/.codex/config.toml', setup: url => `[mcp_servers.cinve]\nurl = "${url}"` },
+  { name: 'OpenCode', logo: '/assets/logos/opencode.svg', how: 'Ejecuta en tu terminal:', setup: url => `opencode mcp add cinve --global --url ${url}` },
+  { name: 'Antigravity', logo: '/assets/logos/antigravity.svg', how: 'Ejecuta en tu terminal:', setup: url => `agy mcp add cinve ${url}` },
+  { name: 'Gemini CLI', logo: '/assets/logos/gemini.svg', how: 'Ejecuta en tu terminal:', setup: url => `gemini mcp add --scope user --transport http cinve ${url}` },
+  { name: 'Hermes', logo: '/assets/logos/hermes.svg', how: 'Ejecuta en tu terminal:', setup: url => `hermes mcp add cinve --url ${url}` },
+  { name: 'OpenClaw', logo: '/assets/logos/openclaw.svg', how: 'Ejecuta en tu terminal:', setup: url => `openclaw mcp add cinve --url ${url} --transport streamable-http` },
 ];
+
+/** The assistant's logo on a light disc, so each mark shows as published. */
+const AppMark = ({ logo }: { logo: string }) =>
+  <span class="app-mark" aria-hidden="true"><img src={assetUrl(logo)} alt="" width="18" height="18" loading="lazy" /></span>;
 
 function WorksWith() {
   return <ul class="works-with" aria-label="Asistentes compatibles">
-    {assistants.map(([name, mark]) => <li><span class="app-mark" aria-hidden="true">{mark ?? name[0]}</span>{name}</li>)}
+    {assistants.map(({ name, logo }) => <li><AppMark logo={logo} />{name}</li>)}
   </ul>;
 }
 
@@ -231,13 +241,6 @@ function Snippet({ id, children }: { id: string; children: string }) {
 
 export function installationPage(origin: string) {
   const endpoint = `${origin}/mcp`;
-  // Commands match each CLI's own help; Codex is configured in config.toml
-  // because some versions of `codex mcp add` start an optional login at once.
-  const manual: [string, JSX.Element, string][] = [
-    ['Claude Code', <>Ejecuta en tu terminal:</>, `claude mcp add --transport http cinve ${endpoint}`],
-    ['Codex', <>Añade esto a <code>~/.codex/config.toml</code>:</>, `[mcp_servers.cinve]\nurl = "${endpoint}"`],
-    ['OpenCode', <>Ejecuta en tu terminal:</>, `opencode mcp add cinve --url ${endpoint}`],
-  ];
   return page('Cómo usar Cinve', <>
     <h1>Cinve en tu asistente.</h1>
     <p class="lead">Envía este mensaje a tu asistente y él se encarga del resto:</p>
@@ -245,10 +248,10 @@ export function installationPage(origin: string) {
     <section class="manual" aria-labelledby="mano">
       <h2 id="mano">Si prefieres añadirlo a mano</h2>
       <ol class="manual-list">
-        {manual.map(([app, how, command], i) => <li>
-          <h3>{app}</h3>
-          <p>{how}</p>
-          <Snippet id={`cmd-${i}`}>{command}</Snippet>
+        {assistants.map(({ name, logo, how, file, setup }, i) => <li>
+          <h3><AppMark logo={logo} />{name}</h3>
+          <p>{how}{file && <> <code>{file}</code>:</>}</p>
+          <Snippet id={`cmd-${i}`}>{setup(endpoint)}</Snippet>
         </li>)}
         <li>
           <h3>Otra aplicación</h3>

@@ -14,6 +14,13 @@ const assets: Record<string, Asset> = {
   '/assets/bricolage-grotesque.woff2': { file: new URL('../assets/bricolage-grotesque.woff2', import.meta.url), type: 'font/woff2' },
   '/assets/instrument-sans.woff2': { file: new URL('../assets/instrument-sans.woff2', import.meta.url), type: 'font/woff2' },
   '/og.png': { file: new URL('../assets/og.png', import.meta.url), type: 'image/png' },
+  '/assets/logos/claudecode.svg': { file: new URL('../assets/logos/claudecode.svg', import.meta.url), type: 'image/svg+xml', compress: true },
+  '/assets/logos/codex.png': { file: new URL('../assets/logos/codex.png', import.meta.url), type: 'image/png' },
+  '/assets/logos/opencode.svg': { file: new URL('../assets/logos/opencode.svg', import.meta.url), type: 'image/svg+xml', compress: true },
+  '/assets/logos/antigravity.svg': { file: new URL('../assets/logos/antigravity.svg', import.meta.url), type: 'image/svg+xml', compress: true },
+  '/assets/logos/gemini.svg': { file: new URL('../assets/logos/gemini.svg', import.meta.url), type: 'image/svg+xml', compress: true },
+  '/assets/logos/hermes.svg': { file: new URL('../assets/logos/hermes.svg', import.meta.url), type: 'image/svg+xml', compress: true },
+  '/assets/logos/openclaw.svg': { file: new URL('../assets/logos/openclaw.svg', import.meta.url), type: 'image/svg+xml', compress: true },
   '/favicon.svg': { file: new URL('../assets/favicon.svg', import.meta.url), type: 'image/svg+xml', compress: true },
 };
 
