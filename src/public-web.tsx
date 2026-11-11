@@ -38,15 +38,28 @@ function SeatMap() {
   </div>;
 }
 
-const questions = ['¿Qué películas hay hoy en Caracas?', '¿Cuánto cuesta la entrada en Cinepic?', '¿Quedan dos asientos juntos a las 7?'];
+// What people ask, and what they get back.
+const questions = [
+  ['¿Qué hay hoy en Caracas?', 'Películas, cines y horarios.'],
+  ['¿Cuánto cuesta la entrada?', 'El precio de la función que elijas.'],
+  ['¿Quedan dos asientos juntos?', 'El mapa de la sala, antes de comprar.'],
+  ['¿Qué combos tienen?', 'La caramelería, cuando el cine la publica.'],
+];
 
 export function landingPage(origin: string) {
   return page('Consulta de cines en Venezuela', <>
     <section class="hero" aria-labelledby="titulo">
       <SeatMap />
       <h1 id="titulo">La cartelera, en tu chat.</h1>
-      <p class="lead">Pregúntale a tu asistente de IA qué películas hay, a qué hora, cuánto cuesta la entrada y qué asientos quedan libres en Cinex, Cines Unidos y Cinepic.</p>
+      <p class="lead">Pregúntale a tu asistente qué ver hoy y él revisa Cinex, Cines Unidos y Cinepic por ti.</p>
       <LinkButton href="#empezar" size="lg">Añadir Cinve a mi asistente</LinkButton>
+    </section>
+    <section class="section">
+      <h2>Qué puedes preguntar</h2>
+      <dl class="questions">
+        {questions.map(([question, answer]) => <div><dt>{question}</dt><dd>{answer}</dd></div>)}
+      </dl>
+      <p class="note">Dile en qué ciudad estás y, si quieres, el cine o la película.</p>
     </section>
     <section class="section" id="empezar">
       <h2>Cómo empezar</h2>
@@ -55,15 +68,15 @@ export function landingPage(origin: string) {
           <p>Copia este mensaje y envíaselo a tu asistente.</p>
           <InstallMessage origin={origin} />
         </li>
-        <li><p>Tu asistente añade Cinve y te pide permiso antes. Funciona con asistentes que admiten conexiones MCP. <a href="/install">Hacerlo a mano</a></p></li>
-        <li>
-          <p>Pregunta como siempre:</p>
-          <ul class="asks">{questions.map(question => <li>{question}</li>)}</ul>
-        </li>
+        <li><p>Tu asistente añade Cinve y te pide permiso. No tienes que crear ninguna cuenta.</p><p class="fine">Funciona con asistentes que aceptan conexiones MCP. <a href="/install">¿Prefieres hacerlo a mano?</a></p></li>
+        <li><p>Pregunta qué quieres ver, como en cualquier chat.</p></li>
       </ol>
-      <p class="note">Algunos precios piden tu cuenta del cine. Tu asistente te dará un enlace privado para conectarla; la contraseña nunca pasa por el chat.</p>
     </section>
-    <aside class="project-note" aria-label="Sobre Cinve"><p>Cinve es gratis e independiente, sin relación con Cinex, Cines Unidos ni Cinepic. Consulta la información; no compra entradas ni reserva asientos.</p></aside>
+    <section class="section">
+      <h2>¿Necesito mi cuenta del cine?</h2>
+      <p>Para la cartelera y los horarios, no. Para precios y asientos, solo en Cinex y Cines Unidos: tu asistente te dará un enlace privado para conectarla. Escribes la contraseña ahí, nunca en el chat, y Cinve no la guarda.</p>
+    </section>
+    <aside class="project-note" aria-label="Sobre Cinve"><p>Cinve es gratis e independiente; no está afiliado a Cinex, Cines Unidos ni Cinepic. Solo consulta lo que cada cine publica: no compra entradas ni reserva asientos.</p></aside>
   </>, { index: true, canonical: origin + '/', script: '/assets/js/site.js' });
 }
 
