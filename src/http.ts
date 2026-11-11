@@ -18,7 +18,29 @@ const cacheEntries = 512, cacheBytesLimit = 64 * 1024 * 1024;
 // within seconds. Remember it per origin so later public reads fail fast (or
 // take an adapter's documented fallback) instead of being refused again.
 const challengeMemoryMs = 10 * 60 * 1000;
-const hosts = new Set(['www.cinex.com.ve', 'www.cinesunidos.com', 'gateway.cinesunidos.com', 'cinepiccandelaria.com', 'cinepicvip.com', 'apifront.cinexo.com.ar', 'api.cinexo.com.ar']);
+const hosts = new Set(['www.cinex.com.ve', 'www.cinesunidos.com', 'gateway.cinesunidos.com', 'cinepiccandelaria.com', 'cinepicvip.com', 'apifront.cinexo.com.ar', 'api.cinexo.com.ar', 'supercines.com.ve']);
+/**
+ * Supercines serves its schedule, fares and concessions only to form POSTs
+ * that carry the anti-forgery token of an anonymous visitor session, exactly
+ * as its own pages do. The token proves the request came through the public
+ * site; it is not an anti-bot control. Sessions last two hours upstream.
+ */
+const formSessionMs = 60 * 60 * 1000;
+const formSessionPage = 'https://supercines.com.ve/cartelera';
+type FormSession = { cookies: Map<string, string>; token: string; expires: number };
+type FormRequest = { method: 'GET' | 'POST'; body?: string; headers: Record<string, string>; onResponse?: (response: Response) => void };
+/** Laravel answers an expired anti-forgery token with HTTP 419. */
+class FormTokenExpired extends DataError { constructor() { super('error', 'El proveedor rechazó el token de consulta pública (HTTP 419).'); } }
+
+function sessionCookies(response: Response, into: Map<string, string>) {
+  const values = typeof response.headers.getSetCookie === 'function' ? response.headers.getSetCookie() : [];
+  for (const value of values) {
+    const pair = value.split(';', 1)[0], i = pair.indexOf('=');
+    const name = pair.slice(0, i).trim(), cookie = pair.slice(i + 1).trim();
+    // Only the framework's own session and token cookies, never a third party's.
+    if (i > 0 && /^[A-Za-z0-9_-]{1,64}$/.test(name) && /^[A-Za-z0-9%=._-]{1,4096}$/.test(cookie) && (into.has(name) || into.size < 4)) into.set(name, cookie);
+  }
+}
 
 function cancelBody(body: ReadableStream<Uint8Array> | null | undefined) {
   if (!body) return;
@@ -175,6 +197,78 @@ export class HttpClient {
     this.bindPending(url, task);
     return task;
   }
+  /**
+   * A public form read: same cache, queue, deadline and size limits as get().
+   * The cache key and the reported source are the URL plus its sorted form
+   * fields, so different queries never share an entry. Callers must validate
+   * the route and fields with assertPublicForm first (ReadContext does).
+   */
+  async post(url: string, fields: Record<string, string>, ttl = 120000, refresh = false): Promise<Page> {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:' || parsed.hostname !== 'supercines.com.ve' || parsed.port || parsed.username || parsed.password || parsed.hash || parsed.search) throw new DataError('error', 'Origen de consulta no permitido.');
+    const body = new URLSearchParams(Object.entries(fields).sort(([a], [b]) => a.localeCompare(b))).toString();
+    const key = body ? `${url}?${body}` : url;
+    if (refresh) this.invalidate(key);
+    const hit = this.cache.get(key);
+    if (!refresh && hit && hit.expires > Date.now()) {
+      this.touch(hit);
+      return { ...hit.page, source: { ...hit.page.source, cached: true } };
+    }
+    if (hit && !refresh) this.evictEntry(hit);
+    const challenge = this.challenged.get(parsed.origin);
+    if (challenge && challenge.until > Date.now()) throw new DataError(challenge.error.status, challenge.error.message);
+    const running = !refresh && this.pending.get(key);
+    if (running) return running;
+    const startedAt = ++this.clock;
+    let task!: Promise<Page>;
+    task = this.readForm(url, key, body, parsed.origin, refresh).then(page => {
+      this.store(key, page, ttl, startedAt, task, false);
+      return page;
+    }).finally(() => this.clearPending(task));
+    this.pendingStartedAt.set(task, startedAt);
+    this.bindPending(key, task);
+    return task;
+  }
+  private formSessions = new Map<string, Promise<FormSession>>();
+  /** One anonymous visitor session per origin, shared by concurrent reads. */
+  private formSession(origin: string, renew: boolean): Promise<FormSession> {
+    const current = this.formSessions.get(origin);
+    if (current && !renew) return current.then(session => session.expires > Date.now() ? session : this.formSession(origin, true));
+    const opened = this.readSessionPage(origin);
+    this.formSessions.set(origin, opened);
+    opened.catch(() => { if (this.formSessions.get(origin) === opened) this.formSessions.delete(origin); });
+    return opened;
+  }
+  private async readSessionPage(origin: string): Promise<FormSession> {
+    assertPublicRead(formSessionPage);
+    const cookies = new Map<string, string>();
+    const page = await this.read(formSessionPage, origin, undefined, false, undefined,
+      { method: 'GET', headers: {}, onResponse: response => sessionCookies(response, cookies) });
+    const token = page.body.match(/<meta\s+name="csrf-token"\s+content="([A-Za-z0-9]{20,128})"/)?.[1];
+    if (!token || !cookies.size) throw new DataError('error', 'El proveedor no abrió una sesión de consulta pública reconocible.');
+    return { cookies, token, expires: Date.now() + formSessionMs };
+  }
+  private async readForm(url: string, key: string, body: string, origin: string, refresh: boolean): Promise<Page> {
+    for (let attempt = 0; ; attempt++) {
+      const session = await this.formSession(origin, attempt > 0);
+      try {
+        const page = await this.read(url, origin, undefined, refresh, undefined, {
+          method: 'POST', body,
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', Accept: 'application/json, text/html',
+            'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-TOKEN': session.token,
+            Cookie: [...session.cookies].map(([name, value]) => `${name}=${value}`).join('; '),
+          },
+          onResponse: response => sessionCookies(response, session.cookies),
+        });
+        return { body: page.body, source: { ...page.source, url: key } };
+      } catch (error) {
+        // One renewal: the upstream session may have expired before ours.
+        if (error instanceof FormTokenExpired && attempt === 0) continue;
+        throw error;
+      }
+    }
+  }
   private bindPending(url: string, task: Promise<Page>) {
     this.pending.set(url, task);
     const keys = this.pendingKeys.get(task) ?? new Set<string>(); keys.add(url); this.pendingKeys.set(task, keys);
@@ -287,18 +381,18 @@ export class HttpClient {
     });
   }
   private async read(url: string, origin: string, authorize?: (target: string) => Promise<Record<string, string>>, refresh = false,
-    onPublicRedirect?: (alias: string, canonical: string) => void): Promise<Page> {
+    onPublicRedirect?: (alias: string, canonical: string) => void, form?: FormRequest): Promise<Page> {
     // AbortSignal.timeout() uses an unreferenced timer: when the only pending
     // work is a stalled promise (a hung transport, session store or body
     // reader), Node may exit or drop the task before the deadline fires. A
     // referenced timer, always cleared, makes the deadline deterministic.
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new DOMException('The operation timed out.', 'TimeoutError')), this.timeout);
-    try { return await this.readUntil(controller.signal, url, origin, authorize, refresh, onPublicRedirect); }
+    try { return await this.readUntil(controller.signal, url, origin, authorize, refresh, onPublicRedirect, form); }
     finally { clearTimeout(timer); }
   }
   private async readUntil(signal: AbortSignal, url: string, origin: string, authorize?: (target: string) => Promise<Record<string, string>>, refresh = false,
-    onPublicRedirect?: (alias: string, canonical: string) => void): Promise<Page> {
+    onPublicRedirect?: (alias: string, canonical: string) => void, form?: FormRequest): Promise<Page> {
     const requested = url;
     const deadline = Date.now() + this.timeout;
     const release = await this.acquire(origin, signal, deadline);
@@ -308,11 +402,13 @@ export class HttpClient {
         const auth = authorize ? await withSignal(authorize(target), signal) : {};
         signal.throwIfAborted();
         return withSignal(this.request(target, {
-          headers: { 'User-Agent': 'cinev-mcp/0.1', ...(refresh ? { 'Cache-Control': 'no-cache' } : {}), ...(origin.includes('gateway.cinesunidos.com') ? { xChannel: 'www' } : {}), ...auth },
-          signal, redirect: 'manual',
+          headers: { 'User-Agent': 'cinev-mcp/0.1', ...(refresh ? { 'Cache-Control': 'no-cache' } : {}), ...(origin.includes('gateway.cinesunidos.com') ? { xChannel: 'www' } : {}), ...form?.headers, ...auth },
+          signal, redirect: 'manual', ...(form ? { method: form.method, ...(form.body !== undefined ? { body: form.body } : {}) } : {}),
         }), signal, response => cancelBody(response.body));
       };
       let response = await requestPage(url);
+      form?.onResponse?.(response);
+      if (form && response.status === 419) { cancelBody(response.body); throw new FormTokenExpired(); }
       // One observed migration of Cinex's ticket page, with identical cinema
       // and session IDs. Re-read credentials and retain the original deadline.
       const ticketRedirect = authorize && cinexTicketRedirect(url, response);
@@ -332,6 +428,9 @@ export class HttpClient {
       if (response.status >= 300 && response.status < 400) {
         const destination = response.headers.get('location'); cancelBody(response.body);
         const redirect = destination ? new URL(destination, url) : undefined;
+        // Supercines sends a listing with no data for the request (a title
+        // with no functions on that date) to its home page.
+        if (form?.method === 'POST' && redirect?.origin === origin && redirect.pathname === '/' && !redirect.search) throw new DataError('empty', 'El proveedor no devolvió datos para esta consulta (redirigió a su portada).');
         if (authorize && redirect?.origin === origin && /^\/(?:clearsession\.html|api\/auth\/signin|login)(?:\/|$)/.test(redirect.pathname)) throw new DataError('auth_required', 'El proveedor redirigió al login; conecta de nuevo tu cuenta en la terminal local.');
         throw new DataError('unavailable', 'El proveedor redirigió la consulta; no se siguió el destino.');
       }
@@ -426,10 +525,31 @@ export function assertPublicRead(value: string) {
           exactQuery(u, { idComplejo: ids, fecha: v => !!v && /^\d{2}\/\d{2}\/\d{4}$/.test(v) });
       case 'api.cinexo.com.ar':
         { const m = path.match(/^\/api\/complejo\/([^/]+)\/candy$/); return !!m && none && Id.safeParse(m[1]).success; }
+      case 'supercines.com.ve':
+        return none && (path === '/cartelera' || /^\/booking\/\d{1,12}$/.test(path));
       default:
         return false;
     }
   })();
+  if (!allowed) throw new DataError('error', 'Ruta de consulta pública no permitida.');
+}
+
+const digits = (value: string | undefined) => value !== undefined && /^\d{1,12}$/.test(value);
+const isoDay = (value: string | undefined) => value !== undefined && /^\d{4}-\d{2}-\d{2}$/.test(value);
+const supercinesForms: Record<string, Record<string, (value: string | undefined) => boolean>> = {
+  '/dame_empresas': {},
+  '/api/app/cartelera/list': { type: value => value === 'all', idEmpresa: value => value === undefined || digits(value) },
+  '/listCartelerafecha': { fecha: isoDay, id: digits },
+  '/listBoletos': { idFuncion: digits, fecha: isoDay, unico: digits, tresD: value => value === '0' || value === '1', idEmpresa: digits },
+  '/listCarameleria': { idEmpresa: digits },
+};
+/**
+ * Public form reads. Only the listing routes Supercines' own pages call, with
+ * exactly their fields: never login, registration, cart, booking or payment.
+ */
+export function assertPublicForm(value: string, fields: Record<string, string>) {
+  const u = new URL(value), rules = u.hostname === 'supercines.com.ve' && !u.search && !u.hash ? supercinesForms[u.pathname] : undefined;
+  const allowed = !!rules && Object.keys(fields).every(key => Object.hasOwn(rules, key)) && Object.entries(rules).every(([key, valid]) => valid(fields[key]));
   if (!allowed) throw new DataError('error', 'Ruta de consulta pública no permitida.');
 }
 
@@ -471,6 +591,18 @@ export class ReadContext {
   }
   async json(url: string): Promise<unknown> {
     try { return JSON.parse(await this.get(url)); }
+    catch (e) { if (e instanceof DataError) throw e; throw new DataError('error', 'El proveedor no devolvió JSON válido.'); }
+  }
+  /** A public listing read sent as a form POST; see HttpClient.post. */
+  async form(url: string, fields: Record<string, string>, ttl?: number): Promise<string> {
+    assertPublicForm(url, fields);
+    this.checkCancelled();
+    const page = await this.http.post(url, fields, ttl, this.refresh);
+    if (!this.sources.some(s => s.url === page.source.url)) this.sources.push(page.source);
+    return page.body;
+  }
+  async formJson(url: string, fields: Record<string, string>, ttl?: number): Promise<unknown> {
+    try { return JSON.parse(await this.form(url, fields, ttl)); }
     catch (e) { if (e instanceof DataError) throw e; throw new DataError('error', 'El proveedor no devolvió JSON válido.'); }
   }
 }

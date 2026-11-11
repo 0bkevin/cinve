@@ -5,6 +5,7 @@ import type { DataItem, Operation, Query, QueryResult } from './core.js';
 import { HttpClient, ReadContext } from './http.js';
 import type { CallOptions } from './http.js';
 import { cinepic, cinesunidos, cinex } from './providers.js';
+import { supercines } from './supercines.js';
 
 const resultWarningLimit = 64;
 const resultWarningCharacters = 8192;
@@ -58,6 +59,7 @@ function boundedSources(sources: QueryResult['sources'], warnings: string[]): Qu
 export const capabilities = {
   cinepic: { seats: 'public_page_data_ascii', cities: 'public', cinemas: 'public', movies: 'public_api', showtimes: 'public_api', prices: 'page_data_ves_and_derived_usd', concessions: 'public_api_empty_in_samples' },
   cinesunidos: { seats: 'authenticated_api_ascii', cities: 'public_api', cinemas: 'page_data', movies: 'page_data', showtimes: 'page_data', prices: 'authenticated_api', concessions: 'public_api' },
+  supercines: { seats: 'not_supported', cities: 'public_form_api', cinemas: 'public_form_api', movies: 'public_api_billboard_by_cinema', showtimes: 'public_form_html_per_title', prices: 'public_form_html_ves_and_derived_usd_requires_movie_and_date', concessions: 'public_form_html_ves' },
   cinex: { seats: 'authenticated_html_ascii', cities: 'public_api', cinemas: 'html', movies: 'html_general_catalog', showtimes: 'html_requires_cinema_or_movie', prices: 'authenticated_html_requires_session', concessions: 'authenticated_html' },
 };
 export class CinemaService {
@@ -66,13 +68,13 @@ export class CinemaService {
   async authStatus() { return Promise.all((['cinex', 'cinesunidos'] as const).map(p => this.http.sessions.status(p))); }
   async query(op: Operation, q: Query, call?: CallOptions): Promise<QueryResult> {
     // One commercial date for the entire operation, including midnight boundaries.
-    if (!q.date && (op === 'showtimes' || (op === 'movies' && q.provider !== 'cinex'))) q = { ...q, date: today() };
+    if (!q.date && (op === 'showtimes' || (op === 'movies' && q.provider !== 'cinex' && q.provider !== 'supercines'))) q = { ...q, date: today() };
     const c = new ReadContext(this.http, q.refresh, call);
     const result: QueryResult = { provider: q.provider, status: 'empty', queried_at: new Date().toISOString(), timezone: 'America/Caracas', sources: [], items: [], warnings: [], total: 0, next_offset: null, partial: false };
     try {
       if (q.cinema_id?.startsWith('directory-')) throw new DataError('unavailable', 'Esta sede no tiene código de consulta verificado. Consulta el enlace oficial devuelto por list_cinemas; el ID directory- solo identifica la sede conocida.');
       const data = q.provider === 'cinex' ? await cinex(op, q, c, this.cinexCatalog)
-        : await ({ cinepic, cinesunidos })[q.provider](op, q, c);
+        : await ({ cinepic, cinesunidos, supercines })[q.provider](op, q, c);
       const unique = new Map<string, DataItem>();
       // A function ID drives price and seat lookups. If the provider reports the
       // same ID with a different film, date, time or room, neither copy is
