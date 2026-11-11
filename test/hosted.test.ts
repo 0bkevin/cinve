@@ -491,7 +491,10 @@ test('browser MCP clients discover OAuth without cookies; approval names are esc
   const html = await (await fetch(a.url)).text();
   assert.ok(html.includes('&lt;script&gt;')); assert.ok(!html.includes('<script>'));
   await f.pool.query('UPDATE cinev_budgets SET count=10000');
-  assert.equal((await fetch(f.origin + '/oauth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 429);
+  // An invalid body is refused for free; a valid registration meets the spent quota.
+  assert.equal((await fetch(f.origin + '/oauth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 400);
+  assert.equal((await fetch(f.origin + '/oauth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ client_name: 'T', redirect_uris: ['https://assistant.example/callback'] }) })).status, 429);
   await f.pool.query(await migrationSql());
   assert.ok(await f.users.authenticate(f.alice.token), 'migrations can be rerun without invalidating existing access');
 });
@@ -1498,4 +1501,89 @@ test('legacy cutoffs follow when signing began, recorded once by the first insta
   await late.pool.query("INSERT INTO cinev_meta VALUES('token_signing_since', now()-interval '40 days')");
   assert.deepEqual(await use(), { access: 401, refresh: 400 });
   assert.equal((await late.post('/connect/exchange', linkToken)).status, 403, 'an unsigned link is no longer accepted');
+});
+
+test('one network cannot spend the shared registration quota', async t => {
+  const f = await fixture(t, undefined, undefined, { trustedVercelProxy: true });
+  const register = (network: string) => fetch(f.origin + '/oauth/register', from(network, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ client_name: 'T', redirect_uris: ['https://assistant.example/callback'] }) })).then(r => r.status);
+  const statuses = [];
+  for (let i = 0; i < 60; i++) statuses.push(await register('203.0.113.66'));
+  assert.equal(statuses.filter(s => s === 201).length, 10);
+  assert.equal(await register('198.51.100.66'), 201, 'another network still registers');
+});
+
+test('junk from others on a shared address never blocks a signed refresh or code exchange', async t => {
+  const f = await fixture(t, undefined, undefined, { trustedVercelProxy: true });
+  const shared = '190.202.7.7';
+  const { client_id, tokens } = await enrolled(f.origin);
+  const pending = await authorizationRequest(f.origin, client_id), callback = await approve(f.origin, pending.url);
+  assert.match(callback.searchParams.get('code')!, /^cvc_[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{43}$/, 'codes are signed');
+  // Junk consent posts (no approval cookie), authorization starts and requests spend the address's quotas.
+  for (let i = 0; i < 70; i++) {
+    await fetch(f.origin + '/oauth/authorize', from(shared, { method: 'POST', headers: { Origin: f.origin, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ request_id: 'a'.repeat(32), csrf: 'b'.repeat(43), decision: 'approve' }) }));
+    await fetch(pending.url, from(shared));
+  }
+  for (let k = 0; k < 12; k++) await Promise.all(Array.from({ length: 50 }, () => fetch(f.origin + '/nothing', from(shared)).then(r => r.text())));
+  assert.equal((await fetch(pending.url, from(shared))).status, 429, 'the junk itself is limited');
+  // A real user on the address approving a request their browser started still gets through.
+  const started = await fetch(pending.url, from('203.0.113.200'));
+  const page = await started.text();
+  const approval = await fetch(f.origin + '/oauth/authorize', from(shared, { method: 'POST', redirect: 'manual', headers: {
+    Origin: f.origin, 'Content-Type': 'application/x-www-form-urlencoded', Cookie: started.headers.get('set-cookie')!.split(';')[0] },
+    body: new URLSearchParams({ request_id: page.match(/name="request_id" value="([^"]+)"/)![1], csrf: page.match(/name="csrf" value="([^"]+)"/)![1], decision: 'approve' }) }));
+  assert.equal(approval.status, 303);
+  const refreshed = await fetch(f.origin + '/oauth/token', from(shared, { method: 'POST',
+    body: new URLSearchParams({ grant_type: 'refresh_token', client_id, refresh_token: tokens.refresh_token, resource: f.origin + '/mcp' }) }));
+  assert.equal(refreshed.status, 200);
+  const exchanged = await fetch(f.origin + '/oauth/token', from(shared, { method: 'POST', body: new URLSearchParams({
+    grant_type: 'authorization_code', client_id, code: callback.searchParams.get('code')!, code_verifier: pending.verifier,
+    resource: f.origin + '/mcp', redirect_uri: pending.params.redirect_uri }) }));
+  assert.equal(exchanged.status, 200);
+  const next = await refreshed.json() as { access_token: string };
+  assert.equal((await fetch(f.origin + '/oauth/revoke', from(shared, { method: 'POST', body: new URLSearchParams({ token: next.access_token, client_id }) }))).status, 200);
+  // A forged signed code is refused without database work.
+  const forged = 'cvc_' + 'A'.repeat(43) + '.' + 'B'.repeat(43);
+  const query = f.pool.query.bind(f.pool), connect = f.pool.connect.bind(f.pool); let queries = 0;
+  f.pool.query = ((...args: Parameters<typeof query>) => { queries++; return query(...args); }) as typeof f.pool.query;
+  // pool.query connects with a callback; a transaction connects through the promise form.
+  f.pool.connect = ((...args: unknown[]) => { if (!args.length) queries++; return (connect as (...a: unknown[]) => unknown)(...args); }) as typeof f.pool.connect;
+  const refused = await form(f.origin, '/oauth/token', { grant_type: 'authorization_code', client_id, code: forged, code_verifier: pending.verifier, resource: f.origin + '/mcp', redirect_uri: pending.params.redirect_uri });
+  f.pool.query = query; f.pool.connect = connect;
+  assert.equal(refused.status, 400); assert.equal(queries, 0, 'no query and no transaction');
+});
+
+test('dead signed tokens buy no headroom, and signed traffic is also capped per /48', async t => {
+  const f = await fixture(t, undefined, undefined, { trustedVercelProxy: true });
+  const { client_id, tokens } = await enrolled(f.origin);
+  const dead = await enrolled(f.origin);
+  await form(f.origin, '/oauth/revoke', { token: dead.tokens.access_token, client_id: dead.client_id });
+  const shared = '190.202.8.8';
+  const mcp = (token: string, network: string) => fetch(f.origin + '/mcp', from(network, { method: 'POST', body: '{}',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' } }));
+  // A dead token on another route, or on /mcp once known dead, counts like any request from the address.
+  await mcp(dead.tokens.access_token, shared);
+  for (let k = 0; k < 12; k++) await Promise.all(Array.from({ length: 50 }, () => mcp(dead.tokens.access_token, shared).then(r => r.text())));
+  assert.equal((await fetch(f.origin + '/nothing', from(shared, { headers: { Authorization: `Bearer ${dead.tokens.access_token}` } }))).status, 429);
+  const live = await mcp(tokens.access_token, shared);
+  assert.notEqual(live.status, 429); assert.notEqual(live.status, 401);
+  // Live signed traffic from one IPv6 /48 is capped too (6000/min), across tokens and /64s.
+  // One registered client, eleven connections (registration itself is limited per network).
+  const many: Array<{ tokens: { access_token: string } }> = [];
+  for (let i = 0; i < 12; i++) {
+    const request = await authorizationRequest(f.origin, client_id), callback = await approve(f.origin, request.url);
+    const response = await form(f.origin, '/oauth/token', { grant_type: 'authorization_code', client_id, code: callback.searchParams.get('code')!,
+      code_verifier: request.verifier, resource: f.origin + '/mcp', redirect_uri: request.params.redirect_uri });
+    many.push({ tokens: await response.json() as { access_token: string } });
+  }
+  const statuses: number[] = [];
+  for (let k = 0; k < 6000; k += 25) statuses.push(...await Promise.all(Array.from({ length: 25 }, (_, i) =>
+    mcp(many[(k + i) % 11].tokens.access_token, `2001:db8:77:${((k + i) % 4000).toString(16)}::1`).then(r => r.status))));
+  assert.ok(!statuses.includes(401));
+  // A twelfth, unused connection (its own database budget untouched) is held back by the /48 cap alone.
+  const over = await mcp(many[11].tokens.access_token, '2001:db8:77:ffff::1');
+  assert.equal(over.status, 429); assert.match(await over.text(), /Demasiadas consultas/);
+  const elsewhere = await mcp(many[11].tokens.access_token, '2001:db8:78::1');
+  assert.notEqual(elsewhere.status, 429, 'another /48'); assert.notEqual(elsewhere.status, 401);
 });

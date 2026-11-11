@@ -142,7 +142,8 @@ export async function createHostedApp(options: {
   //   exempt. A signed credential whose lookup failed is revoked, expired or
   //   used for good, so it is answered from memory for an hour.
   const localRequests = new LocalLimiter(600), localBlockRequests = new LocalLimiter(2400);
-  const localTokenRequests = new LocalLimiter(600), localSignedRequests = new LocalLimiter(3000);
+  const localTokenRequests = new LocalLimiter(600), localSignedRequests = new LocalLimiter(3000), localSignedBlockRequests = new LocalLimiter(6000);
+  const oauthRoutes = new Set(['/oauth/register', '/oauth/authorize', '/oauth/token', '/oauth/revoke']);
   const localAuthFailures = new LocalLimiter(30), knownTokens = new LocalSet(30 * 60000), deadTokens = new LocalSet(60 * 60000);
   const tooManyFailures = () => new HttpError(429, 'Demasiados intentos con credenciales no válidas. Inténtalo en un minuto.');
   const storeFor = (id: string) => new EncryptedSessionStore(options.pool, id, options.key);
@@ -166,15 +167,25 @@ export async function createHostedApp(options: {
       const ip = rateLimitNetwork(typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : req.socket.remoteAddress ?? 'unknown');
       const authorization = req.headers.authorization ?? '';
       const bearer = authorization.startsWith('Bearer ') ? authorization.slice(7) : undefined;
-      const signedBearer = !!bearer && accessTokenFormat(bearer, tokenKey) === 'signed';
+      // A credential earns its own headroom only where it is used, and only
+      // while it is live: a revoked or used one is treated like no credential.
+      const signedBearer = req.url === '/mcp' && !!bearer && accessTokenFormat(bearer, tokenKey) === 'signed' && !deadTokens.has(digest(bearer));
       const linkHeader = req.headers['x-cinev-connection'];
-      const signedLink = typeof linkHeader === 'string' && req.url?.startsWith('/connect/') &&
+      const signedLink = typeof linkHeader === 'string' && !!req.url?.startsWith('/connect/') && !deadTokens.has(digest(linkHeader)) &&
         links.linkFormat(linkHeader, req.url === '/connect/exchange' ? 'invitation' : 'browser') === 'signed';
       const credential = signedBearer ? 'token:' + bearer!.slice(0, 47) : signedLink ? 'link:' + (linkHeader as string).slice(0, 64) : undefined;
       const block = ipv6Block(ip);
-      if (!(credential ? localTokenRequests.hit(credential) && localSignedRequests.hit(ip)
+      // OAuth routes apply these limits themselves, after their free checks.
+      if (!oauthRoutes.has(pagePath ?? '') && !(credential
+        ? localTokenRequests.hit(credential) && localSignedRequests.hit(ip) && (!block || localSignedBlockRequests.hit(block))
         : localRequests.hit(ip) && (!block || localBlockRequests.hit(block)))) throw new HttpError(429, 'Demasiadas consultas. Inténtalo más tarde.');
-      if (await oauth.handle(req, res, ip)) return;
+      if (await oauth.handle(req, res, ip, {
+        // OAuth routes skip the general filter above and apply these after
+        // their free checks, so a signed code or refresh token is limited by
+        // its own id and never by junk from others on its network.
+        credential: id => localTokenRequests.hit('oauth:' + id),
+        network: () => localRequests.hit(ip) && (!block || localBlockRequests.hit(block)),
+      })) return;
       if (req.url === '/mcp') {
         // MCP authorization is exclusively bearer-based; cookies are never used,
         // so any web origin may call it. The Host check above blocks DNS

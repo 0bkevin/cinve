@@ -196,22 +196,30 @@ para tokens de acceso y enlaces y 31 días para tokens de renovación. Así la
 transición sigue al despliegue real; mientras no se ejecute la migración 006,
 se siguen aceptando. Las sesiones de
 cine se cifran con AES-256-GCM y se vinculan criptográficamente a su propietario
-y proveedor. El registro, la aprobación y la emisión de tokens tienen límites persistentes
-por red y por prefijo IPv6 /48. Solo el registro (60 por minuto) y el inicio de
-una autorización (600 por minuto) tienen además un cupo global, que se consume
-cuando la red todavía tiene cupo: renovar tokens, canjear un código ya aprobado
-o revocar nunca dependen de lo que hagan otras redes. Las comprobaciones que no
-necesitan la base (formato y firma de los tokens) se hacen antes de cobrar
-cualquier cupo, así que una solicitud malformada o falsificada no cuesta nada.
+y proveedor. Los códigos de autorización y los tokens de acceso y de renovación llevan firma.
+Las comprobaciones que no necesitan la base (formato del cuerpo, firma,
+parámetros, cookie de aprobación) se hacen antes de cobrar cualquier cupo, así
+que una solicitud malformada o falsificada no cuesta nada. Después:
+
+- iniciar una autorización y registrar un cliente tienen cupos por red y por
+  prefijo IPv6 /48, y un cupo global (600 y 60 por minuto) que se consume solo
+  cuando la red todavía tiene el suyo, así que una sola red nunca lo agota;
+- canjear un código firmado, renovar con un token firmado o revocarlo se
+  limitan por la propia credencial, de un solo uso, y nunca por lo que hagan
+  otros en la misma red;
+- aprobar no tiene cupo de red: exige la cookie de una solicitud que el
+  navegador inició, y el inicio de sesión del cine tiene sus propios límites.
 
 Antes de cualquier consulta a la base, cada instancia aplica en memoria un
 primer filtro. Las páginas estáticas (`/`, `/connect`) nunca se limitan. Las
 solicitudes sin un token firmado admiten 600 por minuto por red y 2400 por
 prefijo IPv6 /48, y 30 credenciales sin firma rechazadas por minuto por red.
 Los tokens de acceso y los enlaces de conexión llevan firma, así que no se
-pueden falsificar: cada uno tiene su propio cupo (600 por minuto), con un tope
-de 3000 por minuto por red para quien emita muchos, y el tráfico basura de
-otros en una dirección compartida (NAT de operador) nunca los detiene. Un
+pueden falsificar: donde se usan (`/mcp` y `/connect/*`), cada uno vigente tiene
+su propio cupo (600 por minuto), con topes de 3000 por minuto por red y 6000
+por /48 para quien emita muchos, y el tráfico basura de otros en una dirección
+compartida (NAT de operador) nunca los detiene. Uno revocado o usado no tiene
+cupo propio. Un
 token o enlace firmado que ya falló (revocado, vencido o usado) se rechaza
 desde memoria durante una hora, y un token sin firma que funcionó hace poco no
 se detiene por los fallos ajenos. Los límites persistentes en PostgreSQL siguen
