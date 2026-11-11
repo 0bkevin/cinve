@@ -11,7 +11,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/server';
 import { createHostedApp, hostedKeys } from '../src/hosted.js';
 import { EncryptedSessionStore, HostedUsers } from '../src/hosted-store.js';
 import { Result } from '../src/core.js';
-import { ConnectionLinks } from '../src/hosted-links.js';
+import { accountName, ConnectionLinks } from '../src/hosted-links.js';
 import { createRemoteServer } from '../src/remote.js';
 import type { login } from '../src/auth.js';
 import type { ClientMetadataFetcher } from '../src/client-metadata.js';
@@ -1455,10 +1455,16 @@ test('every spelling of one email shares its account limit', async t => {
   assert.deepEqual(new Set(variants.map(accountName)), new Set(['owner@example.com']));
   for (const [a, b] of [['carłos@x.com', 'carlos@x.com'], ['mæva@x.com', 'maeva@x.com'], ['jøse@x.com', 'jose@x.com'], ['điana@x.com', 'diana@x.com'],
     ['straße@x.de', 'strasse@x.de'], ['a\u0000b@x.com', 'ab@x.com']]) assert.equal(accountName(a), accountName(b), `${a} ~ ${b}`);
-  assert.equal(accountName('数@x.com'), accountName('字@x.com'), 'other non-ASCII letters share one placeholder (stricter)');
+  assert.notEqual(accountName('数@x.com'), accountName('字@x.com'), 'distinct non-ASCII letters retain separate account keys');
   const results = [];
   for (const [i, username] of [...variants, 'owner@example.com'].entries()) results.push(await f.links.admitSignIn({ network: `203.0.113.${i}`, provider: 'cinex', username }));
   assert.deepEqual(results, [undefined, undefined, undefined, undefined, undefined, 'account']);
+});
+
+test('distinct non-ASCII accounts keep separate keys while accent and case variants still fold', () => {
+  assert.notEqual(accountName('数@gmail.com'), accountName('字@gmail.com'));
+  assert.notEqual(accountName('😀@gmail.com'), accountName('😁@gmail.com'));
+  assert.equal(accountName('Ówner@GMAIL.com'), accountName('owner@gmail.com'));
 });
 
 test('a refused admission or a busy double submit spends no link or consent attempt', async t => {

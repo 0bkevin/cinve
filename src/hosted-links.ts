@@ -58,8 +58,8 @@ export function accountName(username: string) {
   return username.normalize('NFKC').replace(/[\p{Default_Ignorable_Code_Point}\p{Cc}\s]/gu, '')
     .normalize('NFD').replace(/\p{M}/gu, '').toUpperCase().toLowerCase()
     .replace(/[æœøłđðþħŧŋĸ]/g, c => foldedLetters[c])
-    // Anything else outside ASCII shares one placeholder (stricter, never looser).
-    .replace(/[^\x20-\x7e]/g, '*');
+    // Encode remaining non-ASCII code points distinctly after the stricter folding above.
+    .replace(/[^\x20-\x7e]/gu, c => '%' + c.codePointAt(0)!.toString(16));
 }
 const account = (s: SignInSubject) => `${s.provider}:${accountName(s.username)}`;
 const accountKey = (s: SignInSubject) => `signin:account:${account(s)}`;
