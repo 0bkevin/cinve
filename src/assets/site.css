@@ -337,3 +337,7 @@ p a:hover, .note a:hover { text-decoration-color: currentColor; }
   .more > summary .chevron, .more[open] > .board, .faq details, .faq summary .plus { transition: none; animation: none; }
   .spinner { animation-duration: 2.4s; }
 }
+
+/* Everything clickable shows the pointer cursor. */
+a[href], button:not(:disabled), summary, label[for], [role=button], .btn:not(:disabled) { cursor: pointer; }
+button:disabled, .btn:disabled { cursor: not-allowed; }
