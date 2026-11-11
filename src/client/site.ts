@@ -26,7 +26,8 @@ for (const button of document.querySelectorAll<HTMLButtonElement>('button[data-c
       await copyFrom(source);
       label.textContent = 'Copiado';
       button.dataset.copied = '';
-      if (feedback) feedback.textContent = 'Mensaje copiado. Pégalo en tu asistente.';
+      // The green 'Copiado' button is the confirmation; the note is only for failures.
+      if (feedback) feedback.textContent = '';
       clearTimeout(reset);
       reset = window.setTimeout(() => { label.textContent = 'Copiar'; delete button.dataset.copied; }, 2500);
     } catch {
