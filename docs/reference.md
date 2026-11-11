@@ -128,8 +128,10 @@ Cinepic; en Cines Unidos solo la sala, porque su mapa no trae la película ni la
 sede. En Cinex se compara además con su contador "Asientos disponibles" y se
 advierte si difiere. `image=svg` devuelve el mismo mapa como SVG embebido e
 `image=none`, solo los datos. Si la imagen no se puede generar, la respuesta
-conserva los datos y lo advierte. La imagen se dibuja con resvg (WebAssembly) y
-la fuente Inter incluida en `src/assets`, sin depender de fuentes del sistema.
+conserva los datos y lo advierte. La imagen usa el estilo de la marca (sala
+oscura, butacas libres en rojo y el total de libres en ámbar) y se dibuja con
+resvg (WebAssembly) y las fuentes Instrument Sans y Bricolage Grotesque incluidas
+en `src/assets` como instancias estáticas, sin depender de fuentes del sistema.
 
 ## Caché, red y seguridad
 

@@ -30,7 +30,7 @@ test('seat maps follow each provider website: Cinepic screen on top, numbered ri
   assert.ok(xOf(svg, 'A:1') < xOf(svg, 'A:4') && xOf(svg, 'A:4') < xOf(svg, 'A:5'), 'A:1 (column 23) is drawn leftmost, as cinepiccandelaria.com shows');
   assert.ok(svg.indexOf('PANTALLA') < svg.indexOf('<title>A:'), 'the screen is drawn above the seats');
   assert.match(svg, />Cinepic Candelaria<.*>Función 24939</); assert.doesNotMatch(svg, /Cinepic · Cinepic/);
-  assert.match(svg, /Libre \(2\)/); assert.match(svg, /Ocupado \(1\)/); assert.match(svg, /2 libres de 3/);
+  assert.match(svg, /Libre \(2\)/); assert.match(svg, /Ocupado \(1\)/); assert.match(svg, /fill="#ffbd3f" text-anchor="end">2<\/text><text[^>]*>libres de 3</);
   assert.match(svg, /Consultado 05\/11\/2026, 12:52/);
   // The ASCII map uses the same orientation.
   const ascii = renderSeats(seats, layout).split('\n');
@@ -170,11 +170,15 @@ test('the image survives hostile or oversized maps without hiding the data', asy
   // A map far taller than any room is refused before drawing, and get_seats keeps its data.
   const tall = Array.from({ length: 60 }, (_, a) => [s('A', String(a), 0, 0), s('B', String(a), 199, 0)]).flat();
   assert.throws(() => renderSeatMapSvg(tall, seatLayout('cinesunidos'), header), MapTooLarge);
-  // On a narrow map the full legend no longer overlaps the total.
+  // On a narrow map the full legend wraps inside the card instead of running off it.
   const narrow = renderSeatMapSvg([s('A', '1', 0, 0), s('A', '1', 0, 1, 'occupied'), s('A', '1', 0, 2, 'unavailable'), s('A', '1', 0, 3, 'unknown')], seatLayout('cinesunidos'), header);
-  const legendY = Number(capture(narrow, /y="([\d.]+)" font-size="12" fill="#3c4043">Desconocido/));
-  const totalY = Number(capture(narrow, /y="([\d.]+)" font-size="12" font-weight="700" fill="#202124" text-anchor="end">1 libres de 4/));
-  assert.ok(totalY > legendY, `${totalY} > ${legendY}`);
+  const width = Number(capture(narrow, /width="(\d+)"/));
+  for (const label of ['Libre (1)', 'Ocupado (1)', 'No disponible (1)', 'Desconocido (1)']) {
+    const x = Number(capture(narrow, new RegExp(`<text x="([\\d.]+)" y="[\\d.]+" font-size="12.5" fill="#b8a7a1">${label.replace(/[()]/g, '\\$&')}<`)));
+    assert.ok(x + textWidth(label, 12.5) <= width - 28, `${label} ends at ${x + textWidth(label, 12.5)} of ${width}`);
+  }
+  // With unknown seats, the headline count says the free seats are only the confirmed ones.
+  assert.match(narrow, />1<\/text><text[^>]*>libres confirmados de 4</);
 });
 
 test('get_seats warns instead of failing when a map is too large to draw', async t => {
@@ -225,9 +229,9 @@ test('second review: raster budget, real glyph widths, and long tariff names', a
   assert.ok(png.readUInt32BE(16) * png.readUInt32BE(20) <= MAX_PNG_PIXELS, `${png.readUInt32BE(16)}x${png.readUInt32BE(20)}`);
   // Wide letters are measured, not counted: 42 W's do not fit a 560-wide header.
   const svg = renderSeatMapSvg([s('A', '1', 0, 0)], seatLayout('cinesunidos'), { ...header, movie: 'W'.repeat(42) });
-  const title = capture(svg, /font-size="20" font-weight="700" fill="#202124">([^<]*)</);
-  assert.ok(title.endsWith('…') && textWidth(title, 20, true) <= 560 - 56, title);
-  assert.ok(textWidth('W', 20, true) > 2 * textWidth('i', 20, true));
+  const title = capture(svg, /font-size="22" font-weight="700" letter-spacing="-0.4" fill="#f6eee4">([^<]*)</);
+  assert.ok(title.endsWith('…') && textWidth(title, 22, 'display') <= 560 - 56, title);
+  assert.ok(textWidth('W', 20, 'display') > 2 * textWidth('i', 20, 'display'));
   // A tariff name over 60 characters still reports its counter in the warning.
   const seat = { butaca: 'A-1-1', nombre_butaca: 'A:1', fila: '1', columna: '1', libre: '1', seleccionada: '1', tipo_butaca_id: '1', invertida: '0' };
   const body = page({ ...cpBuy, butacasData: { butacas: [seat] }, functionData: { datos: [{ id: 'f1', codigo: 'p1' }], tarifas: [{ _id: '2', id: '1', descripcion: 'GENERAL '.repeat(9), precio: '1', tot: '0', vend: '0', temp: '0' }] } });
@@ -282,8 +286,8 @@ function decodePng(png: Uint8Array) {
 
 test('the PNG is an indexed image that keeps every seat colour exact and the card corners transparent', async () => {
   const s = (i: number, status: 'available' | 'occupied' | 'unavailable' | 'unknown') => ({ label: `R${Math.floor(i / 40)}:${i % 40 + 1}`, row: `R${Math.floor(i / 40)}`, area: '1', row_index: Math.floor(i / 40), column_index: i % 40, status });
-  // A big room where one seat is unknown: its colour is rare next to thousands of anti-aliased edges, and still exact.
-  const seats = Array.from({ length: 2400 }, (_, i) => s(i, i === 1234 ? 'unknown' : nth(['available', 'occupied', 'unavailable'] as const, i % 3)));
+  // A big room where one seat is restricted: its colour is rare next to thousands of anti-aliased edges, and still exact.
+  const seats = Array.from({ length: 2400 }, (_, i) => s(i, i === 1234 ? 'unavailable' : nth(['available', 'occupied', 'unknown'] as const, i % 3)));
   const svg = renderSeatMapSvg(seats, seatLayout('cinesunidos'), header);
   const png = decodePng(await renderSeatMapPng(svg));
   const scale = png.width / Number(capture(svg, /width="(\d+)"/));
@@ -291,10 +295,11 @@ test('the PNG is an indexed image that keeps every seat colour exact and the car
     const seat = new RegExp(`<title>${label}:[^<]*</title><rect x="([\\d.]+)" y="([\\d.]+)"`), x = capture(svg, seat, 1), y = capture(svg, seat, 2);
     return png.at(Math.round((+x + 3) * scale), Math.round((+y + 13) * scale));
   };
-  assert.equal(fillAt('R30:35'), '#f9ab00', 'the only unknown seat');
-  assert.equal(fillAt('R0:1'), '#1e8e3e'); assert.equal(fillAt('R0:2'), '#80868b'); assert.equal(fillAt('R0:3'), '#eceff1');
+  assert.equal(fillAt('R30:35'), '#1b1016', 'the only restricted seat');
+  // Cinve's house palette: upholstery red free, dark taken, and an unknown seat is an outline on the room's night.
+  assert.equal(fillAt('R0:1'), '#a92037'); assert.equal(fillAt('R0:2'), '#2e1b23'); assert.equal(fillAt('R0:3'), '#120a0e');
   assert.equal(png.at(0, 0), '#000000/0', 'outside the rounded card');
-  assert.equal(png.at(Math.floor(png.width / 2), 4), '#ffffff');
+  assert.equal(png.at(Math.floor(png.width / 2), 4), '#120a0e');
 });
 
 test('the PNG encoder handles more than 256 colours, unaligned input and the renderer\'s errors', async () => {
@@ -307,11 +312,11 @@ test('the PNG encoder handles more than 256 colours, unaligned input and the ren
     const [r, g] = [parseInt(png.at(x, y).slice(1, 3), 16), parseInt(png.at(x, y).slice(3, 5), 16)];
     assert.ok(Math.abs(r - x * 4) <= 24 && Math.abs(g - y * 4) <= 24, `${x},${y}: ${png.at(x, y)}`);
   }
-  // 600 frequent colours crowd out a 4-pixel patch of the unknown-seat yellow, which still stays exact.
+  // 600 frequent colours crowd out a 4-pixel patch of the free-seat red, which still stays exact.
   const crowd = new Uint8Array(100 * 62 * 4);
   for (let i = 0; i < 6000; i++) crowd.set([i % 600 % 25 * 10, Math.floor(i % 600 / 25) * 10, 200, 255], i * 4);
-  for (let i = 6000; i < 6200; i++) crowd.set(i < 6004 ? [0xf9, 0xab, 0x00, 255] : [200, 200, 200, 255], i * 4);
-  assert.equal(decodePng(encodeIndexedPng(crowd, 100, 62)).at(0, 60), '#f9ab00');
+  for (let i = 6000; i < 6200; i++) crowd.set(i < 6004 ? [0xa9, 0x20, 0x37, 255] : [200, 200, 200, 255], i * 4);
+  assert.equal(decodePng(encodeIndexedPng(crowd, 100, 62)).at(0, 60), '#a92037');
   assert.throws(() => encodeIndexedPng(new Uint8Array(8), 2, 2), /incompleta/);
   // A document resvg refuses is an error, and the renderer keeps working afterwards.
   await assert.rejects(renderSeatMapPng('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><g>'));
