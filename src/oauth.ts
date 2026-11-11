@@ -77,6 +77,21 @@ export class HostedOAuth {
       [clientId, metadata.client_name, JSON.stringify(metadata.redirect_uris)]);
     return rows[0];
   }
+  /** The assistant app an account connection belongs to; undefined for operator-issued access. */
+  async appFor(user: string): Promise<{ name: string; publisher: string | null; verified: boolean } | undefined> {
+    const { rows } = await this.pool.query(`SELECT a.id,a.name,a.redirect_uris FROM cinev_oauth_grants g JOIN cinev_oauth_apps a ON a.id=g.app_id
+      WHERE g.user_id=$1`, [user]);
+    if (!rows[0]) return undefined;
+    const publisher = isClientIdUrl(rows[0].id) ? new URL(rows[0].id).hostname : undefined;
+    // A link can be forwarded to someone else, so loopback earns no trust here:
+    // anyone can register a local app on their own machine. Only a client
+    // identified by its metadata document, redirecting to that same site, is.
+    const verified = !!publisher && (rows[0].redirect_uris as string[]).every(uri => {
+      const host = new URL(uri).hostname.toLowerCase();
+      return host === publisher || host.endsWith('.' + publisher);
+    });
+    return { name: rows[0].name, publisher: publisher ?? null, verified };
+  }
   get resource() { return this.getOrigin() + '/mcp'; }
   challenge(invalid = false) {
     return `Bearer resource_metadata="${this.getOrigin()}/.well-known/oauth-protected-resource/mcp", scope="${scope}"${invalid ? ', error="invalid_token"' : ''}`;

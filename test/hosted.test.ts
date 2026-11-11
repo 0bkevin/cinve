@@ -84,8 +84,8 @@ test('hosted MCP authenticates every request; account links are one-use and sess
   assert.ok(!(await page.text()).includes(invitation));
   assert.equal((await f.post('/connect/exchange', invitation, {}, { Origin: 'https://evil.test' })).status, 403);
   const exchanged = await f.post('/connect/exchange', invitation);
-  const { browser_token } = await exchanged.json() as { browser_token: string };
-  assert.equal(exchanged.status, 200);
+  const { browser_token, app } = await exchanged.json() as { browser_token: string; app: unknown };
+  assert.equal(exchanged.status, 200); assert.equal(app, null, 'operator-issued access has no assistant app');
   assert.equal((await f.post('/connect/exchange', invitation)).status, 410);
   const logged = await f.post('/connect/login', browser_token, { username: 'person@example.test', password: 'SYNTHETIC_PASSWORD' });
   assert.equal(logged.status, 200); assert.ok(!(await logged.text()).includes('SYNTHETIC'));
@@ -527,6 +527,35 @@ test('only loopback or the publishing site and its subdomains are recognized des
   assert.ok(recognizedDestination('https://app.claude.ai/cb', 'claude.ai'));
   for (const r of ['https://evilclaude.ai/cb', 'https://claude.ai.evil.example/cb', 'https://other.example/cb']) assert.ok(!recognizedDestination(r, 'claude.ai'), r);
   assert.ok(!recognizedDestination('https://claude.ai/cb'), 'registered clients have no publisher to match');
+});
+
+test('the cinema-login link names the assistant app the account will be attached to', async t => {
+  const f = await fixture(t, undefined, undefined, { clientMetadata });
+  const registered = await enrolled(f.origin);
+  const request = await authorizationRequest(f.origin, metadataUrl), callback = await approve(f.origin, request.url);
+  const metadataTokens = await (await form(f.origin, '/oauth/token', { grant_type: 'authorization_code', client_id: metadataUrl,
+    code: callback.searchParams.get('code')!, code_verifier: request.verifier, resource: f.origin + '/mcp', redirect_uri: request.params.redirect_uri })).json() as { access_token: string };
+  for (const [token, expected] of [[registered.tokens.access_token, { name: 'Test assistant', publisher: null, verified: false }],
+    [metadataTokens.access_token, { name: 'Metadata assistant', publisher: 'assistant.example', verified: true }]] as const) {
+    const exchanged = await f.post('/connect/exchange', await link(await f.client(token)));
+    assert.equal(exchanged.status, 200);
+    const body = await exchanged.json() as Record<string, unknown>;
+    assert.deepEqual(body.app, expected); assert.ok(!('user_label' in body));
+  }
+  // A registered local client (loopback only): fine on its own consent page, but not vouched for on a link.
+  const local = await fetch(f.origin + '/oauth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ client_name: 'Local CLI', redirect_uris: ['http://127.0.0.1:8080/callback'] }) });
+  const { client_id } = await local.json() as { client_id: string };
+  const localRequest = await authorizationRequest(f.origin, client_id);
+  localRequest.url.searchParams.set('redirect_uri', 'http://127.0.0.1:8080/callback');
+  const localCallback = await approve(f.origin, localRequest.url);
+  const localTokens = await (await form(f.origin, '/oauth/token', { grant_type: 'authorization_code', client_id, code: localCallback.searchParams.get('code')!,
+    code_verifier: localRequest.verifier, resource: f.origin + '/mcp', redirect_uri: 'http://127.0.0.1:8080/callback' })).json() as { access_token: string };
+  const localLink = await f.post('/connect/exchange', await link(await f.client(localTokens.access_token)));
+  // A forwarded link must not inherit trust from a loopback redirect anyone can register.
+  assert.deepEqual((await localLink.json() as { app: unknown }).app, { name: 'Local CLI', publisher: null, verified: false });
+  const script = await (await fetch(f.origin + '/app.js')).text();
+  assert.match(script, /const app = data\.app;/); assert.doesNotMatch(script, /innerHTML/);
 });
 
 test('every HTML page allows only its own stylesheet, never inline styles', async t => {

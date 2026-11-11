@@ -179,7 +179,7 @@ export async function createHostedApp(options: {
         await body(req, 512);
         const exchanged = await links.exchange(token);
         if (!exchanged || await users.hash(exchanged.connection.user) !== exchanged.connection.tokenHash) throw new HttpError(410, 'Enlace vencido o utilizado.');
-        send(200, { browser_token: exchanged.browserToken, provider: exchanged.connection.provider, user_label: exchanged.connection.user.slice(0, 8) }); return;
+        send(200, { browser_token: exchanged.browserToken, provider: exchanged.connection.provider, app: await oauth.appFor(exchanged.connection.user) ?? null }); return;
       }
       const connection = await links.get(token);
       if (!connection || await users.hash(connection.user) !== connection.tokenHash) throw new HttpError(410, 'Conexión vencida o revocada.');
