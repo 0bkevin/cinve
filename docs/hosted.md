@@ -27,9 +27,9 @@ que el usuario conecte su cuenta.
 | ----------------------- | ----------- | -------------------------------------------------------------- |
 | `DATABASE_URL`          | Sí          | Conexión a PostgreSQL con TLS. Usa la conexión agrupada.       |
 | `DATABASE_URL_UNPOOLED` | No          | Conexión directa, usada por las migraciones si existe.         |
-| `CINEV_PUBLIC_URL`      | Sí          | Origen HTTPS exacto, p. ej. `https://cine.ejemplo.com`.        |
+| `CINEV_PUBLIC_URL`      | Sí          | Origen HTTPS exacto, sin ruta: `https://cine.ejemplo.com`.     |
 | `CINEV_ENCRYPTION_KEY`  | Sí          | 64 caracteres hex. Genérala con `openssl rand -hex 32`.         |
-| `CRON_SECRET`           | Sí          | Secreto de la limpieza diaria. Genéralo igual que la clave.    |
+| `CRON_SECRET`           | En Vercel   | Protege `/internal/cleanup`. Genéralo igual que la clave.      |
 | `PORT`                  | No          | Puerto HTTP fuera de Vercel (por defecto `3000`).              |
 
 - No guardes estos valores en el repositorio ni los pegues en un chat.
@@ -78,6 +78,18 @@ limpieza diaria, por ejemplo con cron:
 ```sh
 npm run db:cleanup
 ```
+
+Ten en cuenta:
+
+- El proxy debe enviar la cabecera `Host` original: si no coincide con
+  `CINEV_PUBLIC_URL`, el servidor responde 403. En Nginx, usa
+  `proxy_set_header Host $host;`.
+- Fuera de Vercel, Cinve identifica al cliente por la IP de la conexión TCP y no
+  lee cabeceras como `X-Forwarded-For`. Detrás de un proxy, todos los usuarios
+  comparten los límites por red (por ejemplo, 20 inicios de sesión por minuto).
+  Es adecuado para uso personal o de pocas personas.
+- `npm run db:migrate` y `npm run db:cleanup` usan `tsx`, una dependencia de
+  desarrollo: no instales con `--omit=dev`.
 
 ## Proteger el servicio
 
@@ -128,7 +140,7 @@ local `stdio`.
 
 | Ruta                                          | Función                                       |
 | --------------------------------------------- | --------------------------------------------- |
-| `POST /mcp`                                   | Endpoint MCP (sin sesiones; GET y DELETE: 405). |
+| `POST /mcp`                                   | Endpoint MCP, sin estado ni sesiones.         |
 | `GET /health`                                 | Estado del proceso.                           |
 | `/.well-known/oauth-protected-resource/mcp`   | Metadatos del recurso MCP.                    |
 | `/.well-known/oauth-authorization-server`     | Metadatos del servidor OAuth.                 |
@@ -136,7 +148,7 @@ local `stdio`.
 | `GET\|POST /oauth/authorize`                  | Página de aprobación.                         |
 | `POST /oauth/token`                           | Canje de códigos y renovación de tokens.      |
 | `POST /oauth/revoke`                          | Revoca la conexión y borra sus sesiones.      |
-| `/connect/*`                                  | Enlaces privados para conectar un cine.       |
+| `/connect`, `/connect/*`                      | Enlaces privados para conectar un cine.       |
 | `GET /internal/cleanup`                       | Limpieza diaria (requiere `CRON_SECRET`).     |
 
 ## Tokens y límites
@@ -145,7 +157,8 @@ local `stdio`.
 - Los tokens de renovación rotan en cada uso, hasta 30 días en total.
 - Reutilizar un código o un token de renovación revoca la conexión.
 - Los tokens se guardan solo como resúmenes SHA-256 y van firmados con HMAC.
-- Cada conexión admite 120 solicitudes por minuto en `/mcp` y 4 simultáneas.
+- Cada conexión admite 120 solicitudes por minuto en `/mcp` y 4 simultáneas
+  (sin token, el límite se aplica por IP).
 - Los inicios de sesión en los cines están limitados por red (20 por minuto) y
   por cuenta (5 cada 15 minutos) para impedir que Cinve se use para probar
   contraseñas. El dueño de una cuenta ya conectada conserva su propio cupo.
@@ -175,6 +188,7 @@ cliente, nunca en una URL.
 | `cinev_oauth_requests` | Aprobaciones pendientes y códigos.            |
 | `cinev_oauth_grants`   | Autorizaciones vigentes.                      |
 | `cinev_oauth_tokens`   | Resúmenes de tokens.                          |
+| `cinev_meta`           | Metadatos internos (inicio de la firma).      |
 
 La limpieza diaria elimina sesiones, enlaces, límites y objetos OAuth vencidos,
 y los clientes registrados sin uso en 90 días. Si la base de datos cae, las

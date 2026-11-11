@@ -3,7 +3,7 @@
 Cartelera de cine de Venezuela para tu asistente de IA.
 
 Cinve es un servidor [MCP](https://modelcontextprotocol.io/) que permite a
-asistentes como Claude Code, Codex o Cursor consultar películas, horarios, precios,
+asistentes como Claude Code, Codex u OpenCode consultar películas, horarios, precios,
 caramelería y disponibilidad de asientos de **Cinex, Cines Unidos, Cinepic,
 Supercines y Gran Cine**.
 
@@ -84,10 +84,10 @@ PostgreSQL.
 
 | Variable               | Descripción                                                     |
 | ---------------------- | --------------------------------------------------------------- |
-| `DATABASE_URL`         | Conexión a PostgreSQL (con TLS).                                |
-| `CINEV_PUBLIC_URL`     | Origen HTTPS público, p. ej. `https://cine.ejemplo.com`.        |
+| `DATABASE_URL`         | Conexión a PostgreSQL con TLS (p. ej. `sslmode=verify-full`).   |
+| `CINEV_PUBLIC_URL`     | Origen HTTPS público, sin ruta: `https://cine.ejemplo.com`.     |
 | `CINEV_ENCRYPTION_KEY` | 64 caracteres hex: `openssl rand -hex 32`. Consérvala.          |
-| `CRON_SECRET`          | Secreto para la limpieza diaria (`openssl rand -hex 32`).        |
+| `CRON_SECRET`          | En Vercel: protege la limpieza diaria (`openssl rand -hex 32`). |
 | `PORT`                 | Puerto HTTP (por defecto `3000`). Solo fuera de Vercel.         |
 
 Cambiar `CINEV_ENCRYPTION_KEY` obliga a todos a reconectar sus cuentas.
@@ -110,12 +110,16 @@ npm run db:migrate
 npm run start:hosted
 ```
 
-Ponlo detrás de un proxy con HTTPS y programa la limpieza diaria (por ejemplo,
-con cron):
+Ponlo detrás de un proxy inverso con HTTPS que conserve la cabecera `Host`
+original, y programa la limpieza diaria (por ejemplo, con cron):
 
 ```sh
 npm run db:cleanup
 ```
+
+> Fuera de Vercel, Cinve no lee la IP real del cliente desde el proxy: todos los
+> usuarios comparten los límites de uso por red. Es adecuado para uso personal
+> o de pocas personas.
 
 Tu servidor MCP quedará en `https://<dominio>/mcp`. Consulta la
 [guía de despliegue](docs/hosted.md) para los detalles de OAuth, límites de uso
