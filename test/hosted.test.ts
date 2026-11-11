@@ -942,3 +942,19 @@ test('clients can identify with a Client ID Metadata Document instead of registe
   const response = await fetch(unlisted, { redirect: 'manual' });
   assert.equal(response.status, 400); assert.equal(response.headers.get('location'), null);
 });
+
+test('crawlers get robots.txt, a sitemap of the public pages and llms.txt; browsers get an HTML 404', async t => {
+  const f = await fixture(t);
+  const robots = await fetch(f.origin + '/robots.txt');
+  assert.equal(robots.status, 200); const rules = await robots.text();
+  assert.match(rules, /Disallow: \/connect\//); assert.doesNotMatch(rules, /Disallow: \/connect\n/);
+  assert.match(rules, new RegExp(`Sitemap: ${f.origin}/sitemap.xml`));
+  const map = await (await fetch(f.origin + '/sitemap.xml')).text();
+  for (const path of ['/', '/install', '/instrucciones']) assert.ok(map.includes(`<loc>${f.origin}${path}</loc>`), path);
+  assert.doesNotMatch(map, /connect|oauth/);
+  assert.match(await (await fetch(f.origin + '/llms.txt')).text(), /^# Cinve/);
+  const page = await fetch(f.origin + '/nope', { headers: { Accept: 'text/html' } });
+  assert.equal(page.status, 404); assert.match(await page.text(), /noindex/);
+  const api = await fetch(f.origin + '/nope');
+  assert.equal(api.status, 404); assert.match(api.headers.get('content-type')!, /json/);
+});

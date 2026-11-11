@@ -351,6 +351,14 @@ export function authorizationPage(o: Consent) {
   </>, { compact: true });
 }
 
+export function notFoundPage() {
+  return page('Página no encontrada', <>
+    <h1>Esta página no existe.</h1>
+    <p class="lead">Puede que el enlace esté mal escrito o que la página se haya movido.</p>
+    <LinkButton href="/" variant="outline">Volver al inicio</LinkButton>
+  </>, { compact: true });
+}
+
 export function authorizationErrorPage() {
   return page('Conexión no disponible', <>
     <h1>No se pudo autorizar la conexión.</h1>

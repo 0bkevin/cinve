@@ -1,9 +1,10 @@
-import { instructionsPage, landingPage, servePublicAsset, setSecurityHeaders } from './public-web.js';
+import { instructionsPage, landingPage, notFoundPage, servePublicAsset, setSecurityHeaders } from './public-web.js';
 import { hostedAuthInstructions } from './hosted-auth-guidance.js';
 import { HostedOAuth } from './oauth.js';
 import { ClientMetadataCache } from './client-metadata.js';
 import type { ClientMetadataFetcher } from './client-metadata.js';
 import { serveInstall } from './install.js';
+import { serveDiscovery } from './discovery.js';
 import { createServer as nodeServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Pool } from 'pg';
@@ -116,7 +117,7 @@ export async function createHostedApp(options: {
     setSecurityHeaders(res, publicUrl.protocol === 'https:');
     const send = (status: number, data: unknown) => { if (!res.headersSent) { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(data)); } };
     try {
-      if (servePublicAsset(req, res) || serveInstall(req, res, origin)) return;
+      if (servePublicAsset(req, res) || serveInstall(req, res, origin) || serveDiscovery(req, res, origin)) return;
       if (req.method === 'GET' && req.url === '/health') { send(200, { status: 'ok' }); return; }
       if (req.headers.host !== publicUrl.host) throw new HttpError(403, 'Origen no permitido.');
       const forwarded = options.trustedVercelProxy ? req.headers['x-vercel-forwarded-for'] : undefined;
@@ -230,6 +231,10 @@ export async function createHostedApp(options: {
         send(200, { connected: true, profile_update_requested: profile });
       } finally { data.username = ''; data.password = ''; if (claimed) await links.release(token); }
     } catch (error) {
+      // People following a broken link get a page; API clients keep JSON.
+      if (error instanceof HttpError && error.status === 404 && ['GET', 'HEAD'].includes(req.method ?? '') && req.headers.accept?.includes('text/html') && !res.headersSent) {
+        res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(req.method === 'HEAD' ? undefined : notFoundPage()); return;
+      }
       send(error instanceof HttpError ? error.status : 500, { error: error instanceof HttpError ? error.message : 'No se pudo completar la solicitud.' });
     }
   };
