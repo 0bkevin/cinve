@@ -124,8 +124,11 @@ export function landingPage(origin: string) {
       <div class="hero-copy">
         <h1 id="titulo"><span>¿Qué</span> <span>vemos hoy?</span></h1>
         <div>
-          <p class="lead">Pregúntaselo a tu asistente. Con Cinve consulta la cartelera, los precios y los asientos de los principales cines de Venezuela. <a href="#cines">Ver qué cines incluye</a></p>
-          <LinkButton href="#empezar" size="lg">Añadir Cinve a mi asistente</LinkButton>
+          <p class="lead">Pregúntaselo a tu asistente. Con Cinve consulta la cartelera, los precios y los asientos de los principales cines de Venezuela.</p>
+          <div class="hero-actions">
+            <LinkButton href="#empezar" size="lg">Añadir Cinve a mi asistente</LinkButton>
+            <LinkButton href="#cines" size="lg" variant="outline">Ver cines</LinkButton>
+          </div>
         </div>
       </div>
     </section>
