@@ -56,8 +56,10 @@ enlaces comparten estos límites:
   las redes sin fallos recientes. Los inicios correctos no tienen tope global,
   así que un ataque no bloquea a quien introduce bien sus datos.
 
-Las claves de estos límites se guardan solo como resúmenes SHA-256 y caducan
-como mucho en un día. Recomendamos añadir además reglas de límite de
+Las claves de todos los límites (que nombran direcciones IP y correos de cuentas
+del cine) se guardan solo como HMAC-SHA256 con una subclave derivada de
+`CINEV_ENCRYPTION_KEY`, así que no se pueden confirmar calculando el resumen
+de una dirección o un correo conocidos, y caducan como mucho en un día. Recomendamos añadir además reglas de límite de
 solicitudes en el firewall de Vercel para `/oauth/authorize` y `/connect/login`. Un doble
 envío espera al primero y devuelve al navegador al asistente con un código
 nuevo; el código anterior deja de ser válido.

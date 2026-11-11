@@ -8,7 +8,7 @@ import { randomBytes } from 'node:crypto';
 import { request as httpRequest } from 'node:http';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
-import { createHostedApp } from '../src/hosted.js';
+import { createHostedApp, hostedKeys } from '../src/hosted.js';
 import { EncryptedSessionStore, HostedUsers } from '../src/hosted-store.js';
 import { Result } from '../src/core.js';
 import { ConnectionLinks } from '../src/hosted-links.js';
@@ -257,7 +257,7 @@ test('stdio bridge forwards tools to authenticated hosted MCP with fresh retriev
 });
 
 test('independent server instances consume a link only once and share saved sessions', async t => {
-  const f = await fixture(t), other = new ConnectionLinks(f.pool);
+  const f = await fixture(t), other = new ConnectionLinks(f.pool, hostedKeys(f.key).budgetKey);
   const hash = (await f.users.hash(f.alice.id))!;
   const invite = await f.links.issue(f.alice.id, hash, 'cinesunidos');
   const results = await Promise.all([f.links.exchange(invite.token), other.exchange(invite.token)]);
@@ -274,7 +274,7 @@ test('independent server instances consume a link only once and share saved sess
 });
 
 test('revocation and newer invitations prevent another instance from saving a late login', async t => {
-  const f = await fixture(t), other = new ConnectionLinks(f.pool);
+  const f = await fixture(t), other = new ConnectionLinks(f.pool, hostedKeys(f.key).budgetKey);
   const hash = (await f.users.hash(f.alice.id))!;
   const session = { version: 1 as const, provider: 'cinesunidos' as const, expires_at: Date.now() + 60000, access_token: 'SECRET_SESSION' };
   const invite = await f.links.issue(f.alice.id, hash, 'cinesunidos');
@@ -291,7 +291,7 @@ test('revocation and newer invitations prevent another instance from saving a la
 });
 
 test('database attempt limits and rate budgets survive new instances', async t => {
-  const f = await fixture(t), other = new ConnectionLinks(f.pool), hash = (await f.users.hash(f.alice.id))!;
+  const f = await fixture(t), other = new ConnectionLinks(f.pool, hostedKeys(f.key).budgetKey), hash = (await f.users.hash(f.alice.id))!;
   const invite = await f.links.issue(f.alice.id, hash, 'cinex');
   const token = (await other.exchange(invite.token))!.browserToken;
   for (let i = 0; i < 5; i++) { assert.ok(await other.claim(token)); await f.links.release(token); }
@@ -833,9 +833,9 @@ test('public pages use the configured origin and serve local fonts under the aut
 test('one address exhausting its OAuth quota cannot consume the shared OAuth quota', async t => {
   const f = await fixture(t);
   const { digest } = await import('../src/hosted-store.js');
-  await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 minute',61)", [digest('oauth:127.0.0.1')]);
+  await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 minute',61)", [f.links.keyHash('oauth:127.0.0.1')]);
   for (let i = 0; i < 20; i++) assert.equal((await form(f.origin, '/oauth/token', { grant_type: 'refresh_token' })).status, 429);
-  const global = await f.pool.query('SELECT count FROM cinev_budgets WHERE key_hash=$1', [digest('oauth:global')]);
+  const global = await f.pool.query('SELECT count FROM cinev_budgets WHERE key_hash=$1', [f.links.keyHash('oauth:global')]);
   assert.equal(global.rows.length, 0, 'rejected requests must not charge the global budget');
 });
 
@@ -865,7 +865,7 @@ test('refresh=true calls have their own small budget so the shared cache cannot 
   const f = await fixture(t);
   const { digest } = await import('../src/hosted-store.js');
   const anonymous = await f.client();
-  await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 minute',10)", [digest('refresh:anonymous:127.0.0.1')]);
+  await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 minute',10)", [f.links.keyHash('refresh:anonymous:127.0.0.1')]);
   await assert.rejects(anonymous.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos', refresh: true } }));
   const cached = await anonymous.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos' } });
   assert.equal((cached.structuredContent as { status: string }).status, 'available');
@@ -951,9 +951,9 @@ test('connection-link sign-ins are charged to the network, and failures and succ
   const { digest } = await import('../src/hosted-store.js');
   const client = await f.client(f.alice.token);
   const browser = async () => ((await (await f.post('/connect/exchange', await link(client))).json()) as { browser_token: string }).browser_token;
-  const count = async (key: string) => (await f.pool.query('SELECT count FROM cinev_budgets WHERE key_hash=$1', [digest(key)])).rows[0]?.count ?? 0;
+  const count = async (key: string) => (await f.pool.query('SELECT count FROM cinev_budgets WHERE key_hash=$1', [f.links.keyHash(key)])).rows[0]?.count ?? 0;
   // Each self-service connection has its own link budget; the network quota still applies.
-  await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 minute',20)", [digest('oauth:login-ip:127.0.0.1')]);
+  await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 minute',20)", [f.links.keyHash('oauth:login-ip:127.0.0.1')]);
   const limited = await f.post('/connect/login', await browser(), { username: 'x', password: 'x' });
   assert.equal(limited.status, 429); assert.equal(calls, 0); assert.match(await limited.text(), /desde tu red/);
   await f.pool.query('DELETE FROM cinev_budgets');
@@ -987,11 +987,11 @@ test('under a broad failing attack only networks without recent failures may sig
   const { digest } = await import('../src/hosted-store.js');
   const subject = (network: string, username: string) => ({ network, provider: 'cinex' as const, username });
   await f.links.signInFailed(subject('203.0.113.1', 'a@example.test'));
-  await f.pool.query("UPDATE cinev_budgets SET count=300 WHERE key_hash=$1", [digest('signin-fail:global')]);
+  await f.pool.query("UPDATE cinev_budgets SET count=300 WHERE key_hash=$1", [f.links.keyHash('signin-fail:global')]);
   assert.equal(await f.links.admitSignIn(subject('203.0.113.1', 'b@example.test')), 'strained');
   assert.equal(await f.links.admitSignIn(subject('203.0.113.2', 'c@example.test')), undefined, 'a clean network still signs in');
   // Below the threshold a single failure blocks nobody.
-  await f.pool.query("UPDATE cinev_budgets SET count=299 WHERE key_hash=$1", [digest('signin-fail:global')]);
+  await f.pool.query("UPDATE cinev_budgets SET count=299 WHERE key_hash=$1", [f.links.keyHash('signin-fail:global')]);
   assert.equal(await f.links.admitSignIn(subject('203.0.113.1', 'd@example.test')), undefined);
 });
 
@@ -1001,7 +1001,7 @@ test('networks have daily failure limits, and IPv6 /64s also share their /48', a
   const { rateLimitNetwork } = await import('../src/hosted.js');
   const subject = (address: string, username: string) => ({ network: rateLimitNetwork(address), provider: 'cinex' as const, username });
   const fill = (key: string, count: number, interval = '1 day') =>
-    f.pool.query(`INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '${interval}',$2)`, [digest(key), count]);
+    f.pool.query(`INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '${interval}',$2)`, [f.links.keyHash(key), count]);
   await fill('signin-fail:day:203.0.113.5', 100);
   assert.equal(await f.links.admitSignIn(subject('203.0.113.5', 'a@example.test')), 'network');
   await fill('signin-fail:day:2001:0db8:0001::/48', 300);
@@ -1011,7 +1011,7 @@ test('networks have daily failure limits, and IPv6 /64s also share their /48', a
   assert.equal(await f.links.admitSignIn(subject('2001:db8:3:9::1', 'd@example.test')), 'network', 'per-minute /48 attempts');
   // Failures from a /64 are counted for its /48 too.
   await f.links.signInFailed(subject('2001:db8:4:1::1', 'e@example.test'));
-  const rows = await f.pool.query('SELECT count FROM cinev_budgets WHERE key_hash=ANY($1)', [['signin-fail:day:2001:0db8:0004:0001::/64', 'signin-fail:day:2001:0db8:0004::/48'].map(digest)]);
+  const rows = await f.pool.query('SELECT count FROM cinev_budgets WHERE key_hash=ANY($1)', [['signin-fail:day:2001:0db8:0004:0001::/64', 'signin-fail:day:2001:0db8:0004::/48'].map(k => f.links.keyHash(k))]);
   assert.deepEqual(rows.rows.map(r => r.count), [1, 1]);
 });
 
@@ -1019,7 +1019,7 @@ test('refresh=true also has a service-wide budget across addresses', async t => 
   const f = await fixture(t);
   const { digest } = await import('../src/hosted-store.js');
   const anonymous = await f.client();
-  await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 minute',120)", [digest('refresh:global')]);
+  await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 minute',120)", [f.links.keyHash('refresh:global')]);
   await assert.rejects(anonymous.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos', refresh: true } }));
   const cached = await anonymous.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos' } });
   assert.equal((cached.structuredContent as { status: string }).status, 'available');
@@ -1138,4 +1138,24 @@ test('refresh token formats are judged in memory and never accept an access sign
   assert.equal(refreshTokenFormat(`cva_${id}.${mac('cva_')}`, key), undefined, 'an access token is not a refresh token');
   assert.equal(refreshTokenFormat('cvr_' + id, key, legacyRefreshTokensUntil - 1), 'legacy');
   assert.equal(refreshTokenFormat('cvr_' + id, key, legacyRefreshTokensUntil), undefined);
+});
+
+test('rate-limit keys are stored as HMACs under a derived key, never as plain digests', async t => {
+  const f = await fixture(t);
+  const { digest } = await import('../src/hosted-store.js');
+  const subject = { network: '198.51.100.20', provider: 'cinex' as const, username: 'person@example.test' };
+  assert.equal(await f.links.admitSignIn(subject), undefined);
+  await f.links.signInFailed(subject);
+  const stored = (await f.pool.query('SELECT key_hash FROM cinev_budgets')).rows.map(r => r.key_hash as string);
+  assert.ok(stored.length >= 4);
+  for (const plain of ['oauth:login-ip:198.51.100.20', 'signin:account:cinex:person@example.test', 'signin-fail:day:198.51.100.20', 'signin-fail:global'])
+    assert.ok(!stored.includes(digest(plain)) && stored.includes(f.links.keyHash(plain)), plain);
+  // Another key sees none of these counts; without a key rate limits refuse to run, while links still work.
+  const other = new ConnectionLinks(f.pool, randomBytes(32));
+  assert.notEqual(other.keyHash('signin-fail:global'), f.links.keyHash('signin-fail:global'));
+  const unkeyed = new ConnectionLinks(f.pool);
+  await assert.rejects(unkeyed.budget('x', 1), /clave/);
+  const invite = await unkeyed.issue(f.alice.id, (await f.users.hash(f.alice.id))!, 'cinex');
+  assert.ok(await unkeyed.exchange(invite.token));
+  await unkeyed.cleanup();
 });

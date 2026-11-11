@@ -76,6 +76,14 @@ export function rateLimitNetwork(address: string): string {
   if (bytes.slice(0, 10).every(b => b === 0) && bytes[10] === 0xff && bytes[11] === 0xff) return bytes.slice(12).join('.');
   return Buffer.from(bytes.slice(0, 8)).toString('hex').replace(/(.{4})(?!$)/g, '$1:') + '::/64';
 }
+/**
+ * Purpose-specific subkeys of CINEV_ENCRYPTION_KEY, which itself only
+ * encrypts cinema sessions: one signs OAuth tokens, one keys rate limits.
+ */
+export function hostedKeys(key: Buffer) {
+  const derive = (info: string) => Buffer.from(hkdfSync('sha256', key, Buffer.alloc(0), info, 32));
+  return { tokenKey: derive('cinve oauth access token v1'), budgetKey: derive('cinve rate limit keys v1') };
+}
 class HttpError extends Error { constructor(readonly status: number, message: string) { super(message); } }
 async function body(req: IncomingMessage, max: number, deadlineMs = 10000): Promise<unknown> {
   if (req.headers['content-type']?.split(';')[0].trim() !== 'application/json') throw new HttpError(415, 'Se requiere JSON.');
@@ -108,14 +116,13 @@ export async function createHostedApp(options: {
       (publicUrl.protocol !== 'https:' && !(options.allowLocal && publicUrl.protocol === 'http:' && publicUrl.hostname === '127.0.0.1'))) throw new Error('CINEV_PUBLIC_URL debe ser un origen HTTPS.');
   if (options.key.length !== 32) throw new Error('Clave de cifrado no válida.');
   let origin = publicUrl.origin;
-  // A separate subkey: the session encryption key itself never signs anything.
-  const tokenKey = Buffer.from(hkdfSync('sha256', options.key, Buffer.alloc(0), 'cinve oauth access token v1', 32));
+  const { tokenKey, budgetKey } = hostedKeys(options.key);
+  const links = new ConnectionLinks(options.pool, budgetKey);
   const oauth = new HostedOAuth(options.pool, () => origin, new ClientMetadataCache(options.clientMetadata), {
     authenticate: options.authenticate ?? login,
     save: (client, user, session) => new EncryptedSessionStore(options.pool, user, options.key).saveInTransaction(client, session),
-  }, tokenKey);
+  }, tokenKey, links);
   const users = new HostedUsers(options.pool);
-  const links = new ConnectionLinks(options.pool);
   // Public cache and in-flight deduplication live for this hosted app. The
   // client is never used for authenticated reads; those remain request/user
   // scoped below.

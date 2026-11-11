@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { digest, EncryptedSessionStore, lockUser, transaction } from './hosted-store.js';
 import type { AuthProviderId, AuthSession } from './auth.js';
@@ -21,8 +21,6 @@ export const signInRefusalMessage: Record<SignInRefusal, string> = {
   strained: 'Demasiados intentos fallidos en Cinve en este momento. Espera 15 minutos y vuelve a intentarlo.',
 };
 const globalFailures = 'signin-fail:global';
-// Budget keys are stored only as SHA-256 digests and expire within 15 minutes;
-// a digest of a known email can still be confirmed by hashing it.
 const accountKey = (s: SignInSubject) => `signin:account:${s.provider}:${s.username.trim().toLowerCase()}`;
 function failureKeys(network: string) {
   // A /64 network also belongs to its /48, which catches rotation across a larger IPv6 allocation.
@@ -30,7 +28,20 @@ function failureKeys(network: string) {
   return { day: `signin-fail:day:${network}`, recent: `signin-fail:recent:${network}`, block, blockDay: block && `signin-fail:day:${block}` };
 }
 export class ConnectionLinks {
-  constructor(readonly pool: Pool) {}
+  /**
+   * budgetKey: a 32-byte key for rate-limit keys. Those name addresses and
+   * cinema account emails, which a plain digest would not hide (any IPv4
+   * address or a known email can be hashed and compared), so they are stored
+   * as HMACs. Only rate limits need it; links and cleanup work without it.
+   */
+  constructor(readonly pool: Pool, private readonly budgetKey?: Buffer) {
+    if (budgetKey && budgetKey.length !== 32) throw new Error('Clave de límites no válida.');
+  }
+  /** The stored form of a rate-limit key. */
+  keyHash(key: string) {
+    if (!this.budgetKey) throw new Error('Falta la clave de los límites.');
+    return createHmac('sha256', this.budgetKey).update(key).digest('hex');
+  }
   async issue(user: string, tokenHash: string, provider: AuthProviderId) {
     return transaction(this.pool, async client => {
       if (await lockUser(client, user) !== tokenHash) throw new Error('Acceso revocado.');
@@ -98,14 +109,14 @@ export class ConnectionLinks {
       VALUES($1,now()+make_interval(secs => $3),1) ON CONFLICT(key_hash) DO UPDATE SET
       count=CASE WHEN cinev_budgets.expires_at<=now() THEN 1 ELSE LEAST(cinev_budgets.count+1,$2+1) END,
       expires_at=CASE WHEN cinev_budgets.expires_at<=now() THEN EXCLUDED.expires_at ELSE cinev_budgets.expires_at END
-      RETURNING count`, [digest(key), limit, windowSeconds]);
+      RETURNING count`, [this.keyHash(key), limit, windowSeconds]);
     return rows[0].count <= limit;
   }
   /** Current counts of live windows, without charging them (0 when absent or expired). */
   private async counts(keys: string[]): Promise<number[]> {
-    const { rows } = await this.pool.query('SELECT key_hash,count FROM cinev_budgets WHERE key_hash=ANY($1) AND expires_at>now()', [keys.map(digest)]);
+    const { rows } = await this.pool.query('SELECT key_hash,count FROM cinev_budgets WHERE key_hash=ANY($1) AND expires_at>now()', [keys.map(key => this.keyHash(key))]);
     const found = new Map(rows.map(r => [r.key_hash as string, r.count as number]));
-    return keys.map(key => found.get(digest(key)) ?? 0);
+    return keys.map(key => found.get(this.keyHash(key)) ?? 0);
   }
   /** Adds one event to each window, in one statement. Keys must be distinct. */
   private async record(entries: Array<[key: string, windowSeconds: number]>) {
@@ -114,7 +125,7 @@ export class ConnectionLinks {
       ON CONFLICT(key_hash) DO UPDATE SET
       count=CASE WHEN cinev_budgets.expires_at<=now() THEN 1 ELSE LEAST(cinev_budgets.count+1,1000000) END,
       expires_at=CASE WHEN cinev_budgets.expires_at<=now() THEN EXCLUDED.expires_at ELSE cinev_budgets.expires_at END`,
-    [entries.map(([key]) => digest(key)), entries.map(([, seconds]) => seconds)]);
+    [entries.map(([key]) => this.keyHash(key)), entries.map(([, seconds]) => seconds)]);
   }
   /**
    * Admission for one cinema sign-in, from the consent page or a connection
@@ -150,7 +161,7 @@ export class ConnectionLinks {
   }
   /** Correct credentials: clear that account's attempts (network and service-wide counts are never cleared). */
   async signInSucceeded(subject: SignInSubject) {
-    await this.pool.query('DELETE FROM cinev_budgets WHERE key_hash=$1', [digest(accountKey(subject))]);
+    await this.pool.query('DELETE FROM cinev_budgets WHERE key_hash=$1', [this.keyHash(accountKey(subject))]);
   }
   async cleanup() {
     // A cinema connected on the consent page whose code was never exchanged

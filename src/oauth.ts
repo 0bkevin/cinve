@@ -98,12 +98,10 @@ export function recognizedDestination(redirect: string, publisher?: string) {
 /** Self-service, isolated connections. Approval creates a NEW empty principal;
  * it never grants access to an existing cinema session or browser identity. */
 export class HostedOAuth {
-  private budgets: ConnectionLinks;
-  /** tokenKey: a 32-byte key for signing access tokens, the same on every instance. */
+  /** tokenKey: a 32-byte key for signing tokens, the same on every instance; budgets: rate limits (with their key). */
   constructor(readonly pool: Pool, readonly getOrigin: () => string, private readonly clientMetadata: ClientMetadataCache,
-    private readonly accounts: ConsentAccounts | undefined, private readonly tokenKey: Buffer) {
+    private readonly accounts: ConsentAccounts | undefined, private readonly tokenKey: Buffer, private readonly budgets: ConnectionLinks) {
     if (tokenKey.length !== 32) throw new Error('Clave de firma no válida.');
-    this.budgets = new ConnectionLinks(pool);
   }
   /** The consent page, which can also sign in to a cinema; re-rendered with an error after a failed sign-in. */
   private consent(res: ServerResponse, status: number, app: { id: string; name: string }, redirect: string, id: string, csrf: string, form: ConsentForm = {}) {
