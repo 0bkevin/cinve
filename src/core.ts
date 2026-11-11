@@ -1,6 +1,6 @@
 import * as z from 'zod';
 
-export const Provider = z.enum(['cinepic', 'cinesunidos', 'cinex', 'supercines']);
+export const Provider = z.enum(['cinepic', 'cinesunidos', 'cinex', 'supercines', 'grancine']);
 export type ProviderId = z.infer<typeof Provider>;
 export const Status = z.enum(['available', 'empty', 'unavailable', 'auth_required', 'blocked', 'rate_limited', 'error']);
 export type StatusId = z.infer<typeof Status>;

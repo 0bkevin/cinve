@@ -18,7 +18,7 @@ const cacheEntries = 512, cacheBytesLimit = 64 * 1024 * 1024;
 // within seconds. Remember it per origin so later public reads fail fast (or
 // take an adapter's documented fallback) instead of being refused again.
 const challengeMemoryMs = 10 * 60 * 1000;
-const hosts = new Set(['www.cinex.com.ve', 'www.cinesunidos.com', 'gateway.cinesunidos.com', 'cinepiccandelaria.com', 'cinepicvip.com', 'apifront.cinexo.com.ar', 'api.cinexo.com.ar', 'supercines.com.ve']);
+const hosts = new Set(['www.cinex.com.ve', 'www.cinesunidos.com', 'gateway.cinesunidos.com', 'cinepiccandelaria.com', 'cinepicvip.com', 'apifront.cinexo.com.ar', 'api.cinexo.com.ar', 'supercines.com.ve', 'www.grancine.net']);
 /**
  * Supercines serves its schedule, fares and concessions only to form POSTs
  * that carry the anti-forgery token of an anonymous visitor session, exactly
@@ -527,6 +527,9 @@ export function assertPublicRead(value: string) {
         { const m = path.match(/^\/api\/complejo\/([^/]+)\/candy$/); return !!m && none && Id.safeParse(m[1]).success; }
       case 'supercines.com.ve':
         return none && (path === '/cartelera' || /^\/booking\/\d{1,12}$/.test(path));
+      case 'www.grancine.net':
+        if (path === '/salas') return none;
+        return path === '/sedes/sede.php' && exactQuery(u, { slug: v => !!v && /^[a-z0-9-]{1,80}$/.test(v), fecha: v => !!v && /^\d{4}-\d{2}-\d{2}$/.test(v) });
       default:
         return false;
     }
