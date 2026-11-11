@@ -119,7 +119,6 @@ export function landingPage(origin: string) {
     <section class="section" id="preguntar" aria-labelledby="preguntar-titulo">
       <header class="section-head">
         <h2 id="preguntar-titulo">Qué puedes preguntar</h2>
-        <p>Dile en qué ciudad estás y, si quieres, el cine o la película.</p>
       </header>
       <ul class="asks">
         {coverage.map(({ topic, ask }) => <li><span class="topic">{topic}</span><span class="ask">“{ask}”</span></li>)}
