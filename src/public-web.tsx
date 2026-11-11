@@ -262,7 +262,7 @@ export function installationPage(origin: string) {
       <div class="picker" role="radiogroup" aria-labelledby="mano">
         <div class="picker-options">
           {[...assistants.map(({ name, logo }, i) => <><input type="radio" name="app" id={`app-${i}`} class="visually-hidden" checked={i === 0} /><label for={`app-${i}`}><AppMark logo={logo} />{name}</label></>),
-            <><input type="radio" name="app" id="app-other" class="visually-hidden" /><label for="app-other"><span class="app-mark app-mark-other" aria-hidden="true">{icons.plus()}</span>Otra</label></>]}
+            <><input type="radio" name="app" id="app-other" class="visually-hidden" /><label for="app-other"><span class="app-mark app-mark-other" aria-hidden="true">{icons.ellipsis()}</span>Otra</label></>]}
         </div>
         <div class="picker-panels">
           {assistants.map(({ how, file, setup }, i) => <div class="picker-panel">

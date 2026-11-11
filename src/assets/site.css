@@ -411,7 +411,7 @@ button:disabled, .btn:disabled { cursor: not-allowed; }
 .picker-options input:checked + label { color: var(--foreground); box-shadow: inset 0 0 0 1.5px var(--amber); }
 .picker-options input:focus-visible + label { outline: 2px solid var(--amber); outline-offset: 3px; }
 .picker-options .app-mark-other { background: var(--night); color: var(--cream); }
-.picker-options .app-mark-other svg { width: 14px; height: 14px; }
+.picker-options .app-mark-other svg { width: 16px; height: 16px; stroke-width: 3; }
 .picker-panels { margin-top: 20px; }
 .picker-panel { display: none; }
 .picker-panel p { margin: 0 0 10px; font-size: 15px; }
