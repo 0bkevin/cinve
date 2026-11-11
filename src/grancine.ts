@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { load } from 'cheerio';
-import { DataError, folded, requireArg, today } from './core.js';
+import { DataError, folded, isPastDate, requireArg, today } from './core.js';
 import type { DataItem, Operation, Query } from './core.js';
 import type { ReadContext } from './http.js';
 import { clock, titled } from './parsers.js';
@@ -78,6 +78,8 @@ export function parseGranCineVenuePage(html: string, venue: Venue, date: string,
     const raw = $(card).find('.titulo-card-horiz').first().text();
     const name = granCineTitle(raw);
     const movieId = ($(card).find('a[href*="detalle_sinopsis.php?id="]').attr('href') ?? '').match(/detalle_sinopsis\.php\?id=(\d{1,9})$/)?.[1];
+    const badge = $(card).find('.badge').first().text().replace(/\s+/g, ' ').trim();
+    const rating = badge && badge.length <= 10 ? badge : undefined;
     if (!name || name.length > 300 || !movieId) { skipped++; return; }
     $(card).find('.caja-hora-sala').each((_, slot) => {
       const room = $(slot).find('small').first().text().replace(/\s+/g, ' ').trim();
@@ -89,7 +91,7 @@ export function parseGranCineVenuePage(html: string, venue: Venue, date: string,
       // (venue, date, time, room, title) so repeated reads agree; it does not
       // exist upstream and cannot be used to buy or look up seats.
       const id = `gc-${createHash('sha256').update(JSON.stringify([venue.id, date, time, room, movieId])).digest('hex').slice(0, 20)}`;
-      items.push({ kind: 'showtime', id, name, cinema_id: venue.id, cinema_name: venue.name.slice(0, 200), movie_id: movieId,
+      items.push({ kind: 'showtime', id, name, cinema_id: venue.id, cinema_name: venue.name.slice(0, 200), movie_id: movieId, rating,
         date, time, starts_at: overnight ? undefined : `${date}T${time}:00-04:00`, screen: room && room.length <= 60 ? room : undefined,
         url: `${GC}/sedes/sede.php?${new URLSearchParams({ slug: venue.id, fecha: date })}` });
     });
@@ -108,6 +110,10 @@ const venueLimit = 12, budgetMs = 60000, readMs = 15000, workers = 2;
 async function showtimes(q: Query, c: ReadContext, listing = false): Promise<Showtime[]> {
   const deadline = Date.now() + budgetMs;
   const date = q.date ?? today();
+  if (isPastDate(date)) {
+    c.warnings.push('Esa fecha ya pasó: Gran Cine solo publica la programación de hoy en adelante.');
+    return [];
+  }
   const all = await venues(c);
   let work: Venue[];
   if (q.cinema_id) {
@@ -157,7 +163,7 @@ export async function grancine(op: Operation, q: Query, c: ReadContext): Promise
     // Titles with functions on that date: the circuit has no billboard API,
     // and its synopsis catalog also lists past titles.
     const movies = new Map<string, DataItem>();
-    for (const s of await showtimes(q, c, true)) if (!movies.has(s.movie_id)) movies.set(s.movie_id, { kind: 'movie', id: s.movie_id, name: s.name, ...(q.cinema_id ? { cinema_id: q.cinema_id } : {}), city: q.city, url: `${GC}/detalle_sinopsis.php?id=${s.movie_id}` });
+    for (const s of await showtimes(q, c, true)) if (!movies.has(s.movie_id)) movies.set(s.movie_id, { kind: 'movie', id: s.movie_id, name: s.name, rating: s.rating, ...(q.cinema_id ? { cinema_id: q.cinema_id } : {}), city: q.city, url: `${GC}/detalle_sinopsis.php?id=${s.movie_id}` });
     return [...movies.values()];
   }
   if (op === 'prices' || op === 'concessions') {
