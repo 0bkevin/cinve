@@ -20,7 +20,7 @@ test('official MCP client discovers tools, validates arguments and reads structu
     const list = await client.listTools();
     assert.equal(list.tools.length, 9);
     assert.ok(list.tools.every(t => t.annotations?.readOnlyHint && t.outputSchema));
-    assert.ok(list.tools.every(t => t.title));
+    assert.ok(list.tools.every(t => t.title && t.annotations?.title === t.title));
     const seatTool = list.tools.find(t => t.name === 'get_seats');
     assert.match(seatTool?.description ?? '', /available=0 con unknown>0 NO significa agotado/);
     assert.match(JSON.stringify(seatTool?.outputSchema), /availability_complete/);
