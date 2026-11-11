@@ -17,6 +17,7 @@
   --line: #33212a;     /* rules, borders and taken seats */
   --seat: #a92037;     /* upholstery: a free seat */
   --taken: #2e1b23;
+  --seat-shape: 45% 45% 15% 15%;
   --amber: #ffbd3f;    /* the seats for you, and the main action */
   --cream: #f6eee4;    /* text in the light of the screen */
   --dust: #b8a7a1;     /* secondary text */
