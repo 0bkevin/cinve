@@ -796,7 +796,7 @@ test('the install page carries security headers even when served before the host
   assert.ok(serveInstall({ url: '/install', method: 'GET', headers: { accept: 'text/html' } } as never, res as never, 'https://cinve.example'));
   assert.match(headers['content-security-policy'], /default-src 'none'.*frame-ancestors 'none'/);
   assert.equal(headers['x-frame-options'], 'DENY');
-  assert.equal(headers['strict-transport-security'], 'max-age=31536000');
+  assert.equal(headers['strict-transport-security'], 'max-age=31536000; includeSubDomains');
 });
 
 test('public pages use the configured origin and serve local fonts under the authorization policy', async t => {
@@ -1023,4 +1023,15 @@ test('refresh=true also has a service-wide budget across addresses', async t => 
   await assert.rejects(anonymous.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos', refresh: true } }));
   const cached = await anonymous.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos' } });
   assert.equal((cached.structuredContent as { status: string }).status, 'available');
+});
+
+test('HTTPS responses send HSTS for the host and its subdomains; plain HTTP sends none', async () => {
+  const { setSecurityHeaders } = await import('../src/public-web.js');
+  const headers = (https: boolean) => {
+    const set = new Map<string, string>();
+    setSecurityHeaders({ setHeader: (k: string, v: string) => set.set(k, v) } as never, https);
+    return set;
+  };
+  assert.equal(headers(true).get('Strict-Transport-Security'), 'max-age=31536000; includeSubDomains');
+  assert.equal(headers(false).has('Strict-Transport-Security'), false);
 });
