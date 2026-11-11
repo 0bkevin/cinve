@@ -1,3 +1,4 @@
+import { assetUrl } from './assets.js';
 import { h, Fragment, raw, type Child } from './jsx.js';
 
 const description = 'Consulta películas, horarios, precios y asientos de cines en Venezuela desde tu asistente.';
@@ -33,9 +34,9 @@ function SocialMeta({ canonical }: { canonical?: string }) {
   </>;
 }
 
-export type PageOptions = { compact?: boolean; script?: string; index?: boolean; canonical?: string; styles?: string };
+export type PageOptions = { compact?: boolean; script?: '/assets/js/site.js' | '/assets/js/connect.js'; index?: boolean; canonical?: string };
 
-export function Page({ title, compact, script, index, canonical, styles, children }: PageOptions & { title: string; children?: Child }) {
+export function Page({ title, compact, script, index, canonical, children }: PageOptions & { title: string; children?: Child }) {
   return (
     <html lang="es">
       <head>
@@ -49,7 +50,9 @@ export function Page({ title, compact, script, index, canonical, styles, childre
         <meta name="theme-color" content="#0a0a0a" media="(prefers-color-scheme: dark)" />
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         {index ? <SocialMeta canonical={canonical} /> : <meta name="robots" content="noindex,nofollow" />}
-        {styles && <style>{raw(styles)}</style>}
+        <link rel="preload" href="/assets/inter-latin.woff2" as="font" type="font/woff2" crossorigin />
+        <link rel="stylesheet" href={assetUrl('/assets/basecoat.css')} />
+        <link rel="stylesheet" href={assetUrl('/assets/site.css')} />
       </head>
       <body>
         <a class="skip" href="#contenido">Ir al contenido</a>
@@ -64,7 +67,7 @@ export function Page({ title, compact, script, index, canonical, styles, childre
             <a href="https://github.com/0bkevin/cinve" aria-label="Ver código en GitHub" title="GitHub">{gitHubIcon}</a>
           </footer>
         </div>
-        {script && <script type="module" src={script}></script>}
+        {script && <script type="module" src={assetUrl(script)}></script>}
       </body>
     </html>
   );

@@ -199,7 +199,7 @@ export class HostedOAuth {
         res.setHeader('Referrer-Policy', 'same-origin');
         // Chromium also checks form-action against the POST's redirect target.
         // Only allow the already-validated callback origin, never arbitrary sites.
-        res.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; img-src 'self'; form-action 'self' ${new URL(redirect).origin}; frame-ancestors 'none'; base-uri 'none'`);
+        res.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; form-action 'self' ${new URL(redirect).origin}; frame-ancestors 'none'; base-uri 'none'`);
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(authorizationPage(app.name, new URL(redirect).origin, id, csrf, isClientIdUrl(clientId) ? new URL(clientId).hostname : undefined));
         return true;

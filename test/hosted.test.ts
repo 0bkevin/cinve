@@ -82,8 +82,8 @@ test('hosted MCP authenticates every request; account links are one-use and sess
   assert.equal(page.headers.get('cache-control'), 'no-store'); assert.match(page.headers.get('content-security-policy')!, /frame-ancestors 'none'/);
   const connectHtml = await page.text();
   assert.ok(!connectHtml.includes(invitation));
-  assert.ok(connectHtml.includes('<script type="module" src="/assets/js/connect.js">'));
-  const script = await fetch(f.origin + '/assets/js/connect.js');
+  const scriptUrl = connectHtml.match(/<script type="module" src="(\/assets\/js\/connect\.js\?v=[0-9a-f]{10})">/)![1];
+  const script = await fetch(f.origin + scriptUrl);
   assert.match(script.headers.get('content-type')!, /text\/javascript/); assert.match(await script.text(), /\/connect\/exchange/);
   assert.equal((await f.post('/connect/exchange', invitation, {}, { Origin: 'https://evil.test' })).status, 403);
   const exchanged = await f.post('/connect/exchange', invitation);
@@ -524,6 +524,12 @@ test('public pages use the configured origin and serve local fonts under the aut
   assert.equal(png.readUInt32BE(16), 1200);
   assert.equal(png.readUInt32BE(20), 630);
   assert.ok(home.headers.get('content-security-policy')?.includes("font-src 'self'"));
+  const policy = home.headers.get('content-security-policy')!;
+  assert.match(policy, /style-src 'self'/); assert.doesNotMatch(policy, /unsafe-inline/);
+  const stylesheet = html.match(/<link rel="stylesheet" href="(\/assets\/basecoat\.css\?v=[0-9a-f]{10})">/)![1];
+  const compressed = await fetch(f.origin + stylesheet, { headers: { 'Accept-Encoding': 'br' } });
+  assert.match(compressed.headers.get('content-type')!, /text\/css/); assert.equal(compressed.headers.get('vary'), 'Accept-Encoding');
+  assert.ok((await compressed.text()).includes('.btn'));
   const font = await fetch(f.origin + '/assets/inter-latin.woff2');
   assert.equal(font.headers.get('content-type'), 'font/woff2');
   assert.equal(Buffer.from(await font.arrayBuffer()).subarray(0, 4).toString(), 'wOF2');
