@@ -55,14 +55,13 @@ export function landingPage(origin: string) {
       <LinkButton href="#empezar" size="lg">Añadir Cinve a mi asistente</LinkButton>
     </section>
     <section class="section">
-      <h2>Qué puedes preguntar</h2>
+      <header><h2>Qué puedes preguntar</h2><p class="note">Dile en qué ciudad estás y, si quieres, el cine o la película.</p></header>
       <dl class="questions">
         {questions.map(([question, answer]) => <div><dt>{question}</dt><dd>{answer}</dd></div>)}
       </dl>
-      <p class="note">Dile en qué ciudad estás y, si quieres, el cine o la película.</p>
     </section>
     <section class="section" id="empezar">
-      <h2>Cómo empezar</h2>
+      <header><h2>Cómo empezar</h2></header>
       <ol class="steps">
         <li>
           <p>Copia este mensaje y envíaselo a tu asistente.</p>
@@ -73,8 +72,8 @@ export function landingPage(origin: string) {
       </ol>
     </section>
     <section class="section">
-      <h2>¿Necesito mi cuenta del cine?</h2>
-      <p>Para la cartelera y los horarios, no. Para precios y asientos, solo en Cinex y Cines Unidos: tu asistente te dará un enlace privado para conectarla. Escribes la contraseña ahí, nunca en el chat, y Cinve no la guarda.</p>
+      <header><h2>¿Necesito mi cuenta del cine?</h2></header>
+      <p class="answer">Para la cartelera y los horarios, no. Para precios y asientos, solo en Cinex y Cines Unidos: tu asistente te dará un enlace privado para conectarla. Escribes la contraseña ahí, nunca en el chat, y Cinve no la guarda.</p>
     </section>
     <aside class="project-note" aria-label="Sobre Cinve"><p>Cinve es gratis e independiente; no está afiliado a Cinex, Cines Unidos ni Cinepic. Solo consulta lo que cada cine publica: no compra entradas ni reserva asientos.</p></aside>
   </>, { index: true, canonical: origin + '/', script: '/assets/js/site.js' });
