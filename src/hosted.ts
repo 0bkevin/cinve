@@ -41,7 +41,10 @@ class HostedService extends CinemaService {
    * credentials was refused, never for an unrelated auth_required.
    */
   private async rejected(status: string, provider: string) {
-    if (status === 'auth_required' && this.store && (provider === 'cinex' || provider === 'cinesunidos') && this.client.rejectedSessions.has(provider))
+    // Supercines fares fall back to public ones when its session is refused,
+    // so that refusal arrives with an available result, not auth_required.
+    const cinema = provider === 'cinex' || provider === 'cinesunidos' || provider === 'supercines';
+    if ((status === 'auth_required' || provider === 'supercines') && this.store && cinema && this.client.rejectedSessions.has(provider))
       await this.store.discardRejected(provider).catch(() => {});
   }
   override async query(op: Operation, q: Query, call?: CallOptions) {

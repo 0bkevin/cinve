@@ -35,7 +35,7 @@ $('login').onsubmit = async event => {
 };
 $('done').onclick = async () => { try { await request('/connect/cancel'); } catch {} token = ''; $('login').reset(); $('login').hidden = true; $('footer').hidden = true; $('accounts').textContent = 'Conexión cancelada. Puedes cerrar esta pestaña.'; };
 request('/connect/exchange', {}, invitation).then(data => {
-  token = data.browser_token; cinema = data.provider === 'cinex' ? 'Cinex' : 'Cines Unidos';
+  token = data.browser_token; cinema = data.provider === 'cinex' ? 'Cinex' : data.provider === 'supercines' ? 'Supercines' : 'Cines Unidos';
   $('title').textContent = 'Conecta tu cuenta de ' + cinema + '.';
   const app = data.app;
   $('accounts').textContent = !app ? 'Se conectará a tu acceso Cinve.'

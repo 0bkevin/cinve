@@ -46,3 +46,7 @@ export const mockFetch: typeof fetch = async (input) => {
   else throw new Error('Unexpected fixture URL: ' + url);
   return new Response(body, { status: 200 });
 };
+/** YYYY-MM-DD plus whole days. */
+export function shiftDate(date: string, days: number): string {
+  return new Date(Date.parse(`${date}T12:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
+}

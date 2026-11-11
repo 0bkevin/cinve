@@ -33,9 +33,11 @@ test('rejects arbitrary origins before making requests', async () => {
 });
 test('429/auth errors are explicit and never cached as successful empty lists', async () => {
   let count = 0;
-  const http = new HttpClient(async () => { count++; return new Response('', { status: 429 }); });
+  const http = new HttpClient(async () => { count++; return new Response('', { status: 429, headers: { 'retry-after': '120' } }); });
   for (let i = 0; i < 2; i++) await assert.rejects(http.get(origin + '/test'), (e: unknown) => e instanceof DataError && e.status === 'rate_limited');
-  assert.equal(count, 2);
+  // The refusal is remembered as a refusal (Retry-After), not as an empty
+  // result, and the provider is not asked again while it lasts.
+  assert.equal(count, 1);
 });
 test('oversize response is cancelled', async () => {
   const http = new HttpClient(async () => new Response('x'.repeat(4 * 1024 * 1024 + 1)));
