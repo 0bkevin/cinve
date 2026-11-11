@@ -1,43 +1,44 @@
-# Alojar Cinve
+# Hosting Cinve
 
-Cómo desplegar tu propio servidor HTTP de Cinve. Para usar el servicio público
-no necesitas nada de esto.
+How to deploy your own Cinve HTTP server. You don't need any of this to use the
+public service.
 
-## Requisitos
+## Requirements
 
-- Node.js 22 o posterior.
-- Una base PostgreSQL dedicada (por ejemplo, Neon).
-- Un dominio con HTTPS.
+- Node.js 22 or later.
+- A dedicated PostgreSQL database (for example, Neon).
+- A domain with HTTPS.
 
-## Variables de entorno
+## Environment variables
 
-| Variable                | Obligatoria | Descripción                                              |
-| ----------------------- | ----------- | -------------------------------------------------------- |
-| `DATABASE_URL`          | Sí          | Conexión a PostgreSQL con TLS.                           |
-| `DATABASE_URL_UNPOOLED` | No          | Conexión directa para las migraciones.                   |
-| `CINEV_PUBLIC_URL`      | Sí          | Origen HTTPS sin ruta: `https://cine.ejemplo.com`.       |
-| `CINEV_ENCRYPTION_KEY`  | Sí          | Genérala con `openssl rand -hex 32`.                     |
-| `CRON_SECRET`           | En Vercel   | Protege la limpieza diaria. Genéralo igual que la clave. |
-| `PORT`                  | No          | Puerto fuera de Vercel (por defecto `3000`).             |
+| Variable                | Required  | Description                                         |
+| ----------------------- | --------- | --------------------------------------------------- |
+| `DATABASE_URL`          | Yes       | PostgreSQL connection with TLS.                     |
+| `DATABASE_URL_UNPOOLED` | No        | Direct connection used for migrations.              |
+| `CINEV_PUBLIC_URL`      | Yes       | HTTPS origin, no path: `https://cine.example.com`.  |
+| `CINEV_ENCRYPTION_KEY`  | Yes       | Generate it with `openssl rand -hex 32`.            |
+| `CRON_SECRET`           | On Vercel | Protects the daily cleanup. Generate it the same way. |
+| `PORT`                  | No        | Port outside Vercel (default `3000`).               |
 
-Conserva `CINEV_ENCRYPTION_KEY`: si cambia, todos deben reconectar sus cuentas.
+Keep `CINEV_ENCRYPTION_KEY` stable: if it changes, everyone must reconnect
+their accounts.
 
-## Desplegar en Vercel
+## Deploy on Vercel
 
-1. Crea un proyecto y conecta una base PostgreSQL en la misma región.
-2. Define las variables de entorno.
-3. Aplica las migraciones: `npm run db:migrate`. Si tu red bloquea conexiones
-   PostgreSQL directas a Neon:
+1. Create a project and connect a PostgreSQL database in the same region.
+2. Set the environment variables.
+3. Run the migrations: `npm run db:migrate`. If your network blocks direct
+   PostgreSQL connections to Neon:
 
    ```sh
    node --env-file=.env.production.local --import tsx scripts/migrate-neon.ts
    ```
 
-4. Despliega y comprueba: `vercel --prod` y `curl https://<dominio>/health`.
+4. Deploy and check: `vercel --prod` and `curl https://<domain>/health`.
 
-`vercel.json` ya incluye las rutas y la limpieza diaria.
+`vercel.json` already includes the routes and the daily cleanup.
 
-## Desplegar en otro servidor
+## Deploy on another server
 
 ```sh
 npm ci
@@ -46,44 +47,43 @@ npm run db:migrate
 npm run start:hosted
 ```
 
-Programa `npm run db:cleanup` una vez al día (por ejemplo, con cron).
+Schedule `npm run db:cleanup` once a day (for example, with cron).
 
-Ponlo detrás de un proxy inverso con HTTPS, teniendo en cuenta que:
+Put it behind an HTTPS reverse proxy, keeping in mind that:
 
-- El proxy debe conservar la cabecera `Host`; si no coincide con
-  `CINEV_PUBLIC_URL`, el servidor responde 403. En Nginx:
+- The proxy must preserve the `Host` header; if it doesn't match
+  `CINEV_PUBLIC_URL`, the server responds 403. In Nginx:
   `proxy_set_header Host $host;`.
-- Cinve no lee `X-Forwarded-For`: todos los usuarios comparten los límites por
-  IP del proxy (por ejemplo, 20 inicios de sesión por minuto). Sirve para uso
-  personal o de pocas personas.
-- No instales con `--omit=dev`: las migraciones y la limpieza usan `tsx`.
+- Cinve doesn't read `X-Forwarded-For`: all users share the proxy IP's rate
+  limits (for example, 20 sign-ins per minute). It suits personal or small-group
+  use.
+- Don't install with `--omit=dev`: migrations and cleanup use `tsx`.
 
-## Proteger el servicio
+## Protect the service
 
-- Limita solicitudes por IP en tu firewall o CDN para `/mcp`, `/oauth/*` y
+- Rate-limit requests per IP in your firewall or CDN for `/mcp`, `/oauth/*` and
   `/connect/*`.
-- Fija un tamaño máximo de cómputo en la base de datos.
-- No registres parámetros SQL ni cuerpos de solicitudes.
+- Set a maximum compute size for the database.
+- Don't log SQL parameters or request bodies.
 
-## Verificar
+## Verify
 
 ```sh
-npm run smoke -- --url https://<dominio>/mcp
+npm run smoke -- --url https://<domain>/mcp
 ```
 
-Ejecuta consultas reales y comprueba que las rutas protegidas pidan
-autenticación.
+Runs real queries and checks that protected routes require authentication.
 
-## Actualizar
+## Update
 
-Ejecuta `npm run db:migrate` antes de desplegar una versión con migraciones
-nuevas. Son idempotentes.
+Run `npm run db:migrate` before deploying a version with new migrations. They
+are idempotent.
 
-## Tokens manuales
+## Manual tokens
 
-Para clientes sin OAuth (requiere `npm run build`):
+For clients without OAuth (requires `npm run build`):
 
 ```sh
-npm run hosted:admin -- issue              # muestra el token una sola vez
+npm run hosted:admin -- issue              # shows the token only once
 npm run hosted:admin -- revoke <client-id>
 ```

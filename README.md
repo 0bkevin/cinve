@@ -1,37 +1,36 @@
-![Cinve: consulta películas, horarios y precios de cines en Venezuela desde tu asistente](src/assets/og.png)
+![Cinve: look up movies, showtimes and prices at Venezuelan cinemas from your assistant](src/assets/og.png)
 
 # Cinve
 
-Servidor [MCP](https://modelcontextprotocol.io/) para consultar desde tu
-asistente de IA las películas, horarios, precios, caramelería y asientos de
-**Cinex, Cines Unidos, Cinepic, Supercines y Gran Cine**.
+An [MCP](https://modelcontextprotocol.io/) server that lets your AI assistant
+look up movies, showtimes, ticket prices, concessions and seats at **Cinex,
+Cines Unidos, Cinepic, Supercines and Gran Cine** in Venezuela.
 
-[Sitio web](https://cinve.kevinbravo.com) ·
-[Reportar un problema](https://github.com/0bkevin/cinve/issues/new/choose)
+[Website](https://cinve.kevinbravo.com) ·
+[Report an issue](https://github.com/0bkevin/cinve/issues/new/choose)
 
-> Proyecto independiente y sin fines de lucro, no afiliado a ningún cine. No
-> compra entradas ni reserva asientos.
+> An independent, non-profit project, not affiliated with any cinema. It does not
+> buy tickets or reserve seats.
 
-## Uso
+## Usage
 
-Pídele a tu asistente:
+Ask your assistant:
 
 ```text
-Instala Cinve siguiendo https://cinve.kevinbravo.com/install
+Install Cinve following https://cinve.kevinbravo.com/install
 ```
 
-O añade este servidor MCP remoto: `https://cinve.kevinbravo.com/mcp`
+Or add this remote MCP server: `https://cinve.kevinbravo.com/mcp`
 
-Luego pregunta, por ejemplo: «¿Qué películas hay hoy en Caracas?» o «¿Quedan
-asientos para la función de las 7?».
+Then ask, for example: "What movies are showing in Caracas today?" or "Are
+there seats left for the 7 pm showing?".
 
-Algunas consultas de Cinex y Cines Unidos requieren tu cuenta del cine; el
-asistente te dará un enlace privado para conectarla. Nunca escribas contraseñas
-en el chat.
+Some Cinex and Cines Unidos queries need your cinema account; the assistant will
+give you a private link to connect it. Never type passwords in the chat.
 
-## Ejecutarlo en tu equipo
+## Run it locally
 
-Requiere Node.js 22 o posterior.
+Requires Node.js 22 or later.
 
 ```sh
 git clone https://github.com/0bkevin/cinve.git
@@ -40,46 +39,46 @@ npm ci
 npm run build
 ```
 
-Configura tu cliente MCP:
+Configure your MCP client:
 
 ```json
 {
   "mcpServers": {
     "cinve": {
       "command": "node",
-      "args": ["/ruta/absoluta/cinve/dist/index.js"]
+      "args": ["/absolute/path/cinve/dist/index.js"]
     }
   }
 }
 ```
 
-Conecta tus cuentas de cine desde tu terminal:
+Connect your cinema accounts from your terminal:
 
 ```sh
-npm run login -- cinex     # o cinesunidos, supercines
+npm run login -- cinex     # or cinesunidos, supercines
 npm run logout -- cinex
 ```
 
-## Alojar tu propio servidor
+## Host your own server
 
-Necesitas PostgreSQL y un dominio con HTTPS. Sigue la
-[guía de despliegue](docs/hosted.md).
+You need PostgreSQL and a domain with HTTPS. Follow the
+[deployment guide](docs/hosted.md).
 
-## Desarrollo
+## Development
 
 ```sh
 npm run check
 npm test
 ```
 
-Consulta [`CONTRIBUTING.md`](CONTRIBUTING.md) y la
-[referencia técnica](docs/reference.md). Para vulnerabilidades, sigue
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) and the
+[technical reference](docs/reference.md). For vulnerabilities, follow
 [`SECURITY.md`](SECURITY.md).
 
-## Autor
+## Author
 
-Creado por [Kevin Bravo](https://kevinbravo.com).
+Created by [Kevin Bravo](https://kevinbravo.com).
 
-## Licencia
+## License
 
 [MIT](LICENSE).

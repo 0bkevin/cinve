@@ -1,105 +1,104 @@
-# Referencia técnica
+# Technical reference
 
-Herramientas, respuestas y límites de Cinve.
+Cinve's tools, responses and limits.
 
-## Herramientas MCP
+## MCP tools
 
-| Herramienta          | Para qué sirve                                                 |
-| -------------------- | -------------------------------------------------------------- |
-| `list_providers`     | Cobertura, capacidades y límites de cada cine.                 |
-| `get_auth_status`    | Estado de las cuentas de Cinex, Cines Unidos y Supercines.     |
-| `connect_account`    | Solo modo alojado: inicia la conexión de una cuenta de cine.   |
-| `disconnect_account` | Solo modo alojado: borra la sesión de un cine en Cinve.        |
-| `list_cities`        | Ciudades de un cine.                                           |
-| `list_cinemas`       | Sedes de un cine.                                              |
-| `list_movies`        | Películas en cartelera, con búsqueda opcional.                 |
-| `get_showtimes`      | Funciones por sede, ciudad, película o fecha.                  |
-| `get_ticket_prices`  | Precios de una función.                                        |
-| `get_seats`          | Mapa de asientos de una función (no reserva).                  |
-| `get_concessions`    | Caramelería de una sede.                                       |
+| Tool                 | Purpose                                                  |
+| -------------------- | -------------------------------------------------------- |
+| `list_providers`     | Coverage, capabilities and limits of each cinema.        |
+| `get_auth_status`    | Status of Cinex, Cines Unidos and Supercines accounts.   |
+| `connect_account`    | Hosted mode only: starts connecting a cinema account.    |
+| `disconnect_account` | Hosted mode only: deletes a cinema session from Cinve.   |
+| `list_cities`        | A cinema's cities.                                       |
+| `list_cinemas`       | A cinema's venues.                                       |
+| `list_movies`        | Movies showing, with optional search.                    |
+| `get_showtimes`      | Showtimes by venue, city, movie or date.                 |
+| `get_ticket_prices`  | Ticket prices for a showtime.                            |
+| `get_seats`          | Seat map for a showtime (does not reserve).              |
+| `get_concessions`    | A venue's concessions.                                   |
 
-Las consultas reciben `provider`: `cinex`, `cinesunidos`, `cinepic`,
-`supercines` o `grancine`. Las herramientas de cuenta solo aceptan `cinex`,
-`cinesunidos` o `supercines`; en modo local se usa `npm run login`.
+Queries take `provider`: `cinex`, `cinesunidos`, `cinepic`, `supercines` or
+`grancine`. Account tools only accept `cinex`, `cinesunidos` or `supercines`;
+in local mode, use `npm run login`.
 
-Los listados admiten `query`, `offset` y `limit` (50 por defecto, 100 máximo).
-Para paginar, repite con `next_offset` hasta que sea `null`.
+Lists accept `query`, `offset` and `limit` (50 by default, 100 max). To page,
+repeat with `next_offset` until it is `null`.
 
-## Flujo recomendado
+## Recommended flow
 
-1. `list_cities` y `list_cinemas` para obtener sedes.
-2. `get_showtimes` para obtener funciones.
-3. `get_ticket_prices` o `get_seats` con los IDs de la función.
+1. `list_cities` and `list_cinemas` to get venues.
+2. `get_showtimes` to get showtimes.
+3. `get_ticket_prices` or `get_seats` with the showtime's IDs.
 
-Usa solo IDs devueltos por Cinve, sin mezclarlos entre cines. Las sedes con
-`code_status=unverified` no se pueden consultar.
+Only use IDs returned by Cinve, and don't mix them across cinemas. Venues with
+`code_status=unverified` can't be queried.
 
-## Argumentos por cine
+## Arguments by cinema
 
-| Cine         | Qué requiere                                                                                       |
+| Cinema       | What it requires                                                                                   |
 | ------------ | -------------------------------------------------------------------------------------------------- |
-| Cinex        | `get_showtimes` con `city` lee toda la ciudad; con `cinema_id`, una sede; con `movie_id`, todas las sedes de esa película. `list_movies` es el catálogo general, sin fecha ni sede. |
-| Cines Unidos | `list_cinemas`, `list_movies` y `get_showtimes` requieren `city`; añade `cinema_id` para una sede. |
-| Cinepic      | Dos sedes: `123300` (Candelaria) y `123301` (VVIP Lido). Todo salvo ciudades y sedes requiere `cinema_id`. |
-| Supercines   | `get_showtimes` requiere `cinema_id`, `city` o `movie_id`. Los precios requieren `movie_id` y la misma `date` de `get_showtimes` si no es hoy. |
-| Gran Cine    | `get_showtimes` sin sede ni ciudad lee todas sus salas.                                            |
+| Cinex        | `get_showtimes` with `city` reads the whole city; with `cinema_id`, one venue; with `movie_id`, every venue for that movie. `list_movies` is the general catalog, with no date or venue. |
+| Cines Unidos | `list_cinemas`, `list_movies` and `get_showtimes` require `city`; add `cinema_id` for one venue.   |
+| Cinepic      | Two venues: `123300` (Candelaria) and `123301` (VVIP Lido). Everything except cities and venues requires `cinema_id`. |
+| Supercines   | `get_showtimes` requires `cinema_id`, `city` or `movie_id`. Prices require `movie_id` and, if not today, the same `date` used in `get_showtimes`. |
+| Gran Cine    | `get_showtimes` with no venue or city reads all its screens.                                       |
 
-## Respuestas
+## Responses
 
 - `status`: `available`, `empty`, `unavailable`, `auth_required`, `blocked`,
-  `rate_limited` o `error`. `empty` significa sin resultados, no un fallo.
-- `items`: los resultados.
-- `partial: true`: Cinve no pudo verificar parte de la respuesta.
-- `warnings`, `sources`, `total`, `next_offset`, `queried_at` y `timezone`.
+  `rate_limited` or `error`. `empty` means no results, not a failure.
+- `items`: the results.
+- `partial: true`: Cinve couldn't verify part of the response.
+- `warnings`, `sources`, `total`, `next_offset`, `queried_at` and `timezone`.
 
-## Cobertura
+## Coverage
 
-| Cine         | Precios | Caramelería | Asientos | Requiere cuenta                     |
-| ------------ | ------- | ----------- | -------- | ----------------------------------- |
-| Cinex        | Sí      | Sí          | Sí       | Precios, caramelería y asientos     |
-| Cines Unidos | Sí      | Sí          | Sí       | Precios y asientos                  |
-| Cinepic      | Sí      | Sí          | Sí       | No                                  |
-| Supercines   | Sí      | Sí          | No       | No (opcional para tarifas propias)  |
-| Gran Cine    | No      | No          | No       | No                                  |
+| Cinema       | Prices | Concessions | Seats | Account required                   |
+| ------------ | ------ | ----------- | ----- | ---------------------------------- |
+| Cinex        | Yes    | Yes         | Yes   | Prices, concessions and seats      |
+| Cines Unidos | Yes    | Yes         | Yes   | Prices and seats                   |
+| Cinepic      | Yes    | Yes         | Yes   | No                                 |
+| Supercines   | Yes    | Yes         | No    | No (optional, for account fares)   |
+| Gran Cine    | No     | No          | No    | No                                 |
 
-Todos ofrecen sedes, películas y funciones. Limitaciones:
+All of them provide venues, movies and showtimes. Limitations:
 
-- **Cines Unidos:** si su web pide un desafío anti-bots (frecuente desde
-  servidores en la nube), Cinve usa su API pública de búsqueda. Puede ser más
-  lenta y marcar resultados como `partial`.
-- **Supercines:** las funciones que solo se venden en taquilla aparecen en
-  `warnings`. Las cuentas creadas con Google no se pueden conectar.
-- **Gran Cine:** cine de autor (Paseo Las Mercedes, Cine Ávila y otras salas);
-  publica unos 20 días hacia adelante.
-- **Cinepic:** su API de caramelería puede devolver un catálogo vacío.
-- **Cinex:** el descubrimiento de sedes y las consultas por ciudad tienen plazos
-  máximos; las sedes no leídas se indican en el resultado.
-- **Precios:** Cinepic y Supercines calculan el USD con la tasa que publica el
-  cine. Ningún precio es el total final de compra.
+- **Cines Unidos:** if its website serves an anti-bot challenge (common from
+  cloud servers), Cinve uses its public search API. It can be slower and mark
+  results as `partial`.
+- **Supercines:** showtimes sold only at the box office appear in `warnings`.
+  Accounts created with Google can't be connected.
+- **Gran Cine:** arthouse cinema (Paseo Las Mercedes, Cine Ávila and other
+  screens); publishes about 20 days ahead.
+- **Cinepic:** its concessions API may return an empty catalog.
+- **Cinex:** venue discovery and city-wide queries have time limits; venues
+  that couldn't be read are listed in the result.
+- **Prices:** Cinepic and Supercines compute USD with the rate the cinema
+  publishes. No price is the final purchase total.
 
-## Mapas de asientos
+## Seat maps
 
-`get_seats` requiere `cinema_id` y `session_id`; Cinepic también requiere
-`movie_id`. Cinex y Cines Unidos requieren una cuenta conectada.
+`get_seats` requires `cinema_id` and `session_id`; Cinepic also requires
+`movie_id`. Cinex and Cines Unidos require a connected account.
 
 ```text
-O libre  X ocupado  - no disponible  ? desconocido
+O free  X occupied  - unavailable  ? unknown
 ```
 
-Devuelve el mapa `ascii` y los contadores `available`, `occupied`,
-`unavailable`, `unknown` y `total`. `include_seats=true` añade cada asiento.
+Returns the `ascii` map and the `available`, `occupied`, `unavailable`,
+`unknown` and `total` counters. `include_seats=true` adds each seat.
 
-- `status=available` significa que se obtuvo el mapa, no que haya asientos
-  libres.
-- `availability_complete` es `true` solo si el mapa tiene asientos y ninguno es
-  desconocido. Si `unknown` es mayor que cero, el mapa es parcial: cero
-  asientos libres con desconocidos **no** significa agotado.
-- La consulta no selecciona ni reserva asientos.
+- `status=available` means the map was retrieved, not that seats are free.
+- `availability_complete` is `true` only if the map has seats and none are
+  unknown. If `unknown` is greater than zero, the map is partial: zero free
+  seats with unknowns does **not** mean sold out.
+- The query doesn't select or reserve seats.
 
-## Caché y red
+## Cache and network
 
-- Las respuestas públicas se guardan en caché; `refresh=true` fuerza una
-  lectura nueva. Las lecturas con cuenta y los asientos nunca se cachean.
-- Cada lectura tiene un plazo de 15 s y como máximo dos simultáneas por sitio.
-- Solo se consultan páginas, API y formularios permitidos. Cinve nunca compra,
-  reserva ni modifica cuentas.
+- Public responses are cached; `refresh=true` forces a fresh read. Account
+  reads and seats are never cached.
+- Each read has a 15 s timeout, with at most two concurrent reads per site.
+- Only allowed pages, APIs and forms are queried. Cinve never buys, reserves or
+  changes accounts.

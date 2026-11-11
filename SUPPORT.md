@@ -1,10 +1,10 @@
-# Soporte
+# Support
 
-1. Revisa el [README](README.md) y la [referencia técnica](docs/reference.md).
-2. Busca en los [issues](https://github.com/0bkevin/cinve/issues).
-3. Si es nuevo, [abre un reporte](https://github.com/0bkevin/cinve/issues/new/choose)
-   con el cine, la sede, la fecha, qué pediste y qué respondió Cinve. Quita
-   contraseñas, tokens y datos personales.
+1. Read the [README](README.md) and the [technical reference](docs/reference.md).
+2. Search the [issues](https://github.com/0bkevin/cinve/issues).
+3. If it's new, [open a report](https://github.com/0bkevin/cinve/issues/new/choose)
+   with the cinema, venue, date, what you asked and what Cinve answered. Remove
+   passwords, tokens and personal data.
 
-Para compras, reembolsos o problemas con tu cuenta, contacta al cine. Las
-vulnerabilidades siguen [`SECURITY.md`](SECURITY.md).
+For purchases, refunds or account problems, contact the cinema. Vulnerabilities
+follow [`SECURITY.md`](SECURITY.md).

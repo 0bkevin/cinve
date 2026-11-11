@@ -1,13 +1,13 @@
-# Contribuir
+# Contributing
 
-Al participar, aceptas el [código de conducta](CODE_OF_CONDUCT.md). Para
-cambios grandes, abre primero un issue. Para vulnerabilidades, sigue
+By participating, you agree to the [code of conduct](CODE_OF_CONDUCT.md). For
+large changes, open an issue first. For vulnerabilities, follow
 [`SECURITY.md`](SECURITY.md).
 
-## Preparar el entorno
+## Set up
 
-Requiere Node.js 22 o posterior y PostgreSQL local (`initdb` y `pg_ctl`), o una
-base desechable en `TEST_DATABASE_URL`. Nunca uses una base de producción.
+Requires Node.js 22 or later and a local PostgreSQL (`initdb` and `pg_ctl`), or
+a disposable database in `TEST_DATABASE_URL`. Never use a production database.
 
 ```sh
 npm ci
@@ -16,22 +16,23 @@ npm test
 npm run build
 ```
 
-`npm run smoke` consulta los cines reales; es opcional.
+`npm run smoke` queries the real cinemas; it's optional.
 
 ## Pull requests
 
-- Un solo problema por pull request, con pruebas si cambia el comportamiento.
-- Actualiza la documentación si cambia la interfaz pública.
-- Explica qué resuelve y cómo lo probaste; añade una captura si cambia la web.
-- No incluyas contraseñas, cookies, tokens ni datos personales, tampoco en
+- One problem per pull request, with tests if behavior changes.
+- Update the documentation if the public interface changes.
+- Explain what it solves and how you tested it; add a screenshot if the website
+  changes.
+- Don't include passwords, cookies, tokens or personal data, including in
   fixtures.
 
-## Cambios en un cine
+## Cinema adapter changes
 
-- Distingue una respuesta vacía de un fallo.
-- Valida IDs, importes y enlaces antes de devolverlos.
-- Marca como `partial` lo que no puedas interpretar con certeza.
-- Nunca presentes un asiento desconocido como libre.
-- Prueba el caso normal y el degradado.
+- Distinguish an empty response from a failure.
+- Validate IDs, amounts and links before returning them.
+- Mark as `partial` anything you can't interpret with certainty.
+- Never present an unknown seat as free.
+- Test both the normal and the degraded case.
 
-Al contribuir, aceptas publicar tu código bajo la [licencia MIT](LICENSE).
+By contributing, you agree to license your code under the [MIT license](LICENSE).

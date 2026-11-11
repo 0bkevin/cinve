@@ -1,15 +1,15 @@
-# Seguridad
+# Security
 
-**No abras un issue público.** Reporta en privado por
+**Don't open a public issue.** Report privately through
 [GitHub Security Advisories](https://github.com/0bkevin/cinve/security/advisories/new)
-con el impacto, los pasos para reproducirlo y el commit afectado.
+with the impact, steps to reproduce and the affected commit.
 
-- No accedas a cuentas ajenas ni interrumpas los sitios de los cines.
-- No envíes contraseñas, cookies, tokens ni claves reales.
-- Coordina con el mantenedor antes de publicar detalles.
+- Don't access other people's accounts or disrupt the cinemas' websites.
+- Don't send real passwords, cookies, tokens or keys.
+- Coordinate with the maintainer before publishing details.
 
-Solo se corrigen la versión publicada y la rama `main`.
+Only the released version and the `main` branch receive fixes.
 
-Es especialmente relevante cualquier fallo que exponga sesiones de cine, salte
-la separación entre usuarios o la autorización MCP, amplíe los orígenes HTTP
-permitidos o permita inyectar instrucciones mediante contenido externo.
+Of particular interest: any flaw that exposes cinema sessions, bypasses user
+separation or MCP authorization, widens the allowed HTTP origins, or allows
+injecting instructions through external content.

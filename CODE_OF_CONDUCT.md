@@ -1,14 +1,14 @@
-# Código de conducta
+# Code of conduct
 
-Trata a los demás con respeto, da comentarios técnicos constructivos y respeta
-la privacidad ajena.
+Treat others with respect, give constructive technical feedback and respect
+other people's privacy.
 
-No se toleran acoso, insultos, discriminación, amenazas, atención sexual no
-deseada ni la publicación de datos privados.
+Harassment, insults, discrimination, threats, unwanted sexual attention and
+publishing private data are not tolerated.
 
-Reporta incidentes en privado por
+Report incidents privately through
 [GitHub Security Advisories](https://github.com/0bkevin/cinve/security/advisories/new),
-indicando que es un asunto de conducta. El mantenedor podrá editar contenido,
-cerrar conversaciones o restringir la participación.
+stating that it's a conduct matter. The maintainer may edit content, close
+conversations or restrict participation.
 
-Inspirado en el [Contributor Covenant 2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct/).
+Inspired by the [Contributor Covenant 2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct/).
