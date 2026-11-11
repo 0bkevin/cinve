@@ -87,6 +87,7 @@ export function Page({ title, compact, script, index, canonical, description = s
               <div>
                 <p class="footer-title">Proyecto</p>
                 <a href="/instrucciones">Instrucciones</a>
+                <a href="/privacidad">Privacidad</a>
                 <a href="https://github.com/0bkevin/cinve">Código en GitHub</a>
                 <a href="https://github.com/0bkevin/cinve/issues/new/choose">Reportar un problema</a>
                 <a href="https://github.com/0bkevin/cinve/security/advisories/new">Seguridad</a>

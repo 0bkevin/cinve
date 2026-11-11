@@ -1,6 +1,6 @@
 import type { ServerResponse } from 'node:http';
 
-/** For pages that are the same for everyone (/, /install, /instrucciones):
+/** For pages that are the same for everyone (/, /install, /instrucciones, /privacidad):
  *  the CDN may cache them briefly; private pages keep no-store. */
 export const publicPageCache = 'public, max-age=0, s-maxage=300, stale-while-revalidate=86400';
 

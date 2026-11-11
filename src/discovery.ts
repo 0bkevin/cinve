@@ -4,7 +4,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 /** Public, indexable pages. /connect, OAuth and errors stay out (noindex). */
-export const indexedPaths = ['/', '/install', '/instrucciones'];
+export const indexedPaths = ['/', '/install', '/instrucciones', '/privacidad'];
 
 // /connect stays crawlable so its noindex can be read; only the POST API
 // under /connect/ is disallowed. AI crawlers get the same rules as everyone.
@@ -31,6 +31,7 @@ const llms = (origin: string) => `# Cinve
 - [Guía de instalación para asistentes](${origin}/install?format=text)
 - [Cómo añadir Cinve a mano](${origin}/install)
 - [Instrucciones que recibe el asistente](${origin}/instrucciones)
+- [Política de privacidad](${origin}/privacidad)
 - [Código fuente](https://github.com/0bkevin/cinve)
 - Endpoint MCP (Streamable HTTP): ${origin}/mcp
 `;
