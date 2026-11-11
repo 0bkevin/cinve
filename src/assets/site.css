@@ -360,8 +360,14 @@ details.more[data-closing] > summary .chevron { transform: none; }
   .safeguards { grid-template-columns: minmax(0, 1fr); gap: 28px; }
   .faq summary { padding: 16px; font-size: 17px; }
   .faq details > p { padding: 0 16px 18px; }
-  .closing { padding: 80px 0 88px; }
-  .closing-links .btn { width: 100%; }
+  /* Phones: left-aligned like the other sections; the code button keeps its
+     size and the two secondary actions sit side by side as plain links. */
+  .closing { padding: 72px 0 80px; text-align: left; justify-items: start; }
+  .closing h2 { font-size: 36px; }
+  .closing p { margin: 16px 0 0; font-size: 16px; }
+  .closing-links { display: grid; grid-template-columns: auto auto; justify-content: start; gap: 10px 24px; margin-top: 28px; }
+  .closing-links .btn:first-child { grid-column: 1 / -1; justify-self: start; }
+  .closing-links .btn[data-variant=ghost] { height: auto; padding: 8px 0; font-weight: 500; color: var(--dust); text-decoration: underline; text-decoration-color: var(--input); text-underline-offset: 4px; background: none; }
   .install { flex-direction: column; align-items: stretch; padding: 18px; }
   .install .btn { width: 100%; }
   .install #install-message { font-size: 13.5px; }
