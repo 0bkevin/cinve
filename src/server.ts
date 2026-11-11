@@ -144,7 +144,7 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
       const data = { connection: { mode: (publicHosted || accounts ? 'hosted' : 'local') as 'hosted' | 'local', client_authorized: !publicHosted }, providers: await service.authStatus() };
       return { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data };
     } catch {
-      throw new Error('No se pudo leer el estado de autenticación. Inténtalo de nuevo más tarde.');
+      throw new Error('Could not read authentication status. Try again later.');
     }
   });
   registerTool('list_providers', {
@@ -166,13 +166,13 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     }, async ({ provider }) => {
       try {
-        if (!accounts) throw new Error('Autoriza Cinve desde la opción de autenticación de tu asistente.');
+        if (!accounts) throw new Error('Authorize Cinve using your assistant\'s authentication option.');
         const data = await accounts.connect(provider);
         return { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data };
       } catch {
         // Account adapters may include database or provider details in their exception.
         // Keep those details out of the MCP result; the browser flow has its own safe errors.
-        throw new Error('No se pudo crear el enlace de conexión. Inténtalo de nuevo más tarde.');
+        throw new Error('Could not create the connection link. Try again later.');
       }
     });
     registerTool('disconnect_account', {
@@ -183,12 +183,12 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     }, async ({ provider }) => {
       try {
-        if (!accounts) throw new Error('Autoriza Cinve desde la opción de autenticación de tu asistente.');
+        if (!accounts) throw new Error('Authorize Cinve using your assistant\'s authentication option.');
         await accounts.disconnect(provider);
         const data = { disconnected: true as const };
         return { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data };
       } catch {
-        throw new Error('No se pudo desconectar la cuenta. Inténtalo de nuevo más tarde.');
+        throw new Error('Could not disconnect the account. Try again later.');
       }
     });
   }
@@ -204,7 +204,7 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
     const data = await service.seats(args, callOptions(ctx));
     // The ASCII map carries every label and state; the per-seat list is ~10x larger.
     if (!include_seats) delete data.seats;
-    if ((publicHosted || accounts) && data.status === 'auth_required') data.warnings = ['Conecta tu cuenta mediante connect_account y repite get_seats. ' + authGuidance];
+    if ((publicHosted || accounts) && data.status === 'auth_required') data.warnings = ['Connect your account with connect_account and repeat get_seats. ' + authGuidance];
     return { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data, isError: data.status !== 'available' };
   });
   const tools: Array<[string, Operation, string]> = [
@@ -223,7 +223,7 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
     description, inputSchema: inputSchema(op), outputSchema: outputSchema(op), annotations,
   }, async (args, ctx) => {
     const data = await service.query(op, args as Query, callOptions(ctx));
-    if (publicHosted && data.status === 'auth_required') data.warnings = ['El proveedor exige una cuenta para esta consulta. Llama connect_account con este proveedor para iniciar la autorización de Cinve. Si devuelve connected=true, repite esta consulta; si no, presenta el enlace privado del cine al usuario y, después de conectar, comprueba get_auth_status y repite esta consulta. No busques páginas de acceso en la web ni pidas contraseñas o tokens en el chat. Los datos públicos siguen disponibles. ' + authGuidance];
+    if (publicHosted && data.status === 'auth_required') data.warnings = ['This query requires a provider account. Call connect_account with this provider to start Cinve authorization. If it returns connected=true, repeat this query; otherwise, present the private cinema link to the user and, after they connect, check get_auth_status and repeat this query. Do not search the web for sign-in pages or ask for passwords or tokens in chat. Public data remains available. ' + authGuidance];
     // A provider-level failure is still a valid Result payload, but MCP clients
     // need isError to distinguish it from an empty/available business result.
     const isError = !['available', 'empty'].includes(data.status);

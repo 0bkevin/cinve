@@ -90,10 +90,10 @@ test('failed login neither stores credentials nor surfaces upstream private cont
 test('login redirects preserve cookies but cannot replay password to another host', async () => {
   let calls = 0;
   const http = new LoginHttp('cinesunidos', async () => { calls++; return new Response(null, { status: 307, headers: { Location: 'https://www.cinesunidos.com/' } }); });
-  await assert.rejects(http.read('https://keycloak.cinesunidos.com/realms/cinesunidos/login-actions/authenticate', { method: 'POST', body: new URLSearchParams({ password: 'SYNTHETIC_PASSWORD' }) }), /No se reenvían/);
+  await assert.rejects(http.read('https://keycloak.cinesunidos.com/realms/cinesunidos/login-actions/authenticate', { method: 'POST', body: new URLSearchParams({ password: 'SYNTHETIC_PASSWORD' }) }), /Credentials are not forwarded/);
   assert.equal(calls, 1);
   const outside = new LoginHttp('cinesunidos', async () => new Response(null, { status: 302, headers: { Location: 'https://example.com/callback' } }));
-  await assert.rejects(outside.read('https://www.cinesunidos.com/'), /no permitido/);
+  await assert.rejects(outside.read('https://www.cinesunidos.com/'), /not allowed/);
 });
 test('HTTP Keycloak flow keeps state cookies and stores only the bearer and its expiry', async t => {
   const store = await fixture(t), exp = Math.floor(Date.now() / 1000) + 600;

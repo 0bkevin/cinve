@@ -65,11 +65,11 @@ test('account adapter failures are returned without exposing internal exception 
     const result = await client.callTool({ name: 'connect_account', arguments: { provider: 'cinex' } });
     assert.equal(result.isError, true);
     assert.equal(JSON.stringify(result).includes('DATABASE_SECRET_INTERNAL'), false);
-    assert.match((result.content[0] as { text: string }).text, /No se pudo crear el enlace/);
+    assert.match((result.content[0] as { text: string }).text, /Could not create the connection link/);
     const disconnected = await client.callTool({ name: 'disconnect_account', arguments: { provider: 'cinex' } });
     assert.equal(disconnected.isError, true);
     assert.equal(JSON.stringify(disconnected).includes('DATABASE_SECRET_INTERNAL'), false);
-    assert.match((disconnected.content[0] as { text: string }).text, /No se pudo desconectar la cuenta/);
+    assert.match((disconnected.content[0] as { text: string }).text, /Could not disconnect the account/);
   } finally { await client.close(); await server.close(); }
 
   const authServer = createServer(new class extends CinemaService {
@@ -82,7 +82,7 @@ test('account adapter failures are returned without exposing internal exception 
     const status = await authClient.callTool({ name: 'get_auth_status', arguments: {} });
     assert.equal(status.isError, true);
     assert.equal(JSON.stringify(status).includes('AUTH_STATUS_INTERNAL'), false);
-    assert.match((status.content[0] as { text: string }).text, /No se pudo leer el estado/);
+    assert.match((status.content[0] as { text: string }).text, /Could not read authentication status/);
   } finally { await authClient.close(); await authServer.close(); }
 });
 
