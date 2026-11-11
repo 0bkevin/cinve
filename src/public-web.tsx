@@ -100,13 +100,16 @@ const assistants: Assistant[] = [
 ];
 
 /** The assistant's logo on a light disc, so each mark shows as published. */
-// Claude Code's vendored mark is a bare shape, so CSS paints it in its brand
-// colour through a mask (see .logo-claudecode) instead of editing the file.
-const AppMark = ({ logo }: { logo: string }) =>
-  <span class="app-mark" aria-hidden="true">{logo.endsWith('claudecode.svg')
-    ? <span class="logo-claudecode"></span>
-    // Codex's file is a full app icon with its own padded tile: it fills the disc.
-    : <img src={assetUrl(logo)} alt="" width="18" height="18" loading="lazy" class={logo.endsWith('codex.png') ? 'logo-fill' : undefined} />}</span>;
+// Each logo gets a data-logo hook so CSS can size it by how big its visible
+// mark looks, not by its file's box (see .app-mark in site.css). Claude
+// Code's vendored mark is a bare shape, so CSS paints it in its brand colour
+// through a mask instead of editing the file.
+const AppMark = ({ logo }: { logo: string }) => {
+  const slug = logo.slice(logo.lastIndexOf('/') + 1, logo.lastIndexOf('.'));
+  return <span class="app-mark" aria-hidden="true">{slug === 'claudecode'
+    ? <span class="logo-claudecode" data-logo={slug}></span>
+    : <img src={assetUrl(logo)} alt="" width="18" height="18" loading="lazy" data-logo={slug} />}</span>;
+};
 
 function WorksWith() {
   return <ul class="works-with" aria-label="Asistentes compatibles">
