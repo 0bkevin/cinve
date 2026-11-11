@@ -21,7 +21,7 @@ import type { Operation, Query } from './core.js';
 import type { CallOptions } from './http.js';
 import { ConnectionLinks } from './hosted-links.js';
 import { EncryptedSessionStore, HostedUsers, digest } from './hosted-store.js';
-import { loginPage, loginScript } from './auth-web.js';
+import { loginPage } from './auth-web.js';
 
 class AnonymousSessions extends SessionStore {
   constructor(private readonly origin: string) { super(); }
@@ -127,9 +127,6 @@ export async function createHostedApp(options: {
       const pagePath = req.url?.split('?')[0];
       if (['GET', 'HEAD'].includes(req.method ?? '') && (pagePath === '/connect' || pagePath === '/')) {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(req.method === 'HEAD' ? undefined : pagePath === '/' ? landingPage(origin) : loginPage()); return;
-      }
-      if (req.method === 'GET' && req.url === '/app.js') {
-        res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8' }); res.end(loginScript); return;
       }
       if (req.url === '/mcp') {
         const authorization = req.headers.authorization ?? '';

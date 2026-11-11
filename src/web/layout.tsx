@@ -64,7 +64,7 @@ export function Page({ title, compact, script, index, canonical, styles, childre
             <a href="https://github.com/0bkevin/cinve" aria-label="Ver código en GitHub" title="GitHub">{gitHubIcon}</a>
           </footer>
         </div>
-        {script && <script src={script}></script>}
+        {script && <script type="module" src={script}></script>}
       </body>
     </html>
   );

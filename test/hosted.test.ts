@@ -80,7 +80,11 @@ test('hosted MCP authenticates every request; account links are one-use and sess
   const invitation = await link(alice);
   const page = await fetch(f.origin + '/connect');
   assert.equal(page.headers.get('cache-control'), 'no-store'); assert.match(page.headers.get('content-security-policy')!, /frame-ancestors 'none'/);
-  assert.ok(!(await page.text()).includes(invitation));
+  const connectHtml = await page.text();
+  assert.ok(!connectHtml.includes(invitation));
+  assert.ok(connectHtml.includes('<script type="module" src="/assets/js/connect.js">'));
+  const script = await fetch(f.origin + '/assets/js/connect.js');
+  assert.match(script.headers.get('content-type')!, /text\/javascript/); assert.match(await script.text(), /\/connect\/exchange/);
   assert.equal((await f.post('/connect/exchange', invitation, {}, { Origin: 'https://evil.test' })).status, 403);
   const exchanged = await f.post('/connect/exchange', invitation);
   const { browser_token } = await exchanged.json() as { browser_token: string };

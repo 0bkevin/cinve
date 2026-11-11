@@ -72,7 +72,7 @@ export function landingPage(origin: string) {
       </div>
     </section>
     <aside class="project-note" aria-label="Sobre Cinve"><p>Cinve es un proyecto independiente, sin fines de lucro y completamente gratuito. No tiene ninguna alianza ni afiliación con Cinex, Cines Unidos o Cinepic.</p></aside>
-  </>, { index: true, canonical: origin + '/', script: '/site.js' });
+  </>, { index: true, canonical: origin + '/', script: '/assets/js/site.js' });
 }
 
 export function installationPage(origin: string) {
@@ -91,10 +91,8 @@ export function installationPage(origin: string) {
     </div>
     <p>Después, pregunta qué películas hay en tu ciudad. Para consultar la cartelera no necesitas una cuenta. Si una consulta requiere conectarte al cine, tu asistente te dará un enlace privado.</p>
     <a href="/install?format=text">Ver las instrucciones completas para el asistente</a>
-  </>, { compact: true, script: '/site.js' });
+  </>, { compact: true, script: '/assets/js/site.js' });
 }
-
-export const siteScript = `const button=document.getElementById('copy-install');button.hidden=false;button.onclick=async()=>{try{await navigator.clipboard.writeText(document.getElementById('install-message').textContent);document.getElementById('copy-feedback').textContent='Mensaje copiado. Pégalo en tu asistente.';}catch{document.getElementById('copy-feedback').textContent='Selecciona el mensaje y cópialo para enviarlo a tu asistente.';}};`;
 
 export function authorizationPage(app: string, destination: string, id: string, csrf: string, publisher?: string) {
   // A metadata-document client is identified by the site that publishes it;
@@ -132,12 +130,19 @@ export function authorizationErrorPage() {
   </>, { compact: true });
 }
 
+// Literal URLs let Vercel's file tracer bundle each asset with the function.
+const publicAssets: Record<string, { file: URL; type: string }> = {
+  '/assets/inter-latin.woff2': { file: new URL('./assets/inter-latin.woff2', import.meta.url), type: 'font/woff2' },
+  '/assets/js/site.js': { file: new URL('./assets/js/site.js', import.meta.url), type: 'text/javascript; charset=utf-8' },
+  '/assets/js/connect.js': { file: new URL('./assets/js/connect.js', import.meta.url), type: 'text/javascript; charset=utf-8' },
+  '/og.png': { file: new URL('./assets/og.png', import.meta.url), type: 'image/png' },
+  '/favicon.svg': { file: new URL('./assets/favicon.svg', import.meta.url), type: 'image/svg+xml' },
+};
+
 export function servePublicAsset(req: IncomingMessage, res: ServerResponse) {
-  const path = req.url?.split('?')[0];
-  if (!['/assets/inter-latin.woff2', '/site.js', '/og.png', '/favicon.svg'].includes(path ?? '')) return false;
+  const asset = publicAssets[req.url?.split('?')[0] ?? ''];
+  if (!asset) return false;
   if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405, { Allow: 'GET, HEAD' }); res.end(); return true; }
-  const font = path === '/assets/inter-latin.woff2';
-  const body = font ? readFileSync(new URL('./assets/inter-latin.woff2', import.meta.url)) : path === '/og.png' ? readFileSync(new URL('./assets/og.png', import.meta.url)) : path === '/favicon.svg' ? readFileSync(new URL('./assets/favicon.svg', import.meta.url)) : siteScript;
-  res.writeHead(200, { 'Content-Type': font ? 'font/woff2' : path === '/og.png' ? 'image/png' : path === '/favicon.svg' ? 'image/svg+xml' : 'text/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=86400', 'X-Content-Type-Options': 'nosniff' });
-  res.end(req.method === 'HEAD' ? undefined : body); return true;
+  res.writeHead(200, { 'Content-Type': asset.type, 'Cache-Control': 'public, max-age=86400', 'X-Content-Type-Options': 'nosniff' });
+  res.end(req.method === 'HEAD' ? undefined : readFileSync(asset.file)); return true;
 }
