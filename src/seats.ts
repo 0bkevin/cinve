@@ -153,7 +153,7 @@ export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions)
       if ((await c.authenticated('cinex', 'https://www.cinex.com.ve/checklogin.php')).trim() !== 'on') throw new DataError('auth_required', 'The Cinex session expired; connect your account again.');
       await c.authenticated('cinex', `https://www.cinex.com.ve/boletosdev.php?${new URLSearchParams({ cinemaid: result.cinema_id, sessionid: result.session_id })}`);
       result.seats = parseCinexSeats(await c.authenticated('cinex', 'https://www.cinex.com.ve/asientosdev.php'), q);
-      c.warnings.push('Cinex: map read without selecting tickets or seats. Special categories may require a specific ticket type.');
+      c.warnings.push('Cinex: map read without selecting tickets or seats. Special categories may require a specific fare.');
     } else {
       throw new DataError('unavailable', 'Seat lookup not implemented for this provider.');
     }
