@@ -68,6 +68,25 @@ function Coverage() {
   </table>;
 }
 
+// The hero's one-line summary of what Cinve can look up.
+const abilities: [JSX.Element, string][] = [
+  [icons.clapperboard(), 'Cartelera y horarios'],
+  [icons.ticket(), 'Precios'],
+  [icons.armchair(), 'Asientos'],
+  [icons.popcorn(), 'Caramelería'],
+];
+
+// How visitor data is handled. Every claim here matches the hosted service
+// (docs/hosted.md): keep them in sync if the implementation changes.
+const safeguards: [JSX.Element, string, string][] = [
+  [icons.keyRound(), 'Tu contraseña no se guarda', 'La escribes solo en la página privada del enlace, nunca en el chat. Cinve la usa una vez, por una conexión segura, para iniciar sesión en el cine, y no la almacena.'],
+  [icons.lock(), 'Sesiones cifradas', 'Solo guardamos la sesión que te da el cine, cifrada con AES-256-GCM y atada a tu conexión. Vence cuando vence la del cine.'],
+  [icons.link(), 'Enlaces de un solo uso', 'Caducan en 10 minutos. Su código va después del «#» de la dirección, así que el navegador no lo envía al servidor.'],
+  [icons.shieldCheck(), 'Acceso con tu permiso', 'Tu asistente se conecta con OAuth y PKCE. Guardamos solo huellas SHA-256 de sus tokens, y reutilizar uno revoca la conexión.'],
+  [icons.unplug(), 'Desconecta cuando quieras', 'Pídeselo a tu asistente y borramos tu sesión. Lo vencido se elimina cada día. Para cerrarla también en el cine, hazlo en su web.'],
+  [icons.eyeOff(), 'Sin rastreadores', 'Esta web no carga anuncios, analíticas ni recursos de otros sitios. Cada conexión está separada: otra aplicación no ve tus cuentas.'],
+];
+
 export function landingPage(origin: string) {
   return page('Consulta de cines en Venezuela', <>
     <section class="hero" aria-labelledby="titulo">
@@ -84,6 +103,9 @@ export function landingPage(origin: string) {
         <h1 id="titulo"><span>¿Qué</span> <span>vemos hoy?</span></h1>
         <div>
           <p class="lead">Pregúntaselo a tu asistente. Con Cinve, él revisa Cinex, Cines Unidos y Cinepic por ti.</p>
+          <ul class="abilities" aria-label="Lo que puede consultar">
+            {abilities.map(([icon, label]) => <li>{icon}{label}</li>)}
+          </ul>
           <LinkButton href="#empezar" size="lg">Añadir Cinve a mi asistente</LinkButton>
         </div>
       </div>
@@ -93,12 +115,19 @@ export function landingPage(origin: string) {
         <h2 id="preguntar-titulo">Qué puedes preguntar</h2>
         <p>Dile en qué ciudad estás y, si quieres, el cine o la película.</p>
       </header>
-      <Coverage />
-      <div class="notes">
-        <p><strong>Con tu cuenta.</strong> Tu asistente te da un enlace privado para conectar tu cuenta del cine. Escribes la contraseña en esa página, nunca en el chat, y Cinve no la guarda.</p>
-        <p><strong>Asientos.</strong> El mapa distingue los libres, los ocupados y los que no se pudieron confirmar. Puede cambiar antes de que compres.</p>
-        <p><strong>Solo consulta.</strong> Cinve no compra entradas ni reserva asientos.</p>
-      </div>
+      <ul class="asks">
+        {coverage.map(({ topic, ask }) => <li><span class="topic">{topic}</span><span class="ask">“{ask}”</span></li>)}
+      </ul>
+      {/* The per-cinema detail stays one click away; <details> works without JavaScript. */}
+      <details class="more">
+        <summary><span>Ver qué ofrece cada cine</span>{icons.chevronDown()}</summary>
+        <Coverage />
+        <div class="notes">
+          <p><strong>Con tu cuenta.</strong> Tu asistente te da un enlace privado para conectar tu cuenta del cine.</p>
+          <p><strong>Asientos.</strong> El mapa distingue los libres, los ocupados y los que no se pudieron confirmar. Puede cambiar antes de que compres.</p>
+          <p><strong>Solo consulta.</strong> Cinve no compra entradas ni reserva asientos.</p>
+        </div>
+      </details>
     </section>
     <section class="section" id="empezar" aria-labelledby="empezar-titulo">
       <header class="section-head">
@@ -111,6 +140,16 @@ export function landingPage(origin: string) {
         <li>Tu asistente añade Cinve y te pide permiso. No tienes que crear ninguna cuenta.</li>
         <li>Pregunta qué quieres ver, como en cualquier chat.</li>
       </ol>
+    </section>
+    <section class="section" id="datos" aria-labelledby="datos-titulo">
+      <header class="section-head">
+        <h2 id="datos-titulo">Cómo cuidamos tus datos</h2>
+        <p>No necesitas crear una cuenta en Cinve, y solo guardamos lo necesario para consultar con la tuya del cine.</p>
+      </header>
+      <ul class="safeguards">
+        {safeguards.map(([icon, title, text]) => <li>{icon}<h3>{title}</h3><p>{text}</p></li>)}
+      </ul>
+      <p class="note">El código es abierto: puedes revisarlo en <a href="https://github.com/0bkevin/cinve">GitHub</a>. Si encuentras un fallo de seguridad, <a href="https://github.com/0bkevin/cinve/security/advisories/new">repórtalo en privado</a>.</p>
     </section>
     <aside class="project-note" aria-label="Sobre Cinve"><p>Cinve es gratis e independiente; no está afiliado a Cinex, Cines Unidos ni Cinepic. Solo consulta lo que cada cine publica.</p></aside>
   </>, { index: true, canonical: origin + '/', script: '/assets/js/site.js' });
