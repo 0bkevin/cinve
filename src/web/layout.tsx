@@ -2,7 +2,7 @@ import { assetUrl } from './assets.js';
 import { h, Fragment, raw, type Child } from './jsx.js';
 
 const siteDescription = 'Consulta películas, horarios, precios y asientos de cines en Venezuela desde tu asistente.';
-const ogImageAlt = 'Cinve: mapa de butacas de una sala de cine frente a la pantalla, con dos asientos libres juntos en ámbar, y la pregunta «¿Qué vemos hoy?». Cartelera, precios y asientos de los cines de Venezuela, desde tu asistente.';
+const ogImageAlt = 'Cinve. «Pregúntale a tu asistente por el cine.» Una conversación de ejemplo: alguien pregunta si quedan dos asientos juntos esta noche y el asistente responde con un mapa de la sala con dos asientos libres juntos. Funciona con Claude Code, Codex, OpenCode, Antigravity, Hermes y OpenClaw. Gratis y de código abierto.';
 
 const gitHubIcon = raw('<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .75a11.25 11.25 0 0 0-3.558 21.923c.563.104.768-.244.768-.543 0-.267-.01-.975-.015-1.914-3.13.68-3.79-1.508-3.79-1.508-.512-1.3-1.25-1.646-1.25-1.646-1.022-.7.078-.686.078-.686 1.13.08 1.725 1.16 1.725 1.16 1.005 1.722 2.638 1.225 3.28.937.102-.728.394-1.225.716-1.507-2.498-.284-5.124-1.25-5.124-5.562 0-1.229.439-2.233 1.16-3.02-.117-.285-.503-1.429.11-2.979 0 0 .945-.302 3.094 1.154a10.8 10.8 0 0 1 5.63 0c2.148-1.456 3.092-1.154 3.092-1.154.614 1.55.228 2.694.112 2.979.722.787 1.158 1.791 1.158 3.02 0 4.323-2.63 5.275-5.136 5.553.404.35.765 1.044.765 2.104 0 1.519-.014 2.744-.014 3.117 0 .302.203.653.774.542A11.252 11.252 0 0 0 12 .75Z"/></svg>');
 
