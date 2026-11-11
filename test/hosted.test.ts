@@ -255,7 +255,7 @@ test('stdio bridge forwards tools to authenticated hosted MCP with fresh retriev
   const hostedTools = await client.listTools();
   assert.equal(hostedTools.tools.length, 11);
   assert.ok(hostedTools.tools.every(tool => tool.title));
-  assert.match(client.getInstructions() ?? '', /Servidor alojado/);
+  assert.match(client.getInstructions() ?? '', /Hosted server/);
   assert.deepEqual(client.getServerVersion(), { name: 'cinve', version: '0.1.0' });
   const result = await client.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos' } });
   assert.equal(Result.parse(result.structuredContent).status, 'available');
@@ -509,8 +509,8 @@ test('the install guide is served with safe HTTP methods and no downloadable hel
   const guide = await fetch(f.origin + '/install');
   assert.equal(guide.status, 200); assert.equal(guide.headers.get('cache-control'), 'no-store');
   const text = await guide.text();
-  assert.match(text, /available=0 con unknown>0 NO significa agotado/);
-  assert.match(text, /bloque de texto monoespaciado/);
+  assert.match(text, /available=0 with unknown>0 does NOT mean sold out/);
+  assert.match(text, /monospaced text block/);
   assert.equal((await fetch(f.origin + '/install', { method: 'POST' })).status, 405);
   assert.equal((await fetch(f.origin + '/codex-client.mjs')).status, 404);
 });
@@ -1107,7 +1107,7 @@ test('an exhausted anonymous global refresh budget does not block authenticated 
   }
   const blocked = await refresh('203.0.113.13');
   assert.equal(blocked.status, 429, 'a fresh anonymous caller is held back by the global cap');
-  assert.match(await blocked.text(), /Demasiadas consultas con refresh=true/);
+  assert.match(await blocked.text(), /Too many requests with refresh=true/);
   const alice = await f.client(f.alice.token);
   const result = await alice.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos', refresh: true } });
   assert.equal((result.structuredContent as { status: string }).status, 'available');
@@ -1244,8 +1244,8 @@ test('rate-limit keys are stored as HMACs under a derived key, never as plain di
   const other = new ConnectionLinks(f.pool, { budgetKey: randomBytes(32), linkKey: randomBytes(32) });
   assert.notEqual(other.keyHash('signin-fail:global'), f.links.keyHash('signin-fail:global'));
   const unkeyed = new ConnectionLinks(f.pool);
-  await assert.rejects(unkeyed.budget('x', 1), /clave/);
-  await assert.rejects(unkeyed.issue(f.alice.id, (await f.users.hash(f.alice.id))!, 'cinex'), /clave/);
+  await assert.rejects(unkeyed.budget('x', 1), /key is missing/);
+  await assert.rejects(unkeyed.issue(f.alice.id, (await f.users.hash(f.alice.id))!, 'cinex'), /key is missing/);
   await unkeyed.cleanup();
 });
 
@@ -1329,6 +1329,25 @@ test('OAuth quotas also apply per IPv6 /48, so rotating /64s does not multiply t
   assert.equal(statuses.filter(s => s === 200).length, 240); assert.equal(statuses.filter(s => s === 429).length, 10);
   assert.equal((await fetch(f.origin + '/oauth/revoke', from('2001:db8:6::1', { method: 'POST',
     body: new URLSearchParams({ token: 'cva_' + randomBytes(32).toString('base64url'), client_id: 'cvapp_x' }) }))).status, 200, 'another /48');
+});
+
+test('shared HTTP errors use English for MCP and preserve Spanish for the connection page', async t => {
+  const f = await fixture(t);
+  const invite = await f.links.issue(f.alice.id, (await f.users.hash(f.alice.id))!, 'cinex');
+  const browser = await (await f.post('/connect/exchange', invite.token)).json() as { browser_token: string };
+  const invalidBodies = [
+    ['text/plain', '{}', 415], ['application/json', '{', 400], ['application/json', 'x'.repeat(65537), 413],
+  ] as const;
+  for (const [path, headers, messages] of [
+    ['/mcp', {}, ['JSON is required.', 'Invalid request.', 'Request is too large.']],
+    ['/connect/login', { Origin: f.origin, 'X-Cinev-Connection': browser.browser_token }, ['Se requiere JSON.', 'Solicitud no válida.', 'Solicitud demasiado grande.']],
+  ] as const) {
+    for (const [index, [type, body, status]] of invalidBodies.entries()) {
+      const response = await fetch(f.origin + path, { method: 'POST', headers: { ...headers, 'Content-Type': type }, body });
+      assert.equal(response.status, status);
+      assert.deepEqual(await response.json(), { error: messages[index] });
+    }
+  }
 });
 
 test('JSON-RPC batches are refused, so one request is one call for every limit', async t => {
@@ -1686,7 +1705,7 @@ test('dead signed tokens buy no headroom, and signed traffic is also capped per 
   assert.ok(!statuses.includes(401));
   // A twelfth, unused connection (its own database budget untouched) is held back by the /48 cap alone.
   const over = await mcp(many[11].tokens.access_token, '2001:db8:77:ffff::1');
-  assert.equal(over.status, 429); assert.match(await over.text(), /Demasiadas consultas/);
+  assert.equal(over.status, 429); assert.match(await over.text(), /Too many requests/);
   const elsewhere = await mcp(many[11].tokens.access_token, '2001:db8:78::1');
   assert.notEqual(elsewhere.status, 429, 'another /48'); assert.notEqual(elsewhere.status, 401);
 });

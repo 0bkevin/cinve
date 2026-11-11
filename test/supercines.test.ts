@@ -107,9 +107,9 @@ test('Supercines reads only its public listing routes, with exactly their fields
     [`${SC}/listBoletos`, { idFuncion: '1', fecha: `${D}`, unico: '2', tresD: '2', idEmpresa: '7' }],
     [`${SC}/listCarameleria?x=1`, { idEmpresa: '7' }],
     ['https://evil.example/listCarameleria', { idEmpresa: '7' }],
-  ] as const) assert.throws(() => assertPublicForm(url, fields), /no permitida/);
-  assert.throws(() => assertPublicRead(`${SC}/mis-cortesias`), /no permitida/);
-  assert.throws(() => assertPublicRead(`${SC}/booking/1?x=1`), /no permitida/);
+  ] as const) assert.throws(() => assertPublicForm(url, fields), /not allowed/);
+  assert.throws(() => assertPublicRead(`${SC}/mis-cortesias`), /not allowed/);
+  assert.throws(() => assertPublicRead(`${SC}/booking/1?x=1`), /not allowed/);
 });
 
 test('Supercines lists active venues and cities without exposing internal directory fields', async () => {
@@ -280,9 +280,9 @@ test('functions listed without online sales are reported by venue and time, neve
   // A venue whose every function is box-office only (Playa Mar on the live site).
   const boxOffice = await service.query('showtimes', { provider: 'supercines', cinema_id: '4', date: D1 });
   assert.equal(boxOffice.status, 'empty');
-  assert.ok(boxOffice.warnings.some(w => w.includes('Supercines Los Aviadores lista 2 funciones sin venta en línea') && w.includes('CLAYFACE 16:00, CLAYFACE 18:25')));
+  assert.ok(boxOffice.warnings.some(w => w.includes('Supercines Los Aviadores lists 2 showtimes without online sales') && w.includes('CLAYFACE 16:00, CLAYFACE 18:25')));
   const granja = await service.query('showtimes', { provider: 'supercines', cinema_id: '7', date: D1 });
-  assert.ok(granja.warnings.some(w => w.includes('Supercines La Granja lista 1 funciones sin venta en línea') && w.includes('CLAYFACE 21:00')));
+  assert.ok(granja.warnings.some(w => w.includes('Supercines La Granja lists 1 showtimes without online sales') && w.includes('CLAYFACE 21:00')));
   // Other venues' box-office functions stay out of a venue query.
   assert.ok(!granja.warnings.some(w => w.includes('Los Aviadores')));
 });
@@ -292,7 +292,7 @@ test('past dates are answered without reading Supercines', async () => {
   const past = shiftDate(D, -2);
   const showtimes = await service.query('showtimes', { provider: 'supercines', cinema_id: '7', date: past });
   assert.equal(showtimes.status, 'empty');
-  assert.ok(showtimes.warnings.some(w => /ya pasó/.test(w)));
+  assert.ok(showtimes.warnings.some(w => /has passed/.test(w)));
   const prices = await service.query('prices', { provider: 'supercines', cinema_id: '7', movie_id: '3991', session_id: '100', date: past });
   assert.equal(prices.status, 'unavailable');
   assert.equal(calls.length, 0);
@@ -302,22 +302,22 @@ test('an empty schedule says whether Supercines has not published it yet, and a 
   const { service } = provider();
   const presale = await service.query('showtimes', { provider: 'supercines', movie_id: '3976', date: D });
   assert.equal(presale.status, 'empty');
-  assert.ok(presale.warnings.some(w => /no tiene funciones de ese título para/.test(w)));
+  assert.ok(presale.warnings.some(w => /has no showtimes for that title for/.test(w)));
   // Without a date the question is often "when": the title's own dates are listed.
-  assert.ok(presale.warnings.some(w => w.includes(`Fechas con funciones publicadas de este título en Supercines (en alguna sede): ${DFAR}`)));
+  assert.ok(presale.warnings.some(w => w.includes(`Dates with published showtimes for this title at Supercines (at some venue): ${DFAR}`)));
   // A published date where the title plays elsewhere names those venues, not "later".
   const elsewhere = await service.query('showtimes', { provider: 'supercines', cinema_id: '2', movie_id: '3991', date: D });
   assert.equal(elsewhere.status, 'empty');
-  assert.ok(elsewhere.warnings.some(w => w.includes('sí las tiene en: Supercines La Granja (Valencia), Supercines Unicentro (Maracay)')));
-  assert.ok(!elsewhere.warnings.some(w => /aún no publica/.test(w)));
-  assert.ok(elsewhere.warnings.some(w => w.includes(`(en alguna sede): ${D1}`)));
+  assert.ok(elsewhere.warnings.some(w => w.includes('it does have them at: Supercines La Granja (Valencia), Supercines Unicentro (Maracay)')));
+  assert.ok(!elsewhere.warnings.some(w => /has not yet published/.test(w)));
+  assert.ok(elsewhere.warnings.some(w => w.includes(`(at some venue): ${D1}`)));
   // A venue still without functions on a future date, while another has them.
   const ahead = await service.query('showtimes', { provider: 'supercines', cinema_id: '7', movie_id: '3976', date: D1 });
-  assert.ok(ahead.warnings.some(w => /aún no publica funciones de ese título en esta sede para .*Vuelve a consultar en unos minutos.*refresh=true/.test(w)));
+  assert.ok(ahead.warnings.some(w => /has not yet published showtimes for that title at this venue for .*Check again in a few minutes.*refresh=true/.test(w)));
   const candyless = await service.query('concessions', { provider: 'supercines', cinema_id: '4' });
   assert.equal(candyless.status, 'empty');
-  assert.ok(candyless.warnings.some(w => /no ofrece caramelería en línea/.test(w)));
-  assert.ok(!candyless.warnings.some(w => /catálogo de caramelería/.test(w)));
+  assert.ok(candyless.warnings.some(w => /offers no online concessions/.test(w)));
+  assert.ok(!candyless.warnings.some(w => /concessions catalog/.test(w)));
 });
 
 test('schedule answers are cached for as long as they stay stable', () => {

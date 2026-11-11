@@ -50,7 +50,7 @@ export async function readLegacyCutoffs(pool: Pool): Promise<LegacyCutoffs> {
     // A concurrent first insert wins the conflict after this statement's
     // snapshot was taken, so neither branch saw a row: read it again.
     if (!rows.length) ({ rows } = await pool.query("SELECT value FROM cinev_meta WHERE key='token_signing_since'"));
-    if (!rows.length) throw new Error('No se pudo registrar el inicio de la firma de tokens.');
+    if (!rows.length) throw new Error('Could not record when token signing began.');
     return legacyCutoffs(rows[0].value);
   } catch (error) {
     if ((error as { code?: string }).code === '42P01') return legacyCutoffs(undefined); // Migration 006 pending.
@@ -160,7 +160,7 @@ export class HostedOAuth {
   /** tokenKey: a 32-byte key for signing tokens, the same on every instance; budgets: rate limits (with their key). */
   constructor(readonly pool: Pool, readonly getOrigin: () => string, private readonly clientMetadata: ClientMetadataCache,
     private readonly accounts: ConsentAccounts | undefined, private readonly tokenKey: Buffer, private readonly budgets: ConnectionLinks) {
-    if (tokenKey.length !== 32) throw new Error('Clave de firma no válida.');
+    if (tokenKey.length !== 32) throw new Error('Invalid signing key.');
   }
   /** The consent page, which can also sign in to a cinema; re-rendered with an error after a failed sign-in. */
   private consent(res: ServerResponse, status: number, app: { id: string; name: string }, redirect: string, id: string, csrf: string, form: ConsentForm = {}) {

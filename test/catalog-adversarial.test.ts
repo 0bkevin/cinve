@@ -38,7 +38,7 @@ test('CU retries unrecognized city spellings with the official canonical city an
   assert.equal(r.status, 'available'); assert.equal(r.items[0].city, 'Maturín');
   assert.ok(requests.some(u => u.includes('Matur%C3%ADn')));
   const missing = await s.query('cinemas', { ...cq, city: 'Atlantis' });
-  assert.equal(missing.status, 'unavailable'); assert.match(missing.warnings.join(' '), /ciudad/i);
+  assert.equal(missing.status, 'unavailable'); assert.match(missing.warnings.join(' '), /city/i);
 });
 test('Cinepic retains both known venues when one site fails or changes its configuration ID', async () => {
   for (const broken of ['network', 'wrong-id']) {
@@ -60,7 +60,7 @@ test('Cinepic configured cities return without probing either cinema website', a
   const s = new CinemaService(new HttpClient(async () => { requests++; return new Response('unexpected'); }));
   const result = await s.query('cities', { provider: 'cinepic' });
   assert.equal(result.status, 'available'); assert.deepEqual(result.items.map(item => item.name), ['Caracas']);
-  assert.equal(requests, 0); assert.ok(result.warnings.some(w => /configurada/.test(w)));
+  assert.equal(requests, 0); assert.ok(result.warnings.some(w => /Configured Cinepic coverage/.test(w)));
 });
 test('Cinepic retains movie references when scheduled sessions lack movie metadata', async () => {
   const payload = structuredClone(cpSessions); payload.data.datos = [];
@@ -76,7 +76,7 @@ test('all providers block nonqueryable directory identifiers before network or a
   for (const provider of ['cinesunidos', 'cinepic', 'cinex'] as const) {
     for (const op of ['prices', 'concessions', 'showtimes'] as const) {
       const r = await s.query(op, { provider, cinema_id: 'directory-unknown', city: 'Caracas', movie_id: 'm', session_id: 's' });
-      assert.equal(r.status, 'unavailable'); assert.match(r.warnings.join(' '), /código/);
+      assert.equal(r.status, 'unavailable'); assert.match(r.warnings.join(' '), /query code/);
     }
   }
   assert.equal(calls, 0);
@@ -103,7 +103,7 @@ test('Cinepic keeps explicitly unverified known sites if both sites fail, withou
   const r = await s.query('cinemas', { provider: 'cinepic' });
   assert.equal(r.total, 2); assert.equal(r.partial, true); assert.equal(r.sources.length, 0);
   assert.ok(r.items.every(i => i.code_status === 'unverified' && i.cinema_id === undefined));
-  assert.ok(r.warnings.some(w => w.includes('no hay descubrimiento automático')));
+  assert.ok(r.warnings.some(w => w.includes('new venues are not discovered automatically')));
 });
 test('CU movie catalogs also combine component blocks rather than accepting the first empty list', async () => {
   const html = page({ movies: [] }) + page({ movies: [{ vistaId: 'M', title: 'Movie', theaters: [{ id: '1002', showTimes: [{ id: 'S', date: '2026-09-18T18:00:00' }] }] }] });

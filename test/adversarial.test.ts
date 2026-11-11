@@ -63,7 +63,7 @@ test('Flight scanner skips markers inside JSON strings and bounds deeply nested 
   const nested = 'self.__next_f.push(' + JSON.stringify([1, 'b:{"injected":true}\n']) + ')';
   assert.equal(findField(flight(page({ label: nested })), 'injected'), undefined);
   let value: unknown = { movies: [] }; for (let i = 0; i < 80; i++) value = [value];
-  assert.throws(() => findField([value], 'movies'), (e: unknown) => e instanceof DataError && /límites/.test(e.message));
+  assert.throws(() => findField([value], 'movies'), (e: unknown) => e instanceof DataError && /structure limits/.test(e.message));
   assert.throws(() => flight('<script>' + 'self.__next_f.push(['.repeat(5000) + '</script>'), DataError);
 });
 test('queues reject overload instead of growing without a limit', async () => {
@@ -78,7 +78,7 @@ test('queue wait consumes the deadline and expired queued work never reaches fet
   const http = new HttpClient(async () => { count++; await gate; return new Response('[]'); }, 25);
   const active = [http.get('https://gateway.cinesunidos.com/hold/1'), http.get('https://gateway.cinesunidos.com/hold/2')].map(p => p.catch(() => null));
   const queued = http.get('https://gateway.cinesunidos.com/hold/3');
-  await Promise.all([assert.rejects(queued, /cola/), delay(50)]);
+  await Promise.all([assert.rejects(queued, /query queue/), delay(50)]);
   release(); await Promise.all(active); assert.equal(count, 2);
 });
 test('cache eviction has a byte budget in addition to an entry count', async () => {

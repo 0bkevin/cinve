@@ -6,10 +6,10 @@ import { DataError } from './core.js';
 
 export const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 export function databasePool(url = process.env.DATABASE_URL) {
-  if (!url) throw new Error('Configura DATABASE_URL.');
+  if (!url) throw new Error('Set DATABASE_URL.');
   const pool = new Pool({ connectionString: url, max: 3, connectionTimeoutMillis: 5000, idleTimeoutMillis: 5000,
     statement_timeout: 10000, idle_in_transaction_session_timeout: 10000, allowExitOnIdle: true });
-  pool.on('error', () => { console.error('La conexión de base de datos se cerró.'); });
+  pool.on('error', () => { console.error('The database connection closed.'); });
   return pool;
 }
 export async function transaction<T>(pool: Pool, fn: (client: PoolClient) => Promise<T>): Promise<T> {
@@ -55,7 +55,7 @@ export class EncryptedSessionStore extends SessionStore {
   private readonly seen = new Map<AuthProviderId, string>();
   constructor(readonly pool: Pool, readonly user: string, private key: Buffer) {
     super();
-    if (key.length !== 32) throw new Error('La clave de cifrado debe tener 32 bytes.');
+    if (key.length !== 32) throw new Error('The encryption key must be 32 bytes.');
   }
   private aad(provider: AuthProviderId) { return Buffer.from(`cinev:v1:${this.user}:${provider}`); }
   encrypt(value: AuthSession) {
@@ -77,7 +77,7 @@ export class EncryptedSessionStore extends SessionStore {
       const session = Session.parse(JSON.parse(Buffer.concat([decipher.update(Buffer.from(data, 'base64')), decipher.final()]).toString('utf8')));
       if (session.provider !== provider) throw new Error();
       return session;
-    } catch { throw new DataError('auth_required', 'Vuelve a conectar tu cuenta con connect_account.'); }
+    } catch { throw new DataError('auth_required', 'Reconnect your account with connect_account.'); }
   }
   async saveInTransaction(client: PoolClient, value: AuthSession) {
     await client.query(`INSERT INTO cinev_sessions(user_id,provider,ciphertext,expires_at) VALUES($1,$2,$3,$4)
@@ -86,7 +86,7 @@ export class EncryptedSessionStore extends SessionStore {
   }
   override async save(value: AuthSession) {
     await transaction(this.pool, async client => {
-      if (!await lockUser(client, this.user)) throw new Error('Acceso revocado.');
+      if (!await lockUser(client, this.user)) throw new Error('Access revoked.');
       await this.saveInTransaction(client, value);
     });
   }

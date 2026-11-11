@@ -3,7 +3,7 @@ import { StringDecoder } from 'node:string_decoder';
 /** One raw-mode reader for both fields. Never echoes input, including a multi-line paste. */
 export function readCredentials(): Promise<{ username: string; password: string }> {
   const input = process.stdin, output = process.stderr;
-  if (!input.isTTY || !output.isTTY) throw new Error('El login requiere una terminal interactiva. No pases contraseñas por argumentos ni variables de entorno.');
+  if (!input.isTTY || !output.isTTY) throw new Error('Sign-in requires an interactive terminal. Do not pass passwords as arguments or environment variables.');
   return new Promise((resolve, reject) => {
     const wasRaw = input.isRaw;
     const decoder = new StringDecoder('utf8');
@@ -14,7 +14,7 @@ export function readCredentials(): Promise<{ username: string; password: string 
       input.setRawMode(wasRaw); input.pause();
     };
     const fail = (message: string) => { if (done) return; done = true; cleanup(); output.write('\n'); reject(new Error(message)); };
-    const cancel = () => fail('Login cancelado.');
+    const cancel = () => fail('Sign-in cancelled.');
     const data = (chunk: Buffer | string) => {
       for (const char of typeof chunk === 'string' ? chunk : decoder.write(chunk)) {
         if (done) break;
@@ -24,16 +24,16 @@ export function readCredentials(): Promise<{ username: string; password: string 
         if (char === '\r' || char === '\n') {
           if (phase === 0) {
             username = current.trim(); current = '';
-            if (!username) { fail('Email requerido.'); break; }
+            if (!username) { fail('Email is required.'); break; }
             phase = 1; output.write('\nPassword (hidden): ');
           } else {
-            if (!current) { fail('Contraseña requerida.'); break; }
+            if (!current) { fail('Password is required.'); break; }
             done = true; cleanup(); output.write('\n'); resolve({ username, password: current });
           }
         } else if (char === '\x7f' || char === '\b') current = [...current].slice(0, -1).join('');
         else if (char >= ' ' && char !== '\x7f') {
           current += char;
-          if (current.length > (phase === 0 ? 320 : 4096)) fail('Entrada de login demasiado larga.');
+          if (current.length > (phase === 0 ? 320 : 4096)) fail('Sign-in input is too long.');
         }
       }
     };

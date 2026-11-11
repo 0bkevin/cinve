@@ -53,7 +53,7 @@ test('Cinex parser diagnostics stay bounded for large malformed pages and long l
   assert.equal(malformedContext.partial, true);
   assert.ok(malformedContext.warnings.length <= 32);
   assert.ok(malformedContext.warnings.join('').length < 8192);
-  assert.ok(malformedContext.warnings.some(w => /repetido 2000 veces/.test(w)));
+  assert.ok(malformedContext.warnings.some(w => /repeated 2000 times/.test(w)));
 
   const longTitle = 'T'.repeat(10000);
   const longContext = context();
@@ -76,8 +76,8 @@ test('Cinepic omits unknown subtitle and overnight flags and marks the result pa
   assert.equal(result.partial, true);
   assert.equal(result.items[0].language, undefined);
   assert.equal(result.items[0].starts_at, undefined);
-  assert.ok(result.warnings.some(w => /subtítulos/.test(w)));
-  assert.ok(result.warnings.some(w => /trasnoche/.test(w)));
+  assert.ok(result.warnings.some(w => /subtitle status/.test(w)));
+  assert.ok(result.warnings.some(w => /late-night showing/.test(w)));
 });
 
 test('service caps distinct and repeated provider warnings with an explicit aggregate', async () => {
@@ -91,7 +91,7 @@ test('service caps distinct and repeated provider warnings with an explicit aggr
   assert.equal(result.total, 200);
   assert.ok(result.warnings.length <= 64);
   assert.ok(result.warnings.join('').length <= 8192);
-  assert.ok(result.warnings.some(w => /Se omitieron/.test(w)));
+  assert.ok(result.warnings.some(w => /repeated or excess warnings were omitted/.test(w)));
 });
 
 test('a Cinex session ID reported with two times or rooms is suppressed, not silently overwritten', () => {
@@ -105,7 +105,7 @@ test('a Cinex session ID reported with two times or rooms is suppressed, not sil
   );
   assert.deepEqual(items.map(i => i.id), ['ok'], 'identical repeats are kept once; conflicts are dropped');
   assert.equal(c.partial, true);
-  assert.ok(c.warnings.some(w => /contradictorios/.test(w) && /same/.test(w)), c.warnings.join(' | '));
+  assert.ok(c.warnings.some(w => /contradictory times for showtime same/.test(w)), c.warnings.join(' | '));
 
   const venue = context();
   const venueItems = parseCinexCinemaShowtimes(
@@ -137,7 +137,7 @@ test('a Cinex session ID reported on two dates is suppressed even when only one 
   );
   assert.deepEqual(venueItems.map(i => i.id), ['ok']);
   assert.equal(venue.partial, true);
-  assert.ok(venue.warnings.some(w => /contradictorios/.test(w) && /same/.test(w)), venue.warnings.join(' | '));
+  assert.ok(venue.warnings.some(w => /contradictory times for showtime same/.test(w)), venue.warnings.join(' | '));
   // A session the page reports on another date only is not part of this answer and raises nothing.
   const other = context();
   assert.deepEqual(parseCinexShowtimes(`<h1>Known</h1><button onclick="checkLogin('x','C')" alt="${epoch('2026-11-04')}"></button><button onclick="checkLogin('x','C')" alt="${epoch('2026-11-04')}"></button>`, 'm', '2026-11-06', other), []);

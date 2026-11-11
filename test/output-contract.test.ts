@@ -62,5 +62,5 @@ test('service preserves a named cinema with malformed code as a nonqueryable dir
   assert.equal(result.items[0].cinema_id, undefined);
   assert.match(result.items[0].id, /^directory-/);
   assert.equal(result.total, 1);
-  assert.match(result.warnings[0], /sede conservada/);
+  assert.match(result.warnings[0], /venue kept/);
 });

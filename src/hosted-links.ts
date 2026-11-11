@@ -85,15 +85,15 @@ export type LinkStage = 'invitation' | 'browser';
 export class ConnectionLinks {
   /** Without keys only cleanup and reading existing links work (the operator CLI). */
   constructor(readonly pool: Pool, private readonly keys?: LinkKeys) {
-    if (keys && (keys.budgetKey.length !== 32 || keys.linkKey.length !== 32)) throw new Error('Claves no válidas.');
+    if (keys && (keys.budgetKey.length !== 32 || keys.linkKey.length !== 32)) throw new Error('Invalid keys.');
   }
   /** The stored form of a rate-limit key. */
   keyHash(key: string) {
-    if (!this.keys) throw new Error('Falta la clave de los límites.');
+    if (!this.keys) throw new Error('Rate-limit key is missing.');
     return createHmac('sha256', this.keys.budgetKey).update(key).digest('hex');
   }
   private linkMac(stage: LinkStage, id: string) {
-    if (!this.keys) throw new Error('Falta la clave de los enlaces.');
+    if (!this.keys) throw new Error('Link key is missing.');
     return createHmac('sha256', this.keys.linkKey).update(`cvl:${stage}:${id}`).digest('base64url');
   }
   /** A new link token for a stage: 64 random hex characters and their HMAC, with the stage inside the signed text. */

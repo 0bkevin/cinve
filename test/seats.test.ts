@@ -63,7 +63,7 @@ test('Cinex seat workflow uses only authenticated GETs and rejects an interleave
   assert.equal(partial.available, 1);
   assert.equal(partial.occupied, 1); assert.equal(partial.unknown, 1);
   assert.equal(partial.total, 3); assert.equal(partial.availability_complete, false);
-  assert.match(partial.warnings.join(' '), /cero libres confirmados no significa agotado/);
+  assert.match(partial.warnings.join(' '), /zero confirmed available seats does not mean sold out/);
   assert.equal(urls.length, 3);
   body = cinexMap.replace('sessionid=s1', 'sessionid=other');
   const result = await new CinemaService(http).seats(q);
@@ -107,5 +107,5 @@ test('Cines Unidos reports confirmed and unknown counts independently, including
   const unknown = await new CinemaService(http).seats(q);
   assert.equal(unknown.available, 0); assert.equal(unknown.unknown, 1);
   assert.equal(unknown.availability_complete, false);
-  assert.match(unknown.warnings.join(' '), /no significa agotado/);
+  assert.match(unknown.warnings.join(' '), /does not mean sold out/);
 });
