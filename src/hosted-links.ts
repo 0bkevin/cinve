@@ -1,4 +1,4 @@
-import { createHmac, randomBytes } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { digest, EncryptedSessionStore, lockUser, transaction } from './hosted-store.js';
 import { CinemaUnavailable, CredentialsRejected, LoginError } from './auth.js';
@@ -33,25 +33,47 @@ function failureKeys(network: string) {
   const block = ipv6Block(network);
   return { day: `signin-fail:day:${network}`, recent: `signin-fail:recent:${network}`, block, blockDay: block && `signin-fail:day:${block}` };
 }
+/**
+ * budgetKey keys rate-limit keys. Those name addresses and cinema account
+ * emails, which a plain digest would not hide (any IPv4 address or a known
+ * email can be hashed and compared), so they are stored as HMACs. linkKey
+ * signs connection-link tokens, so forged ones are refused in memory.
+ */
+export type LinkKeys = { budgetKey: Buffer; linkKey: Buffer };
+export type LinkStage = 'invitation' | 'browser';
 export class ConnectionLinks {
-  /**
-   * budgetKey: a 32-byte key for rate-limit keys. Those name addresses and
-   * cinema account emails, which a plain digest would not hide (any IPv4
-   * address or a known email can be hashed and compared), so they are stored
-   * as HMACs. Only rate limits need it; links and cleanup work without it.
-   */
-  constructor(readonly pool: Pool, private readonly budgetKey?: Buffer) {
-    if (budgetKey && budgetKey.length !== 32) throw new Error('Clave de límites no válida.');
+  /** Without keys only cleanup and reading existing links work (the operator CLI). */
+  constructor(readonly pool: Pool, private readonly keys?: LinkKeys) {
+    if (keys && (keys.budgetKey.length !== 32 || keys.linkKey.length !== 32)) throw new Error('Claves no válidas.');
   }
   /** The stored form of a rate-limit key. */
   keyHash(key: string) {
-    if (!this.budgetKey) throw new Error('Falta la clave de los límites.');
-    return createHmac('sha256', this.budgetKey).update(key).digest('hex');
+    if (!this.keys) throw new Error('Falta la clave de los límites.');
+    return createHmac('sha256', this.keys.budgetKey).update(key).digest('hex');
+  }
+  private linkMac(stage: LinkStage, id: string) {
+    if (!this.keys) throw new Error('Falta la clave de los enlaces.');
+    return createHmac('sha256', this.keys.linkKey).update(`cvl:${stage}:${id}`).digest('base64url');
+  }
+  /** A new link token for a stage: 64 random hex characters and their HMAC, with the stage inside the signed text. */
+  private signedLink(stage: LinkStage) {
+    const id = randomBytes(32).toString('hex');
+    return `${id}.${this.linkMac(stage, id)}`;
+  }
+  /**
+   * 'signed' when the token carries a valid HMAC for this stage, 'legacy' for
+   * the unsigned format issued before signing (links last ten minutes), and
+   * undefined otherwise, judged without the database.
+   */
+  linkFormat(token: string, stage: LinkStage): 'signed' | 'legacy' | undefined {
+    const signed = token.match(/^([a-f0-9]{64})\.([A-Za-z0-9_-]{43})$/);
+    if (signed) return timingSafeEqual(Buffer.from(signed[2]), Buffer.from(this.linkMac(stage, signed[1]))) ? 'signed' : undefined;
+    return /^[a-f0-9]{64}$/.test(token) ? 'legacy' : undefined;
   }
   async issue(user: string, tokenHash: string, provider: AuthProviderId) {
     return transaction(this.pool, async client => {
       if (await lockUser(client, user) !== tokenHash) throw new Error('Acceso revocado.');
-      const token = randomBytes(32).toString('hex');
+      const token = this.signedLink('invitation');
       const { rows } = await client.query(`INSERT INTO cinev_links(token_hash,user_id,provider,stage,expires_at)
         VALUES($1,$2,$3,'invitation',now()+interval '10 minutes')
         ON CONFLICT(user_id,provider) DO UPDATE SET token_hash=EXCLUDED.token_hash,stage='invitation',
@@ -76,7 +98,7 @@ export class ConnectionLinks {
   }
   async exchange(token: string) {
     return this.locked(token, 'invitation', async (client, connection) => {
-      const browserToken = randomBytes(32).toString('hex');
+      const browserToken = this.signedLink('browser');
       await client.query("UPDATE cinev_links SET token_hash=$2,stage='browser' WHERE token_hash=$1", [digest(token), digest(browserToken)]);
       return { browserToken, connection };
     });

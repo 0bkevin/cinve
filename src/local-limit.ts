@@ -35,3 +35,18 @@ export class LocalLimiter {
   }
   get size() { return this.windows.size; }
 }
+
+/** Keys remembered for a fixed time in this process, bounded and evicted like LocalLimiter. */
+export class LocalSet {
+  private entries = new Map<string, number>();
+  constructor(private readonly ttlMs: number, private readonly capacity = 10000, private readonly now: () => number = Date.now) {}
+  has(key: string) { const expires = this.entries.get(key); return expires !== undefined && expires > this.now(); }
+  add(key: string) {
+    const now = this.now();
+    this.entries.delete(key);
+    for (const [k, expires] of this.entries) { if (expires > now) break; this.entries.delete(k); }
+    while (this.entries.size >= this.capacity) this.entries.delete(this.entries.keys().next().value!);
+    this.entries.set(key, now + this.ttlMs);
+  }
+  get size() { return this.entries.size; }
+}

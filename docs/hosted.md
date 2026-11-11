@@ -192,10 +192,17 @@ necesitan la base (formato y firma de los tokens) se hacen antes de cobrar
 cualquier cupo, así que una solicitud malformada o falsificada no cuesta nada.
 
 Antes de cualquier consulta a la base, cada instancia aplica en memoria un
-primer filtro por red: 600 solicitudes por minuto y 30 credenciales rechazadas
-por minuto (tokens Bearer o de enlaces de conexión). Un token con firma válida
-no se detiene por los fallos ajenos de una dirección compartida. Los límites
-persistentes en PostgreSQL siguen siendo los que valen entre instancias.
+primer filtro. Las páginas estáticas (`/`, `/connect`) nunca se limitan. Las
+solicitudes sin un token firmado admiten 600 por minuto por red y 2400 por
+prefijo IPv6 /48, y 30 credenciales sin firma rechazadas por minuto por red.
+Los tokens de acceso y los enlaces de conexión llevan firma, así que no se
+pueden falsificar: cada uno tiene su propio cupo (600 por minuto), con un tope
+de 3000 por minuto por red para quien emita muchos, y el tráfico basura de
+otros en una dirección compartida (NAT de operador) nunca los detiene. Un
+token o enlace firmado que ya falló (revocado, vencido o usado) se rechaza
+desde memoria durante una hora, y un token sin firma que funcionó hace poco no
+se detiene por los fallos ajenos. Los límites persistentes en PostgreSQL siguen
+siendo los que valen entre instancias.
 
 En `/mcp`, cada conexión admite hasta 120 solicitudes por minuto y cuatro
 simultáneas; el proceso admite 32 simultáneas. La plaza se reserva antes de leer

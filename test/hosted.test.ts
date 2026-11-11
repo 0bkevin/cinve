@@ -257,7 +257,7 @@ test('stdio bridge forwards tools to authenticated hosted MCP with fresh retriev
 });
 
 test('independent server instances consume a link only once and share saved sessions', async t => {
-  const f = await fixture(t), other = new ConnectionLinks(f.pool, hostedKeys(f.key).budgetKey);
+  const f = await fixture(t), other = new ConnectionLinks(f.pool, hostedKeys(f.key));
   const hash = (await f.users.hash(f.alice.id))!;
   const invite = await f.links.issue(f.alice.id, hash, 'cinesunidos');
   const results = await Promise.all([f.links.exchange(invite.token), other.exchange(invite.token)]);
@@ -274,7 +274,7 @@ test('independent server instances consume a link only once and share saved sess
 });
 
 test('revocation and newer invitations prevent another instance from saving a late login', async t => {
-  const f = await fixture(t), other = new ConnectionLinks(f.pool, hostedKeys(f.key).budgetKey);
+  const f = await fixture(t), other = new ConnectionLinks(f.pool, hostedKeys(f.key));
   const hash = (await f.users.hash(f.alice.id))!;
   const session = { version: 1 as const, provider: 'cinesunidos' as const, expires_at: Date.now() + 60000, access_token: 'SECRET_SESSION' };
   const invite = await f.links.issue(f.alice.id, hash, 'cinesunidos');
@@ -291,7 +291,7 @@ test('revocation and newer invitations prevent another instance from saving a la
 });
 
 test('database attempt limits and rate budgets survive new instances', async t => {
-  const f = await fixture(t), other = new ConnectionLinks(f.pool, hostedKeys(f.key).budgetKey), hash = (await f.users.hash(f.alice.id))!;
+  const f = await fixture(t), other = new ConnectionLinks(f.pool, hostedKeys(f.key)), hash = (await f.users.hash(f.alice.id))!;
   const invite = await f.links.issue(f.alice.id, hash, 'cinex');
   const token = (await other.exchange(invite.token))!.browserToken;
   for (let i = 0; i < 5; i++) { assert.ok(await other.claim(token)); await f.links.release(token); }
@@ -1047,6 +1047,8 @@ test('access tokens are signed: forgeries are refused without a database query, 
     .structuredContent as { connection: { client_authorized: boolean } }).connection.client_authorized;
   assert.equal(await authorized(tokens.access_token), true);
   const forged = tokens.access_token.slice(0, -1) + (tokens.access_token.endsWith('A') ? 'B' : 'A');
+  // Let the MCP client's background notifications land before measuring.
+  await new Promise(resolve => setTimeout(resolve, 100));
   const query = f.pool.query.bind(f.pool); let queries = 0;
   f.pool.query = ((...args: Parameters<typeof query>) => { queries++; return query(...args); }) as typeof f.pool.query;
   const headers = { Authorization: `Bearer ${forged}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' };
@@ -1152,13 +1154,12 @@ test('rate-limit keys are stored as HMACs under a derived key, never as plain di
   assert.ok(stored.length >= 4);
   for (const plain of ['oauth:login-ip:198.51.100.20', 'signin:account:cinex:person@example.test', 'signin-fail:day:198.51.100.20', 'signin-fail:global'])
     assert.ok(!stored.includes(digest(plain)) && stored.includes(f.links.keyHash(plain)), plain);
-  // Another key sees none of these counts; without a key rate limits refuse to run, while links still work.
-  const other = new ConnectionLinks(f.pool, randomBytes(32));
+  // Another key sees none of these counts; without keys rate limits and new links refuse to run, while cleanup works.
+  const other = new ConnectionLinks(f.pool, { budgetKey: randomBytes(32), linkKey: randomBytes(32) });
   assert.notEqual(other.keyHash('signin-fail:global'), f.links.keyHash('signin-fail:global'));
   const unkeyed = new ConnectionLinks(f.pool);
   await assert.rejects(unkeyed.budget('x', 1), /clave/);
-  const invite = await unkeyed.issue(f.alice.id, (await f.users.hash(f.alice.id))!, 'cinex');
-  assert.ok(await unkeyed.exchange(invite.token));
+  await assert.rejects(unkeyed.issue(f.alice.id, (await f.users.hash(f.alice.id))!, 'cinex'), /clave/);
   await unkeyed.cleanup();
 });
 
@@ -1260,4 +1261,104 @@ test('JSON-RPC batches are refused, so one request is one call for every limit',
   const anonymous = await f.client();
   assert.equal(((await anonymous.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos', refresh: true } })).structuredContent as { status: string }).status, 'available');
   assert.equal((await f.pool.query('SELECT count FROM cinev_budgets WHERE key_hash=$1', [f.links.keyHash('refresh:anonymous:127.0.0.1')])).rows[0].count, 1);
+});
+
+test('connection links are signed per stage; forged and dead ones are refused from memory', async t => {
+  const f = await fixture(t, successfulLogin);
+  // Issued directly: an MCP client's background notifications would overlap the measured windows.
+  const { token: invite } = await f.links.issue(f.alice.id, (await f.users.hash(f.alice.id))!, 'cinesunidos');
+  assert.match(invite, /^[a-f0-9]{64}\.[A-Za-z0-9_-]{43}$/);
+  assert.match(await link(await f.client(f.bob.token)), /^[a-f0-9]{64}\.[A-Za-z0-9_-]{43}$/, 'connect_account links are signed too');
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert.equal(f.links.linkFormat(invite, 'invitation'), 'signed');
+  assert.equal(f.links.linkFormat(invite, 'browser'), undefined, 'an invitation never works as a browser token');
+  const query = f.pool.query.bind(f.pool); let queries: string[] = [];
+  const spy = () => { queries = []; f.pool.query = ((...args: Parameters<typeof query>) => { queries.push(String(args[0])); return query(...args); }) as typeof f.pool.query; };
+  spy();
+  const forged = await f.post('/connect/exchange', invite.slice(0, 64) + '.' + 'A'.repeat(43));
+  const asBrowser = await f.post('/connect/login', invite, { username: 'x', password: 'x' });
+  f.pool.query = query;
+  assert.deepEqual([forged.status, asBrowser.status, queries], [403, 403, []]);
+  const exchanged = await (await f.post('/connect/exchange', invite)).json() as { browser_token: string };
+  assert.equal(f.links.linkFormat(exchanged.browser_token, 'browser'), 'signed');
+  // The used invitation is dead: the first replay looks it up, later ones are answered from memory.
+  assert.equal((await f.post('/connect/exchange', invite)).status, 410);
+  spy();
+  assert.equal((await f.post('/connect/exchange', invite)).status, 410);
+  f.pool.query = query;
+  assert.deepEqual(queries, []);
+  assert.equal((await f.post('/connect/login', exchanged.browser_token, { username: 'person@example.test', password: 'SYNTHETIC_PASSWORD' })).status, 200);
+});
+
+test('attackers on a shared address cannot lock out users of signed tokens or signed links', async t => {
+  const f = await fixture(t, successfulLogin, undefined, { trustedVercelProxy: true });
+  const shared = '190.202.9.9';
+  const { tokens } = await enrolled(f.origin);
+  // 600 junk requests and 30 junk credential lookups from the shared address.
+  for (let k = 0; k < 12; k++) await Promise.all(Array.from({ length: 50 }, () => fetch(f.origin + '/nothing', from(shared)).then(r => r.text())));
+  assert.equal((await fetch(f.origin + '/nothing', from(shared))).status, 429, 'the junk itself is limited');
+  assert.equal((await fetch(f.origin + '/connect', from(shared))).status, 200, 'the link page always opens');
+  const mcp = (token: string, network: string) => fetch(f.origin + '/mcp', from(network, { method: 'POST', body: '{}',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' } }));
+  const other = '190.202.9.10';
+  for (let i = 0; i < 30; i++) {
+    await mcp('cva_' + randomBytes(32).toString('base64url'), other);
+    await f.post('/connect/exchange', randomBytes(32).toString('hex'), {}, { 'x-vercel-forwarded-for': other });
+  }
+  assert.equal((await mcp('cva_' + randomBytes(32).toString('base64url'), other)).status, 429, 'unsigned junk is held back');
+  // A real user on either address still gets through.
+  for (const network of [shared, other]) {
+    const status = await mcp(tokens.access_token, network);
+    assert.notEqual(status.status, 429, network); assert.notEqual(status.status, 401, network);
+    const user = await f.users.issue();
+    const invite = await f.links.issue(user.id, (await f.users.hash(user.id))!, 'cinesunidos');
+    assert.equal((await f.post('/connect/exchange', invite.token, {}, { 'x-vercel-forwarded-for': network })).status, 200, network);
+  }
+});
+
+test('a revoked signed token is refused from memory after its first lookup', async t => {
+  const f = await fixture(t);
+  const { client_id, tokens } = await enrolled(f.origin);
+  await form(f.origin, '/oauth/revoke', { token: tokens.access_token, client_id });
+  const mcp = () => fetch(f.origin + '/mcp', { method: 'POST', body: '{}',
+    headers: { Authorization: `Bearer ${tokens.access_token}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' } });
+  assert.equal((await mcp()).status, 401);
+  const query = f.pool.query.bind(f.pool); let queries = 0;
+  f.pool.query = ((...args: Parameters<typeof query>) => { queries++; return query(...args); }) as typeof f.pool.query;
+  const statuses = [];
+  for (let i = 0; i < 40; i++) statuses.push((await mcp()).status);
+  f.pool.query = query;
+  assert.ok(statuses.every(s => s === 401)); assert.equal(queries, 0);
+});
+
+test('an unsigned token that recently worked is not held back by others\' failures', async t => {
+  const f = await fixture(t);
+  const mcp = (token: string) => fetch(f.origin + '/mcp', { method: 'POST', body: '{}',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' } });
+  assert.notEqual((await mcp(f.alice.token)).status, 401, 'operator token works');
+  for (let i = 0; i < 30; i++) await mcp('cva_' + randomBytes(32).toString('base64url'));
+  assert.equal((await mcp('cva_' + randomBytes(32).toString('base64url'))).status, 429);
+  const again = await mcp(f.alice.token);
+  assert.notEqual(again.status, 429); assert.notEqual(again.status, 401);
+});
+
+test('local filters: requests without a signed token are also limited per IPv6 /48', async t => {
+  const f = await fixture(t, undefined, undefined, { trustedVercelProxy: true });
+  const all: number[] = [];
+  for (let k = 0; k < 2401; k += 20) all.push(...await Promise.all(Array.from({ length: Math.min(20, 2401 - k) }, (_, i) =>
+    fetch(f.origin + '/nothing', from(`2001:db8:9:${(k + i).toString(16)}::1`)).then(r => r.status))));
+  assert.equal(all.filter(s => s === 429).length, 1, 'each /64 is under its own limit; the /48 is not');
+  assert.equal((await fetch(f.origin + '/nothing', from('2001:db8:a::1'))).status, 404, 'another /48');
+});
+
+test('local sets remember keys for their lifetime within a bounded size', async () => {
+  const { LocalSet } = await import('../src/local-limit.js');
+  let now = 0;
+  const set = new LocalSet(1000, 3, () => now);
+  set.add('a'); now = 10; set.add('b'); set.add('c');
+  assert.ok(set.has('a') && set.has('c'));
+  set.add('d');
+  assert.equal(set.has('a'), false, 'oldest evicted at capacity'); assert.equal(set.size, 3);
+  now = 1010;
+  assert.equal(set.has('b'), false, 'expired');
 });
