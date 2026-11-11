@@ -85,10 +85,6 @@
 .footer-base p { margin: 0; font-size: 13px; }
 .footer-base p a { color: var(--cream); }
 .footer-gh { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; margin: -12px -12px -12px 0; }
-@media (max-width: 640px) {
-  .site-footer { grid-template-columns: 1fr; padding-top: 40px; }
-  .footer-links { gap: 40px; }
-}
 
 .lead { font-size: 20px; line-height: 1.5; color: var(--foreground); }
 .fine, .note { font-size: 14px; }
@@ -341,17 +337,12 @@ details.more[data-closing] > summary .chevron { transform: none; }
   .manual .snippet .btn { align-self: flex-end; }
   .wrap { width: calc(100% - 32px); }
   .site-nav a:not(.nav-cta) { display: none; }
-  /* Phones: logo and tagline on top, each link group flows as one wrapping row; the group names stay
-     available to screen readers. */
-  .site-footer { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "brand brand" "links links" "made gh"; gap: 28px 16px; padding: 40px 0 24px; }
-  .footer-brand { grid-area: brand; max-width: none; }
-  .footer-links { grid-area: links; display: grid; gap: 14px; }
-  .footer-links div { display: flex; flex-wrap: wrap; gap: 0 18px; }
-  .footer-links h2 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  .footer-links a { color: var(--foreground); opacity: .8; }
-  .footer-base { display: contents; }
-  .footer-base p { grid-area: made; align-self: center; }
-  .footer-gh { grid-area: gh; margin: -12px -12px -12px 0; }
+  /* Small screens keep the desktop order (brand left, two titled link
+     columns right) with tighter spacing. */
+  .site-footer { gap: 32px 28px; padding: 40px 0 24px; }
+  .footer-links { gap: 28px; }
+  .footer-links div { gap: 0; }
+  .footer-links a { padding-block: 6px; }
   .consent-actions { flex-direction: column; }
   .consent-actions .btn { width: 100%; }
   .site-header { height: 64px; }
@@ -374,6 +365,13 @@ details.more[data-closing] > summary .chevron { transform: none; }
   .install .btn { width: 100%; }
   .compact { margin: 40px auto 64px; }
   .card > footer .btn { flex: 1; }
+}
+
+/* Phones: brand on top, then the two titled columns side by side. */
+@media (max-width: 560px) {
+  .site-footer { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+  .footer-brand { max-width: none; }
+  .footer-links { display: grid; grid-template-columns: auto auto; justify-content: start; column-gap: 40px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
