@@ -8,7 +8,7 @@ import { serveInstall } from './install.js';
 import { createServer as nodeServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Pool } from 'pg';
-import { timingSafeEqual } from 'node:crypto';
+import { hkdfSync, timingSafeEqual } from 'node:crypto';
 import { createMcpHandler } from '@modelcontextprotocol/server';
 import { toNodeHandler } from '@modelcontextprotocol/node';
 import { createServer } from './server.js';
@@ -107,10 +107,12 @@ export async function createHostedApp(options: {
       (publicUrl.protocol !== 'https:' && !(options.allowLocal && publicUrl.protocol === 'http:' && publicUrl.hostname === '127.0.0.1'))) throw new Error('CINEV_PUBLIC_URL debe ser un origen HTTPS.');
   if (options.key.length !== 32) throw new Error('Clave de cifrado no válida.');
   let origin = publicUrl.origin;
+  // A separate subkey: the session encryption key itself never signs anything.
+  const tokenKey = Buffer.from(hkdfSync('sha256', options.key, Buffer.alloc(0), 'cinve oauth access token v1', 32));
   const oauth = new HostedOAuth(options.pool, () => origin, new ClientMetadataCache(options.clientMetadata), {
     authenticate: options.authenticate ?? login,
     save: (client, user, session) => new EncryptedSessionStore(options.pool, user, options.key).saveInTransaction(client, session),
-  });
+  }, tokenKey);
   const users = new HostedUsers(options.pool);
   const links = new ConnectionLinks(options.pool);
   // Public cache and in-flight deduplication live for this hosted app. The

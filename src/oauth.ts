@@ -1,5 +1,5 @@
 import { authorizationPage, authorizationErrorPage, styleSource } from './public-web.js';
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Pool, PoolClient } from 'pg';
 import * as z from 'zod';
@@ -25,6 +25,25 @@ const registration = z.object({
   grant_types: z.array(z.enum(['authorization_code', 'refresh_token'])).default(['authorization_code', 'refresh_token']),
   response_types: z.array(z.literal('code')).default(['code']),
 });
+/**
+ * Access tokens issued before signing was introduced (cva_ plus 43 random
+ * characters). They last one hour, so this cutoff only has to outlive the
+ * deployment that introduces signing; after it, every access token must be
+ * signed and the legacy branch can be removed.
+ */
+export const legacyAccessTokensUntil = Date.parse('2026-12-01T00:00:00Z');
+const accessMac = (key: Buffer, id: string) => createHmac('sha256', key).update('cva_' + id).digest('base64url');
+/**
+ * Which kind of access token this is, judged in memory: 'signed' when its
+ * HMAC is valid, 'legacy' for the unsigned format before the cutoff, and
+ * undefined otherwise. Only these reach the database, so a flood of forged
+ * tokens costs no queries.
+ */
+export function accessTokenFormat(token: string, key: Buffer, now = Date.now()): 'signed' | 'legacy' | undefined {
+  const signed = token.match(/^cva_([A-Za-z0-9_-]{43})\.([A-Za-z0-9_-]{43})$/);
+  if (signed) return timingSafeEqual(Buffer.from(signed[2]), Buffer.from(accessMac(key, signed[1]))) ? 'signed' : undefined;
+  return /^cva_[A-Za-z0-9_-]{43}$/.test(token) && now < legacyAccessTokensUntil ? 'legacy' : undefined;
+}
 class OAuthError extends Error {
   constructor(readonly error: string, readonly status = 400) { super(error); }
 }
@@ -71,8 +90,12 @@ export function recognizedDestination(redirect: string, publisher?: string) {
  * it never grants access to an existing cinema session or browser identity. */
 export class HostedOAuth {
   private budgets: ConnectionLinks;
-  constructor(readonly pool: Pool, readonly getOrigin: () => string, private readonly clientMetadata = new ClientMetadataCache(),
-    private readonly accounts?: ConsentAccounts) { this.budgets = new ConnectionLinks(pool); }
+  /** tokenKey: a 32-byte key for signing access tokens, the same on every instance. */
+  constructor(readonly pool: Pool, readonly getOrigin: () => string, private readonly clientMetadata: ClientMetadataCache,
+    private readonly accounts: ConsentAccounts | undefined, private readonly tokenKey: Buffer) {
+    if (tokenKey.length !== 32) throw new Error('Clave de firma no válida.');
+    this.budgets = new ConnectionLinks(pool);
+  }
   /** The consent page, which can also sign in to a cinema; re-rendered with an error after a failed sign-in. */
   private consent(res: ServerResponse, status: number, app: { id: string; name: string }, redirect: string, id: string, csrf: string, form: ConsentForm = {}) {
     // A native form POST inherits this policy. no-referrer makes browsers
@@ -121,7 +144,7 @@ export class HostedOAuth {
     return `Bearer resource_metadata="${this.getOrigin()}/.well-known/oauth-protected-resource/mcp", scope="${scope}"${invalid ? ', error="invalid_token"' : ''}`;
   }
   async authenticate(token: string) {
-    if (!/^cva_[A-Za-z0-9_-]{43}$/.test(token)) return undefined;
+    if (!accessTokenFormat(token, this.tokenKey)) return undefined;
     const { rows } = await this.pool.query(`SELECT c.id,c.token_hash FROM cinev_oauth_tokens t
       JOIN cinev_oauth_grants g ON g.user_id=t.user_id JOIN cinev_clients c ON c.id=t.user_id
       WHERE t.token_hash=$1 AND t.kind='access' AND t.expires_at>clock_timestamp()
@@ -129,7 +152,7 @@ export class HostedOAuth {
     return rows[0] ? { id: rows[0].id as string, tokenHash: rows[0].token_hash as string } : undefined;
   }
   private async tokens(client: PoolClient, user: string) {
-    const access = 'cva_' + secret(), refresh = 'cvr_' + secret();
+    const id = secret(), access = `cva_${id}.${accessMac(this.tokenKey, id)}`, refresh = 'cvr_' + secret();
     await client.query(`INSERT INTO cinev_oauth_tokens(token_hash,user_id,kind,expires_at) VALUES
       ($1,$3,'access',now()+interval '1 hour'),
       ($2,$3,'refresh',(SELECT expires_at FROM cinev_oauth_grants WHERE user_id=$3))`, [digest(access), digest(refresh), user]);

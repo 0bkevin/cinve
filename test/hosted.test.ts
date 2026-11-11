@@ -1035,3 +1035,42 @@ test('HTTPS responses send HSTS for the host and its subdomains; plain HTTP send
   assert.equal(headers(true).get('Strict-Transport-Security'), 'max-age=31536000; includeSubDomains');
   assert.equal(headers(false).has('Strict-Transport-Security'), false);
 });
+
+test('access tokens are signed: forgeries are refused without a database query, valid ones still checked', async t => {
+  const f = await fixture(t);
+  const { digest } = await import('../src/hosted-store.js');
+  const { tokens } = await enrolled(f.origin);
+  assert.match(tokens.access_token, /^cva_[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{43}$/);
+  const authorized = async (token: string) => ((await (await f.client(token)).callTool({ name: 'get_auth_status', arguments: {} }))
+    .structuredContent as { connection: { client_authorized: boolean } }).connection.client_authorized;
+  assert.equal(await authorized(tokens.access_token), true);
+  const forged = tokens.access_token.slice(0, -1) + (tokens.access_token.endsWith('A') ? 'B' : 'A');
+  const query = f.pool.query.bind(f.pool); let queries = 0;
+  f.pool.query = ((...args: Parameters<typeof query>) => { queries++; return query(...args); }) as typeof f.pool.query;
+  const headers = { Authorization: `Bearer ${forged}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' };
+  const refused = await fetch(f.origin + '/mcp', { method: 'POST', headers, body: '{}' });
+  f.pool.query = query;
+  assert.equal(refused.status, 401); assert.equal(queries, 0, 'a forged token never reaches Postgres');
+  // A token issued before signing keeps working until the cutoff, via the database.
+  const { rows } = await f.pool.query('SELECT user_id FROM cinev_oauth_tokens WHERE token_hash=$1', [digest(tokens.access_token)]);
+  const legacy = 'cva_' + randomBytes(32).toString('base64url');
+  await f.pool.query("INSERT INTO cinev_oauth_tokens(token_hash,user_id,kind,expires_at) VALUES($1,$2,'access',now()+interval '1 hour')", [digest(legacy), rows[0].user_id]);
+  assert.equal(await authorized(legacy), true);
+  // Revocation is still enforced for a correctly signed token.
+  await f.pool.query('UPDATE cinev_clients SET revoked_at=now() WHERE id=$1', [rows[0].user_id]);
+  await assert.rejects(f.client(tokens.access_token));
+});
+
+test('the access token format is judged in memory, and unsigned tokens stop at the cutoff', async () => {
+  const { accessTokenFormat, legacyAccessTokensUntil } = await import('../src/oauth.js');
+  const { createHmac } = await import('node:crypto');
+  const key = randomBytes(32), id = randomBytes(32).toString('base64url');
+  const signed = `cva_${id}.${createHmac('sha256', key).update('cva_' + id).digest('base64url')}`;
+  assert.equal(accessTokenFormat(signed, key), 'signed');
+  assert.equal(accessTokenFormat(signed, randomBytes(32)), undefined, 'another key');
+  assert.equal(accessTokenFormat(`cva_${randomBytes(32).toString('base64url')}.${signed.split('.')[1]}`, key), undefined, 'a signature moved to another id');
+  const legacy = 'cva_' + id;
+  assert.equal(accessTokenFormat(legacy, key, legacyAccessTokensUntil - 1), 'legacy');
+  assert.equal(accessTokenFormat(legacy, key, legacyAccessTokensUntil), undefined);
+  for (const bad of ['', 'cva_', signed + 'x', 'cvr_' + id, `cva_${id}.`]) assert.equal(accessTokenFormat(bad, key), undefined);
+});
