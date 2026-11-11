@@ -55,6 +55,10 @@ jobs:
       - name: Instalar dependencias
         run: npm ci
 
+      - name: Auditar dependencias
+        # Fails on high or critical advisories in the locked dependency tree.
+        run: npm audit --audit-level=high
+
       - name: Comprobar tipos
         run: npm run check
 
