@@ -7,6 +7,8 @@ import type { AuthProviderId } from './auth.js';
 export type EvidenceSource = z.infer<typeof Source>;
 /** empty: the provider confirmed it has no data for this request (cacheable, unlike an error). */
 type Page = { body: string; source: EvidenceSource; empty?: true };
+/** Cache lifetime in ms, or one chosen from the answer (e.g. shorter for "no data yet"). */
+export type Ttl = number | ((page: Page) => number);
 type CacheEntry = { page: Page; expires: number; bytes: number; startedAt: number; keys: Set<string> };
 type Waiting = { start: () => boolean; cancel: () => void };
 type RefreshState = { keys: Set<string> };
@@ -213,7 +215,7 @@ export class HttpClient {
    * fields, so different queries never share an entry. Callers must validate
    * the route and fields with assertPublicForm first (ReadContext does).
    */
-  async post(url: string, fields: Record<string, string>, ttl = 120000, refresh = false): Promise<Page> {
+  async post(url: string, fields: Record<string, string>, ttl: Ttl = 120000, refresh = false): Promise<Page> {
     const parsed = new URL(url);
     if (parsed.protocol !== 'https:' || parsed.hostname !== 'supercines.com.ve' || parsed.port || parsed.username || parsed.password || parsed.hash || parsed.search) throw new DataError('error', 'Origen de consulta no permitido.');
     const body = new URLSearchParams(Object.entries(fields).sort(([a], [b]) => a.localeCompare(b))).toString();
@@ -232,7 +234,7 @@ export class HttpClient {
     const startedAt = ++this.clock;
     let task!: Promise<Page>;
     task = this.readForm(url, key, body, parsed.origin, refresh).then(page => {
-      this.store(key, page, ttl, startedAt, task, false);
+      this.store(key, page, typeof ttl === 'function' ? ttl(page) : ttl, startedAt, task, false);
       return page;
     }).finally(() => this.clearPending(task));
     this.pendingStartedAt.set(task, startedAt);
@@ -625,18 +627,18 @@ export class ReadContext {
     catch (e) { if (e instanceof DataError) throw e; throw new DataError('error', 'El proveedor no devolvió JSON válido.'); }
   }
   /** A public listing read sent as a form POST; see HttpClient.post. */
-  async form(url: string, fields: Record<string, string>, ttl?: number): Promise<string> {
+  async form(url: string, fields: Record<string, string>, ttl?: Ttl): Promise<string> {
     return (await this.formPage(url, fields, ttl)).body;
   }
   /** Like form(), keeping the provider's confirmation that it has no data (empty). */
-  async formPage(url: string, fields: Record<string, string>, ttl?: number): Promise<Page> {
+  async formPage(url: string, fields: Record<string, string>, ttl?: Ttl): Promise<Page> {
     assertPublicForm(url, fields);
     this.checkCancelled();
     const page = await this.http.post(url, fields, ttl, this.refresh);
     if (!this.sources.some(s => s.url === page.source.url)) this.sources.push(page.source);
     return page;
   }
-  async formJson(url: string, fields: Record<string, string>, ttl?: number): Promise<unknown> {
+  async formJson(url: string, fields: Record<string, string>, ttl?: Ttl): Promise<unknown> {
     try { return JSON.parse(await this.form(url, fields, ttl)); }
     catch (e) { if (e instanceof DataError) throw e; throw new DataError('error', 'El proveedor no devolvió JSON válido.'); }
   }

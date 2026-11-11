@@ -115,11 +115,24 @@ export function parseSupercinesShowtimes(html: string, movie: { id: string; name
   return items;
 }
 
+/**
+ * How long a schedule answer stays cached. Supercines sends no validators
+ * (no ETag or Last-Modified), so freshness costs a full re-read; spend it
+ * where answers change. Observed November 2026: the next day's schedule is
+ * loaded during the day, venue by venue, so "no functions yet" and
+ * tomorrow's partial schedules go stale within minutes; today's and
+ * presale dates' schedules rarely change.
+ */
+export function scheduleTtl(date: string, page: { empty?: true }): number {
+  if (page.empty) return 60000;
+  const current = today();
+  const tomorrow = new Date(Date.parse(`${current}T12:00:00Z`) + 86400000).toISOString().slice(0, 10);
+  return date === tomorrow ? 120000 : 600000;
+}
+
 /** One title's functions on one date; undefined when it has none (e.g. a presale before its release). */
 async function schedule(c: ReadContext, movieId: string, date: string): Promise<string | undefined> {
-  // Ten minutes: a city or venue call reads one schedule per title, and
-  // "no functions" answers are cached for as long as schedules.
-  const page = await c.formPage(`${SC}/listCartelerafecha`, { fecha: date, id: movieId }, 600000);
+  const page = await c.formPage(`${SC}/listCartelerafecha`, { fecha: date, id: movieId }, answer => scheduleTtl(date, answer));
   return page.empty ? undefined : page.body;
 }
 
@@ -190,7 +203,7 @@ async function showtimes(q: Query, c: ReadContext): Promise<DataItem[]> {
     if (others.length) c.warnings.push(`Supercines no tiene funciones${scope ? ` ${scope}` : ''} para ${date}; sí las tiene en: ${others.join(', ')}.`);
     // Observed November 2026: the next day's schedule is loaded during the
     // day, venue by venue; later days only for presales.
-    else if (!published && date > today()) c.warnings.push(`Supercines aún no publica funciones${scope ? ` ${scope}` : ''} para ${date}: carga la programación poco antes (la del día siguiente, sede por sede durante el día) y las preventas en sus propias fechas. Vuelve a consultar más tarde.`);
+    else if (!published && date > today()) c.warnings.push(`Supercines aún no publica funciones${scope ? ` ${scope}` : ''} para ${date}: carga la programación poco antes (la del día siguiente, sede por sede durante el día) y las preventas en sus propias fechas. Vuelve a consultar en unos minutos (Cinve guarda esta respuesta 1 minuto; refresh=true la relee).`);
     else c.warnings.push(`Supercines no tiene funciones${scope ? ` ${scope}` : ''} para ${date}.`);
     // One title: its page lists the dates it has functions on (any venue).
     if (q.movie_id && work.length === 1) {

@@ -6,6 +6,7 @@ import { HttpClient, assertPublicForm, assertPublicRead } from '../src/http.js';
 import { HostedHttpClient } from '../src/hosted-http.js';
 import { SessionStore } from '../src/auth.js';
 import { fanOut } from '../src/fanout.js';
+import { scheduleTtl } from '../src/supercines.js';
 import { DataError, today } from '../src/core.js';
 import { inputSchema } from '../src/server.js';
 import { EmptySessionStore, shiftDate } from './fixtures.js';
@@ -206,7 +207,7 @@ test('hosted calls share one Supercines visitor session, cache and request limit
   assert.equal(calls.length, cold, 'a second hosted call is served from the shared cache');
 });
 
-test('titles without functions that day are cached like schedules', async () => {
+test('titles without functions that day are cached too (briefly)', async () => {
   const { service, calls } = provider();
   await service.query('showtimes', { provider: 'supercines', cinema_id: '7', date: `${D}` });
   const cold = calls.length;
@@ -312,9 +313,20 @@ test('an empty schedule says whether Supercines has not published it yet, and a 
   assert.ok(elsewhere.warnings.some(w => w.includes(`(en alguna sede): ${D1}`)));
   // A venue still without functions on a future date, while another has them.
   const ahead = await service.query('showtimes', { provider: 'supercines', cinema_id: '7', movie_id: '3976', date: D1 });
-  assert.ok(ahead.warnings.some(w => /aún no publica funciones de ese título en esta sede para .*Vuelve a consultar más tarde/.test(w)));
+  assert.ok(ahead.warnings.some(w => /aún no publica funciones de ese título en esta sede para .*Vuelve a consultar en unos minutos.*refresh=true/.test(w)));
   const candyless = await service.query('concessions', { provider: 'supercines', cinema_id: '4' });
   assert.equal(candyless.status, 'empty');
   assert.ok(candyless.warnings.some(w => /no ofrece caramelería en línea/.test(w)));
   assert.ok(!candyless.warnings.some(w => /catálogo de caramelería/.test(w)));
+});
+
+test('schedule answers are cached for as long as they stay stable', () => {
+  // "No functions yet" can change at any moment while Supercines publishes.
+  assert.equal(scheduleTtl(D1, { empty: true }), 60000);
+  assert.equal(scheduleTtl(D, { empty: true }), 60000);
+  // Tomorrow is loaded venue by venue during the day.
+  assert.equal(scheduleTtl(D1, {}), 120000);
+  // Today's and presale dates' schedules rarely change.
+  assert.equal(scheduleTtl(D, {}), 600000);
+  assert.equal(scheduleTtl(DFAR, {}), 600000);
 });
