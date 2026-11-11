@@ -1,30 +1,25 @@
 # Código de conducta
 
-Cinve busca una comunidad abierta, respetuosa y útil para personas con cualquier
-nivel de experiencia.
+Cinve quiere ser un espacio abierto y respetuoso para cualquier persona.
 
-## Comportamiento esperado
+## Lo que esperamos
 
-- Tratar a las demás personas con respeto y empatía.
-- Dar y recibir comentarios técnicos de forma concreta y constructiva.
-- Aceptar correcciones y responsabilizarse por los errores.
-- Respetar la privacidad y evitar publicar información sensible.
-- Priorizar el bienestar de la comunidad sobre una discusión individual.
+- Trato respetuoso y empático.
+- Comentarios técnicos concretos y constructivos.
+- Aceptar correcciones y asumir los propios errores.
+- Respetar la privacidad de los demás.
 
-No se toleran el acoso, los insultos, la discriminación, las amenazas, la
-atención sexual no deseada, la publicación de datos privados ni cualquier otra
-conducta que razonablemente haga insegura la participación.
+## Lo que no se tolera
 
-## Aplicación
+Acoso, insultos, discriminación, amenazas, atención sexual no deseada,
+publicación de datos privados o cualquier conducta que haga inseguro participar.
 
-El código se aplica en issues, pull requests, discusiones y demás espacios del
-proyecto, así como cuando alguien representa públicamente a Cinve.
+## Cómo reportar
 
-Reporta incidentes de forma privada mediante
+Reporta en privado por
 [GitHub Security Advisories](https://github.com/0bkevin/cinve/security/advisories/new)
-e indica claramente que se trata de un asunto de conducta. El mantenedor
-protegerá la privacidad de quien reporte y podrá editar contenido, cerrar
-conversaciones o restringir la participación según la gravedad y reincidencia.
+e indica que es un asunto de conducta. El mantenedor protegerá tu privacidad y
+podrá editar contenido, cerrar conversaciones o restringir la participación.
 
-Este documento está inspirado en el
-[Contributor Covenant 2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct/).
+Se aplica en issues, pull requests y cualquier espacio del proyecto. Inspirado
+en el [Contributor Covenant 2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct/).
