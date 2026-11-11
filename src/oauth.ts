@@ -171,6 +171,9 @@ export class HostedOAuth {
     // Chromium also checks form-action against the POST's redirect target.
     // Only allow the already-validated callback origin, never arbitrary sites.
     res.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; form-action 'self' ${new URL(redirect).origin}; frame-ancestors 'none'; base-uri 'none'`);
+    // Assistants may open authorization in a popup and read the callback via
+    // window.opener; COOP same-origin here would sever that link for good.
+    res.setHeader('Cross-Origin-Opener-Policy', 'unsafe-none');
     res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' });
     const publisher = isClientIdUrl(app.id) ? new URL(app.id).hostname : undefined;
     res.end(authorizationPage({ app: app.name, destination: new URL(redirect).origin, id, csrf, publisher,

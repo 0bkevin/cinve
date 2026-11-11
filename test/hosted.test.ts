@@ -520,7 +520,10 @@ test('consent warns when Cinve cannot vouch for the destination', async t => {
   const page = async (client_id: string, redirect?: string) => {
     const r = await authorizationRequest(f.origin, client_id);
     if (redirect) r.url.searchParams.set('redirect_uri', redirect);
-    const response = await fetch(r.url); assert.equal(response.status, 200); return response.text();
+    const response = await fetch(r.url); assert.equal(response.status, 200);
+    // Popup-based OAuth reads the callback through window.opener; same-origin COOP would sever it.
+    assert.equal(response.headers.get('cross-origin-opener-policy'), 'unsafe-none');
+    return response.text();
   };
   // A registered client with a web redirect can claim any name and destination.
   assert.match(await page(await register(f.origin)), /class="warning" role="alert"><strong>Cinve no puede verificar esta aplicación/);
@@ -812,6 +815,10 @@ test('the install page carries security headers even when served before the host
   assert.match(headers['content-security-policy'], /default-src 'none'.*frame-ancestors 'none'/);
   assert.equal(headers['x-frame-options'], 'DENY');
   assert.equal(headers['strict-transport-security'], 'max-age=31536000; includeSubDomains');
+  assert.match(headers['permissions-policy'], /camera=\(\).*geolocation=\(\).*microphone=\(\)/);
+  assert.equal(headers['cross-origin-opener-policy'], 'same-origin');
+  assert.equal(headers['cross-origin-resource-policy'], 'same-origin');
+  assert.equal(headers['cross-origin-embedder-policy'], 'require-corp');
 });
 
 test('public pages use the configured origin and serve local fonts under the authorization policy', async t => {
