@@ -314,6 +314,8 @@ details.more[data-closing] > summary .chevron { transform: none; }
 }
 
 @media (max-width: 900px) {
+  .site-nav a:not(.nav-cta) { display: none; }
+  .site-nav .language-switch a { display: inline; }
   /* Below 900px the five columns don't fit: each topic becomes a short list, one line per cinema, so the
      table never scrolls sideways. */
   .board, .board tbody, .board tr, .board th, .board td { display: block; }
@@ -358,7 +360,8 @@ details.more[data-closing] > summary .chevron { transform: none; }
   .footer-links a { padding-block: 6px; }
   .consent-actions { flex-direction: column; }
   .consent-actions .btn { width: 100%; }
-  .site-header { height: 64px; }
+  .site-header { min-height: 64px; height: auto; padding-block: 10px; }
+  .site-nav { flex-wrap: wrap; justify-content: flex-end; gap: 8px 14px; }
   .hero { padding: 16px 0 72px; }
   /* Phones: 20 seats, 19 gaps and two aisles fill the content width (100vw
      minus the 16px gutters), with a little slack for the seats' tilt, and
