@@ -501,6 +501,33 @@ test('the install guide is served with safe HTTP methods and no downloadable hel
   assert.equal((await fetch(f.origin + '/codex-client.mjs')).status, 404);
 });
 
+test('every HTML page allows only its own stylesheet, never inline styles', async t => {
+  const f = await fixture(t);
+  const { createHash } = await import('node:crypto');
+  const client_id = await register(f.origin);
+  const pages = [f.origin + '/', f.origin + '/connect', (await authorizationRequest(f.origin, client_id)).url.href, f.origin + '/oauth/authorize?client_id=unknown'];
+  const install = await fetch(f.origin + '/install', { headers: { Accept: 'text/html' } });
+  for (const r of [...await Promise.all(pages.map(u => fetch(u))), install]) {
+    const csp = r.headers.get('content-security-policy')!, html = await r.text();
+    assert.match(r.headers.get('content-type')!, /text\/html/);
+    assert.doesNotMatch(csp, /unsafe-inline/);
+    const styles = [...html.matchAll(/<style>([\s\S]*?)<\/style>/g)].map(m => m[1]);
+    assert.equal(styles.length, 1); assert.doesNotMatch(html, /\sstyle=/);
+    assert.ok(csp.includes(`style-src 'sha256-${createHash('sha256').update(styles[0]).digest('base64')}'`), r.url);
+    assert.match(csp, /frame-ancestors 'none'/);
+  }
+});
+
+test('the install page carries security headers even when served before the hosted app', async () => {
+  const { serveInstall } = await import('../src/install.js');
+  const headers: Record<string, string> = {};
+  const res = { setHeader: (k: string, v: string) => { headers[k.toLowerCase()] = v; }, writeHead() {}, end() {} };
+  assert.ok(serveInstall({ url: '/install', method: 'GET', headers: { accept: 'text/html' } } as never, res as never, 'https://cinve.example'));
+  assert.match(headers['content-security-policy'], /default-src 'none'.*frame-ancestors 'none'/);
+  assert.equal(headers['x-frame-options'], 'DENY');
+  assert.equal(headers['strict-transport-security'], 'max-age=31536000');
+});
+
 test('public pages use the configured origin and serve local fonts under the authorization policy', async t => {
   const f = await fixture(t);
   const home = await fetch(f.origin + '/?from=portfolio');

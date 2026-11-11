@@ -1,4 +1,4 @@
-import { landingPage, servePublicAsset } from './public-web.js';
+import { landingPage, servePublicAsset, setSecurityHeaders } from './public-web.js';
 import { hostedAuthInstructions } from './hosted-auth-guidance.js';
 import { HostedOAuth } from './oauth.js';
 import { ClientMetadataCache } from './client-metadata.js';
@@ -92,10 +92,7 @@ export async function createHostedApp(options: {
   const active = new Map<string, number>(); let totalActive = 0;
   const storeFor = (id: string) => new EncryptedSessionStore(options.pool, id, options.key);
   const handler = async (req: IncomingMessage, res: ServerResponse) => {
-    res.setHeader('Cache-Control', 'no-store'); res.setHeader('Referrer-Policy', 'no-referrer');
-    res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; font-src 'self'; img-src 'self'; connect-src 'self'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'");
-    if (publicUrl.protocol === 'https:') res.setHeader('Strict-Transport-Security', 'max-age=31536000');
+    setSecurityHeaders(res, publicUrl.protocol === 'https:');
     const send = (status: number, data: unknown) => { if (!res.headersSent) { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(data)); } };
     try {
       if (servePublicAsset(req, res) || serveInstall(req, res, origin)) return;

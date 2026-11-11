@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
@@ -12,6 +13,17 @@ const styles = `
 @media(max-width:640px){.wrap{width:calc(100% - 40px)}.site-header{height:56px}.site-nav{gap:16px}.hero{padding:36px 0 32px}.hero .eyebrow{font-size:11px;letter-spacing:.12em;margin-bottom:16px}.hero h1{font-size:clamp(28px,8.5vw,36px);line-height:1.15;letter-spacing:-.035em;margin-bottom:20px}.hero .lead{font-size:16px;line-height:1.6;margin-bottom:0}.hero .actions{display:grid;grid-template-columns:1fr;gap:10px;margin-top:24px}.hero .button{width:100%;min-height:48px}.lead{font-size:17px}.examples,.setup{grid-template-columns:1fr;gap:28px}.section{padding:42px 0}.examples{gap:30px}.number{margin-bottom:8px}.compact{margin:42px auto 56px}.compact h1{font-size:32px}.card{padding:20px}.providers{gap:10px 20px}.providers span:first-child{width:100%}}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
 `;
+
+/** CSP source for the one stylesheet every page inlines; no other inline style is allowed. */
+export const styleSource = `'sha256-${createHash('sha256').update(styles).digest('base64')}'`;
+
+/** Headers for every response, including pages served outside the hosted app (for example /install on Vercel). */
+export function setSecurityHeaders(res: ServerResponse, https: boolean) {
+  res.setHeader('Cache-Control', 'no-store'); res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Content-Security-Policy', `default-src 'none'; script-src 'self'; style-src ${styleSource}; font-src 'self'; img-src 'self'; connect-src 'self'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'`);
+  if (https) res.setHeader('Strict-Transport-Security', 'max-age=31536000');
+}
 
 export function publicPage(title: string, content: string, options: { compact?: boolean; script?: string; index?: boolean; canonical?: string } = {}) {
   const description = 'Consulta películas, horarios, precios y asientos de cines en Venezuela desde tu asistente.';

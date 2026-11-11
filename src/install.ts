@@ -1,4 +1,4 @@
-import { installationPage } from './public-web.js';
+import { installationPage, setSecurityHeaders } from './public-web.js';
 import { seatInstructions } from './seat-guidance.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
@@ -138,9 +138,8 @@ Users do not need to mention Cinve or MCP in their cinema questions.
 export function serveInstall(req: IncomingMessage, res: ServerResponse, publicUrl: string): boolean {
   const path = req.url?.split('?')[0];
   if (path !== '/install') return false;
+  setSecurityHeaders(res, new URL(publicUrl).protocol === 'https:');
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-store');
-  res.setHeader('X-Content-Type-Options', 'nosniff');
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.writeHead(405, { Allow: 'GET, HEAD' });
     res.end('Method not allowed\n');
