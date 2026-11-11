@@ -153,5 +153,10 @@ test('login errors say whether the cinema refused the credentials, never saw the
   assert.equal(await kind('cinesunidos', unidos(() => new Response('', { status: 401 }))), 'refused');
   assert.equal(await kind('cinesunidos', unidos(() => new Response('', { status: 502 }))), 'unclear');
   assert.equal(await kind('cinesunidos', async () => new Response('', { status: 503 })), 'unavailable');
+  // A firewall challenge on the submission never reached the login: an outage, not a refusal.
+  const challenge = () => new Response('', { status: 403, headers: { 'cf-mitigated': 'challenge' } });
+  assert.equal(await kind('cinex', cinex(challenge)), 'unavailable');
+  assert.equal(await kind('cinesunidos', unidos(challenge)), 'unavailable');
+  assert.equal(await kind('cinex', cinex(() => new Response('', { status: 403 }))), 'refused', 'a plain 403 is still a refusal');
   assert.equal(await store.read('cinex'), undefined); assert.equal(await store.read('cinesunidos'), undefined);
 });

@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Pool, PoolClient } from 'pg';
 import * as z from 'zod';
 import { digest, lockUser, transaction } from './hosted-store.js';
-import { ConnectionLinks, cinemaUnavailableMessage, ipv6Block, signInRefusalMessage } from './hosted-links.js';
+import { ConnectionLinks, cinemaUnavailableMessage, ipv6Block, signInFloor, signInRefusalMessage } from './hosted-links.js';
 import { ClientMetadataCache, isClientIdUrl, redirectUri } from './client-metadata.js';
 import { AuthProvider, SessionStore } from './auth.js';
 import type { AuthProviderId, AuthSession, login } from './auth.js';
@@ -13,6 +13,8 @@ import type { AuthProviderId, AuthSession, login } from './auth.js';
 export type ConsentAccounts = {
   authenticate: typeof login;
   save(client: PoolClient, user: string, session: AuthSession): Promise<void>;
+  /** Minimum time before answering a refused sign-in (see signInFloor). */
+  refusalFloorMs?: number;
 };
 type ConsentForm = { error?: string; provider?: AuthProviderId; username?: string };
 
@@ -358,9 +360,11 @@ export class HostedOAuth {
                 return again(429, signInRefusalMessage[refusal]);
               }
               const staged = new class extends SessionStore { override async save(value: AuthSession) { session = value; } }();
+              const started = Date.now();
               try { await this.accounts!.authenticate(provider.data, username, password, staged); }
               catch (error) {
                 if (await this.budgets.signInError(subject, error) === 'unavailable') return again(503, cinemaUnavailableMessage);
+                await signInFloor(started, this.accounts!.refusalFloorMs);
                 return again(401, 'No se pudo iniciar sesión. Revisa tus datos o comprueba en la web del cine si pide una verificación adicional.');
               }
               // Not a refusal of the credentials, so it is not counted as a failure.

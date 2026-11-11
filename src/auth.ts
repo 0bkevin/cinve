@@ -142,7 +142,13 @@ export class LoginHttp {
           if (body && next.origin !== new URL(url).origin) throw new Error('No se reenvían credenciales entre orígenes.');
           url = next.href; continue;
         }
-        if (!r.ok) { await r.body?.cancel(); throw new LoginError(`El login respondió HTTP ${r.status}.`, r.status); }
+        if (!r.ok) {
+          await r.body?.cancel();
+          // A firewall challenge stops the request at the cinema's edge: the
+          // credentials never reached its login, so this is an outage.
+          if (r.status === 403 && r.headers.get('cf-mitigated')?.toLowerCase() === 'challenge') throw new CinemaUnavailable('El cine exige un desafío anti-bots y no admite el inicio de sesión automatizado.');
+          throw new LoginError(`El login respondió HTTP ${r.status}.`, r.status);
+        }
         const reader = r.body?.getReader(); if (!reader) throw new Error('Respuesta de login vacía.');
         const chunks: Uint8Array[] = []; let size = 0;
         while (true) { const { done, value } = await reader.read(); if (done) break;
@@ -165,7 +171,7 @@ export async function login(provider: AuthProviderId, username: string, password
   const submit = async (url: string, init: RequestInit) => {
     sent = true;
     try { return await http.read(url, init); } catch (e) {
-      if (e instanceof LoginError && e.status !== undefined && refusalStatuses.has(e.status)) throw new CredentialsRejected('El cine rechazó el login.');
+      if (e instanceof LoginError && !(e instanceof CinemaUnavailable) && e.status !== undefined && refusalStatuses.has(e.status)) throw new CredentialsRejected('El cine rechazó el login.');
       throw e;
     }
   };
@@ -208,7 +214,7 @@ export async function login(provider: AuthProviderId, username: string, password
     return { provider, authenticated: true, profile_update_requested: false };
   } catch (e) {
     // Never surface provider HTML, personal data, request objects, or credential-bearing URLs.
-    if (e instanceof CredentialsRejected) throw e;
+    if (e instanceof CredentialsRejected || e instanceof CinemaUnavailable) throw e;
     const message = e instanceof LoginError ? e.message : 'No se pudo completar el login HTTP. Revisa la conexión o inicia sesión en el sitio para comprobar pasos adicionales.';
     throw sent ? new LoginError(message) : new CinemaUnavailable(message);
   }

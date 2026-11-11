@@ -66,11 +66,14 @@ del enlace ni de la aprobación.
 Solo cuenta como fallo un rechazo del cine: Cinex responde que el login no es
 válido, Cines Unidos devuelve su formulario de acceso, o el envío de las
 credenciales recibe HTTP 400, 401, 403 o 422. Si el cine falla antes de recibir
-las credenciales, Cinve responde que el cine no está disponible (503), no cuenta
-el fallo y devuelve el intento a la cuenta. Un error posterior al envío
+las credenciales (también si su firewall exige un desafío anti-bots), Cinve
+responde que el cine no está disponible (503), no cuenta el fallo y devuelve el
+intento a la cuenta. Un error posterior al envío
 (tiempo de espera, 429 o 5xx) solo cuenta para los topes diarios de la red, no
 para el modo de ataque global, y se responde igual que un rechazo, para no
-revelar si la contraseña era correcta.
+revelar si la contraseña era correcta. Por la misma razón, un rechazo y un error
+posterior al envío no se responden antes de dos segundos desde el intento, para
+que el tiempo de respuesta tampoco lo revele.
 
 Las claves de todos los límites (que nombran direcciones IP y correos de cuentas
 del cine) se guardan solo como HMAC-SHA256 con una subclave derivada de

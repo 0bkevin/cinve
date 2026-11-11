@@ -17,7 +17,7 @@ import type { login } from '../src/auth.js';
 import type { ClientMetadataFetcher } from '../src/client-metadata.js';
 
 async function fixture(t: { after(fn: () => Promise<void>): void }, authenticate?: typeof login,
-  request: typeof fetch = async () => new Response('["Caracas"]'), extra: { bodyTimeoutMs?: number; clientMetadata?: ClientMetadataFetcher; trustedVercelProxy?: boolean } = {}) {
+  request: typeof fetch = async () => new Response('["Caracas"]'), extra: { bodyTimeoutMs?: number; clientMetadata?: ClientMetadataFetcher; trustedVercelProxy?: boolean; signInFloorMs?: number } = {}) {
   const schema = 'test_' + randomBytes(12).toString('hex');
   const admin = new Pool({ connectionString: process.env.TEST_DATABASE_URL });
   await admin.query(`CREATE SCHEMA ${schema}`);
@@ -25,7 +25,8 @@ async function fixture(t: { after(fn: () => Promise<void>): void }, authenticate
 
   await pool.query(await migrationSql());
   const key = randomBytes(32);
-  const app = await createHostedApp({ publicUrl: 'http://127.0.0.1:0', allowLocal: true, pool, key, authenticate, request, ...extra });
+  // No response floor by default: tests fail sign-ins on purpose and should stay fast.
+  const app = await createHostedApp({ publicUrl: 'http://127.0.0.1:0', allowLocal: true, pool, key, authenticate, request, signInFloorMs: 0, ...extra });
   await new Promise<void>(resolve => app.server.listen(0, '127.0.0.1', resolve));
   const address = app.server.address(); assert.ok(address && typeof address !== 'string');
   const origin = `http://127.0.0.1:${address.port}`;
@@ -1427,4 +1428,27 @@ test('a refused admission or a busy double submit spends no link or consent atte
   await f.pool.query('DELETE FROM cinev_budgets');
   assert.equal((await consent.submit({ ...cinema, password: 'SYNTHETIC_PASSWORD' })).status, 303);
   assert.equal(calls, 2);
+});
+
+test('refused and unclear sign-ins take the same minimum time, on links and on consent', async t => {
+  const { CredentialsRejected, LoginError } = await import('../src/auth.js');
+  let next: Error = new Error();
+  const f = await fixture(t, async () => { throw next; }, undefined, { signInFloorMs: 300 });
+  const client = await f.client(f.alice.token);
+  const timed = async (error: Error) => {
+    next = error;
+    const browser = ((await (await f.post('/connect/exchange', await link(client))).json()) as { browser_token: string }).browser_token;
+    const started = Date.now();
+    const response = await f.post('/connect/login', browser, { username: `u${Math.random()}@example.test`, password: 'x' });
+    return { status: response.status, elapsed: Date.now() - started };
+  };
+  for (const error of [new CredentialsRejected('no'), new LoginError('timeout')]) {
+    const { status, elapsed } = await timed(error);
+    assert.equal(status, 401); assert.ok(elapsed >= 290, `${error.constructor.name}: ${elapsed} ms`);
+  }
+  next = new CredentialsRejected('no');
+  const consent = await consentForm(f.origin, await register(f.origin));
+  const started = Date.now();
+  assert.equal((await consent.submit({ ...cinema, password: 'WRONG' })).status, 401);
+  assert.ok(Date.now() - started >= 290);
 });

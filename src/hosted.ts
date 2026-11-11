@@ -21,7 +21,7 @@ import { SessionStore, login } from './auth.js';
 import type { AuthSession, AuthProviderId } from './auth.js';
 import type { Operation, Query } from './core.js';
 import type { CallOptions } from './http.js';
-import { ConnectionLinks, cinemaUnavailableMessage, ipv6Block, signInRefusalMessage } from './hosted-links.js';
+import { ConnectionLinks, cinemaUnavailableMessage, ipv6Block, signInFloor, signInRefusalMessage } from './hosted-links.js';
 import type { SignInSubject } from './hosted-links.js';
 import { EncryptedSessionStore, HostedUsers, digest } from './hosted-store.js';
 import { loginPage, loginScript } from './auth-web.js';
@@ -106,7 +106,7 @@ function refreshCall(message: unknown): boolean {
 }
 export async function createHostedApp(options: {
   publicUrl: string; pool: Pool; key: Buffer; allowLocal?: boolean; trustedVercelProxy?: boolean; cleanupSecret?: string;
-  authenticate?: typeof login; request?: typeof fetch; bodyTimeoutMs?: number; clientMetadata?: ClientMetadataFetcher;
+  authenticate?: typeof login; request?: typeof fetch; bodyTimeoutMs?: number; clientMetadata?: ClientMetadataFetcher; signInFloorMs?: number;
 }) {
   const publicUrl = new URL(options.publicUrl);
   if (publicUrl.pathname !== '/' || publicUrl.search || publicUrl.hash || publicUrl.username || publicUrl.password ||
@@ -118,6 +118,7 @@ export async function createHostedApp(options: {
   const oauth = new HostedOAuth(options.pool, () => origin, new ClientMetadataCache(options.clientMetadata), {
     authenticate: options.authenticate ?? login,
     save: (client, user, session) => new EncryptedSessionStore(options.pool, user, options.key).saveInTransaction(client, session),
+    refusalFloorMs: options.signInFloorMs,
   }, tokenKey, links);
   const users = new HostedUsers(options.pool);
   // Public cache and in-flight deduplication live for this hosted app. The
@@ -295,11 +296,13 @@ export async function createHostedApp(options: {
         // after upstream login (disconnect/cancel/revocation may happen meanwhile).
         const staged = new class extends SessionStore { override async save(value: AuthSession) { stagedSession = value; } }();
         let profile = false;
+        const started = Date.now();
         try {
           const result = await (options.authenticate ?? login)(connection.provider, data.username.trim(), data.password, staged);
           profile = result.profile_update_requested;
         } catch (error) {
           if (await links.signInError(subject, error) === 'unavailable') throw new HttpError(503, cinemaUnavailableMessage);
+          await signInFloor(started, options.signInFloorMs);
           throw new HttpError(401, 'No se pudo conectar. Revisa tus datos o comprueba en la web del cine si requiere una verificación adicional.');
         }
         // Not a refusal of the credentials, so it is not counted as a failure.
