@@ -68,8 +68,29 @@ export function Page({ title, compact, script, index, canonical, children }: Pag
           </header>
           <main id="contenido" class={compact ? 'compact' : undefined}>{children}</main>
           <footer class="site-footer">
-            <p>Developed by <a href="https://kevinbravo.com">Kevin Bravo</a></p>
-            <a href="https://github.com/0bkevin/cinve" aria-label="Ver código en GitHub" title="GitHub">{gitHubIcon}</a>
+            <div class="footer-brand">
+              <a class="brand" href="/" aria-label="Cinve, inicio">cinve<span>.</span></a>
+              <p>Cartelera, precios y asientos de los cines de Venezuela, desde tu asistente.</p>
+            </div>
+            <nav class="footer-links" aria-label="Pie de página">
+              <div>
+                <h2>Cinve</h2>
+                <a href="/#preguntar">Qué preguntar</a>
+                <a href="/#empezar">Empezar</a>
+                <a href="/#datos">Tus datos</a>
+                <a href="/#preguntas">Preguntas</a>
+              </div>
+              <div>
+                <h2>Proyecto</h2>
+                <a href="https://github.com/0bkevin/cinve">Código en GitHub</a>
+                <a href="https://github.com/0bkevin/cinve/issues/new/choose">Reportar un problema</a>
+                <a href="https://github.com/0bkevin/cinve/security/advisories/new">Seguridad</a>
+              </div>
+            </nav>
+            <div class="footer-base">
+              <p>Hecho por <a href="https://kevinbravo.com">Kevin Bravo</a></p>
+              <a class="footer-gh" href="https://github.com/0bkevin/cinve" aria-label="Ver código en GitHub" title="GitHub">{gitHubIcon}</a>
+            </div>
           </footer>
         </div>
         {script && <script type="module" src={assetUrl(script)}></script>}
