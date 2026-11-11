@@ -56,7 +56,15 @@ export function Page({ title, compact, script, index, canonical, description, st
             <nav class="site-nav" data-common-label="nav" aria-label={text.nav}>
               <a href={internal('/#preguntar')} data-common-i18n="questionNav">{text.questionNav}</a><a href={internal('/#datos')} data-common-i18n="dataNav">{text.dataNav}</a><a href={internal('/#preguntas')} data-common-i18n="faqNav">{text.faqNav}</a>
               <a class="nav-cta" href={internal('/#empezar')} data-common-i18n="startNav">{text.startNav}</a>
-              <span class="language-switch" data-common-label="language" aria-label={text.language}><a data-locale-switch="es" href={localized('es')} lang="es" aria-current={locale === 'es' ? 'page' : undefined}>{text.spanish}</a><span aria-hidden="true"> / </span><a data-locale-switch="en" href={localized('en')} lang="en" aria-current={locale === 'en' ? 'page' : undefined}>{text.english}</a></span>
+              <span class="language-switch" data-common-label="language" aria-label={text.language}>
+                <details class="dropdown-menu language-menu">
+                  <summary class="btn language-trigger" data-variant="ghost" data-size="sm"><span data-current-locale-label lang={locale}>{locale === 'es' ? text.spanish : text.english}</span>{icons.chevronDown()}</summary>
+                  <div class="language-options">
+                    <a data-locale-switch="es" href={localized('es')} lang="es" aria-current={locale === 'es' ? 'page' : undefined}><span>{text.spanish}</span><span class="language-check" data-locale-check="es" aria-hidden="true">{locale === 'es' ? '✓' : ''}</span></a>
+                    <a data-locale-switch="en" href={localized('en')} lang="en" aria-current={locale === 'en' ? 'page' : undefined}><span>{text.english}</span><span class="language-check" data-locale-check="en" aria-hidden="true">{locale === 'en' ? '✓' : ''}</span></a>
+                  </div>
+                </details>
+              </span>
             </nav>
           </header>
           <main id="contenido" class={compact ? 'compact' : undefined}>{children}</main>

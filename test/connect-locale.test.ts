@@ -31,9 +31,17 @@ test('switching languages during and after exchange keeps one private connection
     if (String(path).startsWith('/connect/exchange')) return exchange;
     return Response.json({ connected: true });
   }) as typeof fetch);
+  const menu = c.document.querySelector<HTMLDetailsElement>('.language-menu')!;
+  menu.open = true;
   c.switchTo('en');
   assert.equal(c.url.searchParams.get('lang'), 'en');
   assert.equal(c.document.documentElement.lang, 'en');
+  assert.equal(menu.open, false, 'in-place language selection closes the disclosure');
+  assert.equal(c.document.querySelector('[data-current-locale-label]')!.textContent, 'English');
+  assert.equal(c.document.querySelector('[data-current-locale-label]')!.getAttribute('lang'), 'en');
+  assert.equal(c.document.querySelector('[data-locale-switch="en"]')!.getAttribute('aria-current'), 'page');
+  assert.equal(c.document.querySelector('[data-locale-check="en"]')!.textContent, '✓');
+  assert.equal(c.document.querySelector('[data-locale-check="es"]')!.textContent, '');
   assert.match(c.document.querySelector('.site-nav')!.textContent!, /What to ask/);
   assert.match(c.document.querySelector('.site-footer')!.textContent!, /Code on GitHub/);
   assert.match(c.document.querySelector('h1')!.textContent!, /Connect your cinema account/);
@@ -54,6 +62,10 @@ test('switching languages during and after exchange keeps one private connection
   assert.equal(c.document.getElementById('result-title')!.textContent, 'Account connected');
   c.switchTo('es');
   assert.equal(c.document.getElementById('result-title')!.textContent, 'Cuenta conectada');
+  assert.equal(c.document.querySelector('[data-current-locale-label]')!.textContent, 'Español');
+  assert.equal(c.document.querySelector('[data-locale-switch="es"]')!.getAttribute('aria-current'), 'page');
+  assert.equal(c.document.querySelector('[data-locale-check="es"]')!.textContent, '✓');
+  assert.equal(c.document.querySelector('[data-locale-check="en"]')!.textContent, '');
   assert.equal(calls.length, 2);
 });
 

@@ -47,6 +47,13 @@ test('every view localizes visible text and provides a working language switcher
     for (const html of pages) {
       const $ = load(html);
       assert.equal($('html').attr('lang'), locale);
+      const currentLanguage = locale === 'es' ? 'Español' : 'English';
+      assert.equal($('[data-current-locale-label]').text(), currentLanguage);
+      assert.equal($('[data-current-locale-label]').attr('lang'), locale);
+      assert.equal($(`[data-locale-switch="${locale}"]`).attr('aria-current'), 'page');
+      assert.equal($(`[data-locale-check="${locale}"]`).text(), '✓');
+      assert.equal($(`[data-locale-check="${locale === 'es' ? 'en' : 'es'}"]`).text(), '');
+      assert.equal($('.language-menu').attr('open'), undefined, 'language disclosure starts closed');
       for (const target of ['es', 'en']) {
         const link = $(`[data-locale-switch="${target}"]`);
         assert.equal(new URL(link.attr('href')!, origin).searchParams.get('lang'), target);

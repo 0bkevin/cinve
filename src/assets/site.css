@@ -71,9 +71,18 @@
 .brand span { color: var(--amber); }
 .site-nav { display: flex; gap: 28px; align-items: center; font-size: 15px; }
 .site-nav a { text-decoration: none; color: var(--dust); padding-block: 10px; }
-.language-switch { display: inline-flex; gap: 5px; align-items: center; white-space: nowrap; color: var(--dust); font-size: 13px; }
-.site-nav .language-switch a { padding-block: 6px; }
-.language-switch a[aria-current="page"] { color: var(--foreground); }
+.language-switch { display: inline-flex; align-items: center; white-space: nowrap; color: var(--dust); font-size: 13px; }
+.language-menu { position: relative; }
+.language-trigger { display: inline-flex; align-items: center; gap: 8px; color: var(--dust); cursor: pointer; list-style: none; }
+.language-trigger::-webkit-details-marker { display: none; }
+.language-trigger::marker { content: ''; }
+.language-trigger:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
+.language-trigger .chevron { width: 14px; height: 14px; transition: transform .18s ease; }
+.language-menu[open] .language-trigger .chevron { transform: rotate(180deg); }
+.language-options { position: absolute; z-index: 60; top: calc(100% + 6px); right: 0; width: 150px; display: grid; gap: 2px; padding: 5px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--popover); color: var(--popover-foreground); box-shadow: 0 12px 32px rgb(0 0 0 / .32); }
+.site-nav .language-switch .language-options a { display: flex; justify-content: space-between; align-items: center; gap: 12px; min-height: 38px; padding: 7px 9px; border-radius: calc(var(--radius) - 3px); color: var(--muted-foreground); text-decoration: none; }
+.site-nav .language-options a:hover, .site-nav .language-options a:focus-visible { background: var(--muted); color: var(--foreground); }
+.language-check { min-width: 1em; color: var(--amber); text-align: center; }
 .site-footer { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 40px 48px; margin-top: 48px; padding: 56px 0 28px; color: var(--dust); font-size: 14px; }
 .site-footer a { text-decoration: none; color: var(--dust); transition: color .15s; }
 .site-footer a:hover { color: var(--cream); }

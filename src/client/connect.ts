@@ -69,6 +69,14 @@ function translatePage() {
     link.href = `/connect?lang=${link.dataset.localeSwitch}`;
     if (active) link.setAttribute('aria-current', 'page'); else link.removeAttribute('aria-current');
   }
+  const currentLabel = document.querySelector<HTMLElement>('[data-current-locale-label]');
+  if (currentLabel) {
+    currentLabel.textContent = common[currentLocale === 'es' ? 'spanish' : 'english'] ?? '';
+    currentLabel.lang = currentLocale;
+  }
+  for (const check of document.querySelectorAll<HTMLElement>('[data-locale-check]')) {
+    check.textContent = check.dataset.localeCheck === currentLocale ? '✓' : '';
+  }
 }
 
 function updateAppCopy() {
@@ -86,6 +94,8 @@ document.addEventListener('click', event => {
   event.preventDefault();
   const target = link.dataset.localeSwitch;
   if (target !== 'es' && target !== 'en') return;
+  const languageMenu = link.closest('details') as HTMLDetailsElement | null;
+  if (languageMenu) languageMenu.open = false;
   currentLocale = target;
   const url = new URL(location.href);
   url.searchParams.set('lang', target);
