@@ -1,24 +1,24 @@
-## Qué cambia
+## What changes
 
-<!-- Resume el cambio y el problema que resuelve. -->
+<!-- Summarize the change and the problem it solves. -->
 
-## Cómo se validó
+## How it was tested
 
 - [ ] `npm run check`
 - [ ] `npm test`
 - [ ] `npm run build`
-- [ ] Actualicé la documentación si cambió la interfaz pública.
-- [ ] Añadí o actualicé pruebas cuando cambió el comportamiento.
+- [ ] Updated the documentation if the public interface changed.
+- [ ] Added or updated tests if behavior changed.
 
-## Evidencia
+## Evidence
 
-<!-- Incluye logs anonimizados, capturas o una grabación cuando corresponda. -->
+<!-- Include anonymized logs, screenshots or a recording when relevant. -->
 
-## Issue relacionado
+## Related issue
 
-<!-- Ejemplo: Cierra #123 -->
+<!-- Example: Closes #123 -->
 
-## Seguridad y datos
+## Security and data
 
-- [ ] El cambio no incluye credenciales, cookies, tokens ni datos personales.
-- [ ] Los datos externos nuevos se validan y los resultados inciertos se marcan como parciales.
+- [ ] The change includes no credentials, cookies, tokens or personal data.
+- [ ] New external data is validated and uncertain results are marked as partial.

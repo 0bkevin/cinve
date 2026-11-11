@@ -1,74 +1,74 @@
-name: Reportar un error
-description: Informa un comportamiento incorrecto o una consulta que falla.
-title: "[Error]: "
+name: Report a bug
+description: Report incorrect behavior or a failing query.
+title: "[Bug]: "
 labels:
   - bug
 body:
   - type: markdown
     attributes:
       value: |
-        Gracias por ayudar a mejorar Cinve. No incluyas contraseñas, cookies, tokens ni datos personales.
+        Thanks for helping improve Cinve. Don't include passwords, cookies, tokens or personal data.
 
   - type: checkboxes
     id: checks
     attributes:
-      label: Comprobaciones previas
+      label: Checks
       options:
-        - label: Busqué en los issues y no encontré el mismo problema.
+        - label: I searched the issues and didn't find the same problem.
           required: true
-        - label: Eliminé cualquier credencial o dato personal del reporte.
+        - label: I removed any credentials or personal data from the report.
           required: true
 
   - type: dropdown
     id: provider
     attributes:
-      label: Proveedor
+      label: Provider
       options:
         - Cinepic
         - Cines Unidos
         - Cinex
         - Supercines
         - Gran Cine
-        - Servicio MCP o autenticación
-        - No aplica / no lo sé
+        - MCP service or authentication
+        - Not applicable / not sure
     validations:
       required: true
 
   - type: input
     id: location
     attributes:
-      label: Ciudad o sede
-      description: Déjalo vacío si no aplica. No incluyas datos de tu cuenta.
+      label: City or venue
+      description: Leave empty if not applicable. Don't include account details.
 
   - type: textarea
     id: description
     attributes:
-      label: Qué ocurrió
-      description: Explica el resultado observado y el que esperabas.
+      label: What happened
+      description: Describe what you saw and what you expected.
     validations:
       required: true
 
   - type: textarea
     id: reproduce
     attributes:
-      label: Cómo reproducirlo
-      description: Incluye la consulta, fecha y pasos mínimos.
+      label: How to reproduce
+      description: Include the query, date and minimal steps.
       placeholder: |
-        1. Consulté…
-        2. Cinve respondió…
-        3. Esperaba…
+        1. I asked…
+        2. Cinve answered…
+        3. I expected…
     validations:
       required: true
 
   - type: input
     id: version
     attributes:
-      label: Versión o commit
-      placeholder: main, 0.1.0 o hash del commit
+      label: Version or commit
+      placeholder: main, 0.1.0 or commit hash
 
   - type: textarea
     id: logs
     attributes:
-      label: Logs o contexto adicional
-      description: Adjunta solo información anonimizada.
+      label: Logs or additional context
+      description: Attach anonymized information only.
       render: shell

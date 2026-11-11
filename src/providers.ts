@@ -38,7 +38,7 @@ function providerWarning(c: ReadContext, key: string, message: string | (() => s
   state.suppressed++;
   if (state.aggregateIndex === undefined) {
     state.aggregateIndex = c.warnings.length;
-    c.warnings.push('Se omitieron diagnósticos repetidos o excedentes del proveedor; la respuesta puede ser parcial.');
+    c.warnings.push('Repeated or excess provider diagnostics were omitted; the response may be partial.');
   }
 }
 
@@ -46,9 +46,9 @@ function providerWarningSummary(c: ReadContext) {
   const state = providerWarningStates.get(c);
   if (!state) return;
   for (const entry of state.entries.values()) {
-    if (entry.count > 1) c.warnings[entry.index] = `${entry.base} (repetido ${entry.count} veces).`;
+    if (entry.count > 1) c.warnings[entry.index] = `${entry.base} (repeated ${entry.count} times).`;
   }
-  if (state.aggregateIndex !== undefined && state.suppressed > 1) c.warnings[state.aggregateIndex] = `Se omitieron ${state.suppressed} diagnósticos repetidos o excedentes del proveedor; la respuesta puede ser parcial.`;
+  if (state.aggregateIndex !== undefined && state.suppressed > 1) c.warnings[state.aggregateIndex] = `${state.suppressed} repeated or excess provider diagnostics were omitted; the response may be partial.`;
 }
 
 const CP = {
@@ -57,7 +57,7 @@ const CP = {
 } as const;
 function cpSite(q: Query) {
   const id = requireArg(q, 'cinema_id');
-  if (!(id in CP)) throw new DataError('unavailable', 'Cinepic admite las sedes 123300 (Candelaria) y 123301 (VVIP Lido).');
+  if (!(id in CP)) throw new DataError('unavailable', 'Cinepic supports the venues 123300 (Candelaria) and 123301 (VVIP Lido).');
   return CP[id as keyof typeof CP];
 }
 function isoDate(q: Query) { return q.date ?? today(); }
@@ -78,21 +78,21 @@ export async function cpBuy(q: Query, c: ReadContext) {
   const functionData = findField(records, 'functionData');
   if (functionData === undefined) {
     const $ = load(html); $('script,style').remove();
-    if (/No pudimos mostrar la función/.test($.text()) && /\bAC-001\b/.test($.text())) throw new DataError('unavailable', 'Cinepic informa que no pudo cargar la función (AC-001). Inténtalo nuevamente más tarde.');
+    if (/No pudimos mostrar la función/.test($.text()) && /\bAC-001\b/.test($.text())) throw new DataError('unavailable', 'Cinepic reports that it could not load the showtime (AC-001). Try again later.');
   }
   const f = object(functionData);
   const functions = rows(f.datos, 'functionData.datos');
-  if (text(functions[0]?.id) !== q.session_id || text(functions[0]?.codigo) !== q.movie_id) throw new DataError('unavailable', 'La página no corresponde a la función y película solicitadas.');
+  if (text(functions[0]?.id) !== q.session_id || text(functions[0]?.codigo) !== q.movie_id) throw new DataError('unavailable', 'The page does not match the requested showtime and movie.');
   return { records, f, url };
 }
 export async function cinepic(op: Operation, q: Query, c: ReadContext): Promise<DataItem[]> {
   if (op === 'cities') {
-    c.warnings.push('Cobertura Cinepic configurada: solo Caracas; list_cities no consulta los dos sitios de sede.');
+    c.warnings.push('Configured Cinepic coverage: Caracas only; list_cities does not query the two venue sites.');
     return [{ kind: 'city', id: 'Caracas', name: 'Caracas' }];
   }
   if (op === 'cinemas') {
     if (q.city && folded(q.city) !== 'caracas') return [];
-    c.warnings.push('Cobertura Cinepic: dos sedes configuradas, Candelaria y VVIP; no hay descubrimiento automático de nuevas sedes.');
+    c.warnings.push('Cinepic coverage: two configured venues, Candelaria and VVIP; new venues are not discovered automatically.');
     return Promise.all(Object.entries(CP).map(async ([id, site]) => {
       const url = `${site.host}/es-AR`;
       try {
@@ -100,13 +100,13 @@ export async function cinepic(op: Operation, q: Query, c: ReadContext): Promise<
         const configs = [...objects(records)].filter(r => text(r.idUltracine) === id && text(r.nombre));
         const config = configs[0];
         if (!config || text(config.nombre).length > 512 || configs.some(r => text(r.nombre) !== text(config.nombre))) {
-          throw new DataError('error', 'Configuración pública de sede ausente o contradictoria.');
+          throw new DataError('error', 'Public venue configuration missing or contradictory.');
         }
         return { kind: 'cinema' as const, id, cinema_id: id, code_status: 'verified' as const,
           name: text(config.nombre), city: 'Caracas', address: text(config.direccion), url };
       } catch (error) {
         c.partial = true;
-        c.warnings.push(`${site.name}: no se pudo verificar la configuración actual; se conserva la sede conocida y su enlace. Esto no indica cierre. ${error instanceof DataError ? error.message : ''}`);
+        c.warnings.push(`${site.name}: the current configuration could not be verified; the known venue and its link are kept. This does not indicate a closure. ${error instanceof DataError ? error.message : ''}`);
         return { kind: 'cinema' as const, id: `directory-cinepic-${id}`, code_status: 'unverified' as const, name: site.name, city: 'Caracas', url };
       }
     }));
@@ -116,8 +116,8 @@ export async function cinepic(op: Operation, q: Query, c: ReadContext): Promise<
       const url = `https://api.cinexo.com.ar/api/complejo/${encodeURIComponent(q.cinema_id!)}/candy`;
       const candy = object(await c.json(url));
       const units = rows(candy.unidades_negocios, 'candy.unidades_negocios');
-      if (units.length) throw new DataError('unavailable', 'El catálogo Cinepic dejó de estar vacío; su esquema de productos y moneda necesita validación antes de mostrar precios.');
-      c.warnings.push('La API pública devolvió caramelería vacía para esta sede; no implica que no venda productos en taquilla.');
+      if (units.length) throw new DataError('unavailable', 'The Cinepic catalog is no longer empty; its product and currency schema needs validation before prices are shown.');
+      c.warnings.push('The public API returned no concessions for this venue; this does not mean it sells no products at the box office.');
       return [];
   }
   if (op === 'prices') {
@@ -126,11 +126,11 @@ export async function cinepic(op: Operation, q: Query, c: ReadContext): Promise<
     const rate = number(cfg.tasaConversion);
     // Verified in the current purchase JS: tarifa.precio is labeled '(Bs.)';
     // checkout divides SubtotalTarifas by tasaConversion and sets currency:'USD'.
-    c.warnings.push('Tarifas en VES según la interfaz del proveedor. USD calculado con su tasa de conversión, no una tasa BCV verificada; cargos finales no verificados.');
-    if (rate === undefined || rate <= 0) c.warnings.push('Sin tasa de conversión positiva; se omite la equivalencia USD.');
+    c.warnings.push('Prices in VES according to the provider\'s interface. USD calculated with its conversion rate, not a verified BCV rate; final charges not verified.');
+    if (rate === undefined || rate <= 0) c.warnings.push('No positive conversion rate; the USD equivalent is omitted.');
     return rows(f.tarifas, 'functionData.tarifas').map(r => {
       const amount = number(r.precio);
-      if (amount === undefined || amount < 0) throw new DataError('error', 'Tarifa sin importe válido.');
+      if (amount === undefined || amount < 0) throw new DataError('error', 'Price without a valid amount.');
       const prices: NonNullable<DataItem['prices']> = [{ currency: 'VES', amount, basis: 'provider' }];
       if (rate !== undefined && rate > 0) prices.push({ currency: 'USD', amount: Number((amount / rate).toFixed(2)), basis: 'provider_conversion' });
       return { kind: 'ticket_price', id: requiredText(r, '_id'), name: requiredText(r, 'descripcion'),
@@ -142,7 +142,7 @@ export async function cinepic(op: Operation, q: Query, c: ReadContext): Promise<
   const [year, month, day] = date.split('-');
   const url = `https://apifront.cinexo.com.ar/mobile/consultas/peliculas/PeliculasConFuncionesYHorarios?${new URLSearchParams({ idComplejo: q.cinema_id!, fecha: `${day}/${month}/${year}` })}`;
   const payload = object(await c.json(url));
-  if (payload.success !== true) throw new DataError('error', 'Cinepic no confirmó el éxito de la consulta.');
+  if (payload.success !== true) throw new DataError('error', 'Cinepic did not confirm that the query succeeded.');
   const data = object(payload.data);
   const movies = rows(data.datos, 'data.datos'), sessions = rows(data.funciones, 'data.funciones');
   const names = new Map(movies.map(r => [text(r.peliculas_codigo), r]));
@@ -152,32 +152,32 @@ export async function cinepic(op: Operation, q: Query, c: ReadContext): Promise<
       const movie = names.get(mid);
       if (movie && text(movie.peliculas_nombre)) return { ...movieCP(movie, site.host), cinema_id: q.cinema_id };
       c.partial = true;
-      c.warnings.push(`Película ${mid}: hay funciones pero no se recibió una ficha con título; se conserva la referencia.`);
-      return { kind: 'movie', id: mid, name: `Película ${mid}`, cinema_id: q.cinema_id,
+      c.warnings.push(`Movie ${mid}: there are showtimes but no movie record with a title was received; the reference is kept.`);
+      return { kind: 'movie', id: mid, name: `Movie ${mid}`, cinema_id: q.cinema_id,
         url: `${site.host}/es-AR/programacion/${encodeURIComponent(mid)}` };
     });
   }
   return sessions.filter(r => !q.movie_id || text(r.codPelicula) === q.movie_id).map(r => {
     const id = requiredText(r, '_id'), mid = requiredText(r, 'codPelicula'), movie = names.get(mid);
     const time = requiredText(r, 'hora');
-    if (!/^\d{2}:\d{2}$/.test(time) || Number(time.slice(0, 2)) > 23 || Number(time.slice(3)) > 59) throw new DataError('error', 'Horario Cinepic inválido.');
+    if (!/^\d{2}:\d{2}$/.test(time) || Number(time.slice(0, 2)) > 23 || Number(time.slice(3)) > 59) throw new DataError('error', 'Invalid Cinepic showtime.');
     const overnight = flagValue(r.trasnoche);
     if (overnight === undefined) {
       c.partial = true;
-      providerWarning(c, 'cinepic-unknown-trasnoche', () => `Función ${warningLabel(id)}: Cinepic no confirmó si es trasnoche; se omite la marca de fecha calendario.`);
+      providerWarning(c, 'cinepic-unknown-trasnoche', () => `Showtime ${warningLabel(id)}: Cinepic did not confirm whether it is a late-night showing; the calendar date marker is omitted.`);
     } else if (overnight) {
-      providerWarning(c, 'cinepic-trasnoche', () => `Función ${warningLabel(id)}: trasnoche; fecha comercial recibida, fecha calendario sin confirmar.`);
+      providerWarning(c, 'cinepic-trasnoche', () => `Showtime ${warningLabel(id)}: late-night showing; business date received, calendar date unconfirmed.`);
     }
     if (!movie || !text(movie.peliculas_nombre)) {
       c.partial = true;
-      providerWarning(c, 'cinepic-missing-movie-title', () => `Función ${warningLabel(id)}: no se recibió ficha con título de la película ${warningLabel(mid)}.`);
+      providerWarning(c, 'cinepic-missing-movie-title', () => `Showtime ${warningLabel(id)}: no record with a title was received for movie ${warningLabel(mid)}.`);
     }
     const subtitled = flagValue(r.subtitulada);
     if (subtitled === undefined) {
       c.partial = true;
-      providerWarning(c, 'cinepic-unknown-subtitle', () => `Función ${warningLabel(id)}: Cinepic no confirmó el estado de subtítulos; se omite language.`);
+      providerWarning(c, 'cinepic-unknown-subtitle', () => `Showtime ${warningLabel(id)}: Cinepic did not confirm the subtitle status; language is omitted.`);
     }
-    return { kind: 'showtime', id, name: text(movie?.peliculas_nombre) || `Película ${mid}`, cinema_id: q.cinema_id, cinema_name: site.name, movie_id: mid,
+    return { kind: 'showtime', id, name: text(movie?.peliculas_nombre) || `Movie ${mid}`, cinema_id: q.cinema_id, cinema_name: site.name, movie_id: mid,
       date, time, starts_at: overnight === true ? undefined : overnight === false ? `${date}T${time}:00-04:00` : undefined,
       format: text(r.formato), language: subtitled === undefined ? undefined : subtitled ? 'subtitulada' : 'no_subtitulada',
       url: `${site.host}/es-AR/compra?${new URLSearchParams({ cid: q.cinema_id!, fid: id, pid: mid })}` };
@@ -188,26 +188,26 @@ const CU = 'https://www.cinesunidos.com';
 export async function cinesunidos(op: Operation, q: Query, c: ReadContext): Promise<DataItem[]> {
   if (op === 'cities') {
     const data = await c.json('https://gateway.cinesunidos.com/search/cities');
-    if (!Array.isArray(data) || data.some(r => typeof r !== 'string')) throw new DataError('error', 'Lista de ciudades no reconocida.');
+    if (!Array.isArray(data) || data.some(r => typeof r !== 'string')) throw new DataError('error', 'Unrecognized city list.');
     return data.map(r => ({ kind: 'city', id: r, name: r }));
   }
   if (op === 'prices') {
     const url = `https://gateway.cinesunidos.com/tickets/www/theaters/${encodeURIComponent(requireArg(q, 'cinema_id'))}/sessions/${encodeURIComponent(requireArg(q, 'session_id'))}/`;
     const body = await c.authenticated('cinesunidos', url);
-    let data: unknown; try { data = JSON.parse(body); } catch { throw new DataError('error', 'El proveedor no devolvió JSON de tarifas válido.'); }
-    c.warnings.push('Tarifas de la función autenticada; revisa restricciones de canje/edad. No es un total final de compra.');
+    let data: unknown; try { data = JSON.parse(body); } catch { throw new DataError('error', 'The provider did not return valid price JSON.'); }
+    c.warnings.push('Prices for the authenticated showtime; check redemption/age restrictions. Not a final purchase total.');
     return parseCinesUnidosPrices(data, q, url);
   }
   if (op === 'concessions') {
     const id = requireArg(q, 'cinema_id');
     const url = `https://gateway.cinesunidos.com/concessions/www/cinemas/${encodeURIComponent(id)}/concessions`;
-    c.warnings.push('Precios y stock del catálogo de esta sede; impuestos incluidos y cargos finales no verificados.');
+    c.warnings.push('Prices and stock from this venue\'s catalog; taxes included and final charges not verified.');
     return rows(await c.json(url), 'concessions').map(r => {
       const prices: NonNullable<DataItem['prices']> = [];
       for (const [key, currency] of [['itemPriceUSD', 'USD'], ['itemPriceVE', 'VES']] as const) {
         const amount = number(r[key]); if (amount !== undefined && amount >= 0) prices.push({ currency, amount, basis: 'provider' });
       }
-      if (!prices.length) c.warnings.push(`Producto ${warningLabel(r.itemId)} sin precio verificable.`);
+      if (!prices.length) c.warnings.push(`Product ${warningLabel(r.itemId)} without a verifiable price.`);
       return { kind: 'concession', id: requiredText(r, 'itemId'), name: requiredText(r, 'itemDescription'), cinema_id: id,
         category: text(r.itemClassDescription), stock: number(r.itemStock), prices, final_total_verified: false, image_url: text(r.itemImageUrl), url: `${CU}/carameleria` };
     });
@@ -235,7 +235,7 @@ export async function cinesunidos(op: Operation, q: Query, c: ReadContext): Prom
     if (!(error instanceof DataError) || error.status !== 'blocked') throw error;
     return cinesUnidosGateway(op, q, c, city);
   }
-  if (!fields.length) throw new DataError('error', `No se reconoció el catálogo Cines Unidos: ${key}.`);
+  if (!fields.length) throw new DataError('error', `Unrecognized Cines Unidos catalog: ${key}.`);
   if (op === 'cinemas') return parseCinemaDirectory(fields, city, url, c);
   const movies = fields.flatMap(field => rows(field, 'movies'));
   const items: DataItem[] = [];
@@ -248,7 +248,7 @@ export async function cinesunidos(op: Operation, q: Query, c: ReadContext): Prom
       if (q.cinema_id && cid !== q.cinema_id) continue;
       for (const s of rows(cinema.showTimes, 'theater.showTimes')) {
         const raw = requiredText(s, 'date');
-        if (!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/.test(raw) || !DateInput.safeParse(raw.slice(0, 10)).success) throw new DataError('error', 'Fecha Cines Unidos con formato no reconocido.');
+        if (!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/.test(raw) || !DateInput.safeParse(raw.slice(0, 10)).success) throw new DataError('error', 'Cines Unidos date in an unrecognized format.');
         if (raw.slice(0, 10) !== isoDate(q)) continue;
         sessions.push({ kind: 'showtime', id: requiredText(s, 'id'), name: requiredText(m, 'title'), cinema_id: cid, cinema_name: warningLabel(text(cinema.name), 200) || undefined, movie_id: mid,
           date: raw.slice(0, 10), time: raw.slice(11, 16), starts_at: `${raw}-04:00`, screen: text(s.screen), format: text(s.format),
@@ -265,7 +265,7 @@ export async function cinesunidos(op: Operation, q: Query, c: ReadContext): Prom
 async function cinesUnidosCity(city: string, q: Query, c: ReadContext): Promise<string> {
   const cities = await cinesunidos('cities', q, c);
   const canonical = cities.find(r => folded(r.name) === folded(city))?.name;
-  if (!canonical) throw new DataError('unavailable', 'Ciudad no reconocida por Cines Unidos; consulta list_cities.');
+  if (!canonical) throw new DataError('unavailable', 'City not recognized by Cines Unidos; check list_cities.');
   return canonical;
 }
 
@@ -280,24 +280,24 @@ async function cinesUnidosGateway(op: Operation, q: Query, c: ReadContext, reque
   const city = await cinesUnidosCity(requestedCity, q, c);
   const base = `https://gateway.cinesunidos.com/search/cities/${encodeURIComponent(city)}`;
   const pageUrl = (path: string) => `${CU}/${path}?${new URLSearchParams({ city })}`;
-  c.warnings.push('La web de Cines Unidos rechazó la consulta automatizada; los datos provienen de su API pública de búsqueda.');
+  c.warnings.push('The Cines Unidos website rejected the automated query; the data comes from its public search API.');
   if (op === 'cinemas') return parseCinemaDirectory([rows(await c.json(`${base}/theaters`), 'gateway theaters')], city, pageUrl('cines'), c);
   const films = await c.json(`${base}/films`);
-  if (!Array.isArray(films) || films.some(t => typeof t !== 'string')) throw new DataError('error', 'Lista de películas de Cines Unidos no reconocida.');
+  if (!Array.isArray(films) || films.some(t => typeof t !== 'string')) throw new DataError('error', 'Unrecognized Cines Unidos movie list.');
   // The service filters results by name; the session title is the searched
   // film title, so a name filter can skip the searches it would discard.
   const titles = [...new Set((films as string[]).map(t => t.trim()).filter(t => t && t.length <= 200))]
     .filter(t => !q.query || folded(t).includes(folded(q.query)));
   if (titles.length > cuGatewayTitles) {
     c.partial = true;
-    c.warnings.push(`Se consultaron ${cuGatewayTitles} de ${titles.length} títulos de Cines Unidos; el resultado es parcial.`);
+    c.warnings.push(`${cuGatewayTitles} of ${titles.length} Cines Unidos titles were queried; the result is partial.`);
   }
   const date = isoDate(q);
   // Normalize each title's sessions inside its own settled task: a title
   // whose records are malformed fails alone instead of taking the others along.
   const normalize = (s: Obj): DataItem | undefined => {
     const raw = requiredText(s, 'showtime');
-    if (!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/.test(raw) || !DateInput.safeParse(raw.slice(0, 10)).success) throw new DataError('error', 'Fecha Cines Unidos con formato no reconocido.');
+    if (!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/.test(raw) || !DateInput.safeParse(raw.slice(0, 10)).success) throw new DataError('error', 'Cines Unidos date in an unrecognized format.');
     const mid = requiredText(s, 'ho'), cid = requiredText(s, 'cinemaId'), name = requiredText(s, 'title');
     if (raw.slice(0, 10) !== date || (q.cinema_id && cid !== q.cinema_id) || (q.movie_id && mid !== q.movie_id)) return undefined;
     const item: DataItem = { kind: 'showtime', id: requiredText(s, 'sessionId'), name, cinema_id: cid, movie_id: mid,
@@ -323,7 +323,7 @@ async function cinesUnidosGateway(op: Operation, q: Query, c: ReadContext, reque
           .map(normalize).filter((item): item is DataItem => item !== undefined));
         succeeded++;
       } catch (error) { failures.push(error); }
-      c.progress(`Cines Unidos: ${succeeded + failures.length} de ${work.length} títulos consultados.`);
+      c.progress(`Cines Unidos: ${succeeded + failures.length} of ${work.length} titles queried.`);
     }
   };
   await Promise.all(Array.from({ length: Math.min(cuGatewayWorkers, work.length) }, worker));
@@ -331,13 +331,13 @@ async function cinesUnidosGateway(op: Operation, q: Query, c: ReadContext, reque
   // One failed title must not discard every other title's schedule.
   if (failures.length) {
     c.partial = true;
-    c.warnings.push(`No se pudieron consultar las funciones de ${failures.length} de ${work.length} títulos de Cines Unidos; el resultado es parcial.`);
+    c.warnings.push(`Showtimes could not be queried for ${failures.length} of ${work.length} Cines Unidos titles; the result is partial.`);
   }
   if (skipped) {
     c.partial = true;
-    c.warnings.push(`Se agotó el tiempo de consulta antes de leer ${skipped} de ${work.length} títulos de Cines Unidos; usa query con el título para consultarlos.`);
+    c.warnings.push(`The query timed out before reading ${skipped} of ${work.length} Cines Unidos titles; use query with the title to look them up.`);
   }
-  if (work.length && !succeeded) throw failures[0] ?? new DataError('unavailable', 'Se agotó el tiempo de consulta de Cines Unidos; usa query con el título de la película.');
+  if (work.length && !succeeded) throw failures[0] ?? new DataError('unavailable', 'The Cines Unidos query timed out; use query with the movie title.');
   const movies = new Map<string, DataItem>();
   for (const s of showtimes) if (!movies.has(s.movie_id!)) movies.set(s.movie_id!, { kind: 'movie', id: s.movie_id!, name: s.name, city, url: s.url });
   return op === 'showtimes' ? showtimes : [...movies.values()];
@@ -353,14 +353,14 @@ export function parseCinexMovies(html: string): DataItem[] {
     const name = decodeLabel($(e).attr('title') || $(e).attr('alt'));
     if (name) items.set(match[1], { kind: 'movie', id: match[1], name, url: `${CX}/sinopsis-${match[1]}.html` });
   });
-  if (!items.size) throw new DataError('error', 'No se reconoció la cartelera HTML de Cinex.');
+  if (!items.size) throw new DataError('error', 'Unrecognized Cinex HTML listings.');
   return [...items.values()];
 }
 export function parseCinexShowtimes(html: string, movieId: string, date: string, c?: ReadContext): DataItem[] {
   const $ = load(html);
   const title = decodeLabel($('h1').first().text() || movieId);
   const nodes = $('[onclick*="checkLogin("]');
-  if (!nodes.length) throw new DataError('unavailable', 'La ficha Cinex no contiene funciones reconocibles.');
+  if (!nodes.length) throw new DataError('unavailable', 'The Cinex movie page contains no recognizable showtimes.');
   let malformed = 0;
   // Read every date on the page first: a session ID reported on two dates is
   // as contradictory as one reported at two times, and filtering by the
@@ -385,14 +385,14 @@ export function parseCinexShowtimes(html: string, movieId: string, date: string,
   for (const list of occurrences.values()) {
     if (!list.some(item => item.date === date)) continue;
     if (list.some(item => cinexSessionConflict(list[0], item))) {
-      if (c) { c.partial = true; providerWarning(c, 'cinex-movie-conflict', () => `Cinex devolvió horarios contradictorios para la función ${warningLabel(list[0].id)}; se omitió.`); }
+      if (c) { c.partial = true; providerWarning(c, 'cinex-movie-conflict', () => `Cinex returned contradictory times for showtime ${warningLabel(list[0].id)}; it was omitted.`); }
       continue;
     }
     items.push(list[0]);
   }
   if (malformed && c) {
     c.partial = true;
-    providerWarning(c, 'cinex-movie-malformed-session', 'Cinex devolvió una o más funciones de película con epoch o identificador malformado; se omitieron.');
+    providerWarning(c, 'cinex-movie-malformed-session', 'Cinex returned one or more movie showtimes with a malformed epoch or identifier; they were omitted.');
   }
   if (c) providerWarningSummary(c);
   return items;
@@ -413,7 +413,7 @@ const cinexMovieTitle = (name: string) => folded(name).replace(/[^a-z0-9]/g, '')
 
 /** Parse the calendar-style cinema page, whose blocks have titles but no movie slugs. */
 export function parseCinexCinemaShowtimes(html: string, movies: DataItem[], cinemaId: string, date: string, c: ReadContext, url: string, cinemaName?: string): DataItem[] {
-  if (!Id.safeParse(cinemaId).success) throw new DataError('error', 'Código de sede Cinex inválido.');
+  if (!Id.safeParse(cinemaId).success) throw new DataError('error', 'Invalid Cinex venue code.');
   const byTitle = new Map<string, DataItem[]>();
   for (const movie of movies) {
     const key = cinexMovieTitle(movie.name);
@@ -449,7 +449,7 @@ export function parseCinexCinemaShowtimes(html: string, movies: DataItem[], cine
     });
     if (validEpochNodes.length !== sessionNodes.length) {
       c.partial = true;
-      providerWarning(c, 'cinex-cinema-malformed-epoch', 'Cinex devolvió una o más funciones de sede con hora epoch ausente o malformada; se omitieron.');
+      providerWarning(c, 'cinex-cinema-malformed-epoch', 'Cinex returned one or more venue showtimes with a missing or malformed epoch time; they were omitted.');
     }
     const datedNodes = validEpochNodes.filter((_, e) => new Date(number($(e).attr('alt'))! * 1000 - 4 * 3600000).toISOString().slice(0, 10) === date);
     // Do not report a missing catalog match for a different commercial date
@@ -461,10 +461,10 @@ export function parseCinexCinemaShowtimes(html: string, movies: DataItem[], cine
     if (matches.length !== 1) {
       c.partial = true;
       providerWarning(c, !title ? 'cinex-cinema-missing-title' : matches.length > 1 ? 'cinex-cinema-ambiguous-title' : 'cinex-cinema-unknown-title', () => !title
-        ? 'Cinex devolvió una función sin título de película; se omitió porque no se puede confirmar su movie_id.'
+        ? 'Cinex returned a showtime without a movie title; it was omitted because its movie_id cannot be confirmed.'
         : matches.length > 1
-          ? `Cinex devolvió una función con título ambiguo (${warningLabel(title)}); se omitió porque no se puede confirmar su movie_id.`
-          : `Cinex no encontró el título de función en su catálogo (${warningLabel(title)}); se omitió porque no se puede confirmar su movie_id.`);
+          ? `Cinex returned a showtime with an ambiguous title (${warningLabel(title)}); it was omitted because its movie_id cannot be confirmed.`
+          : `Cinex did not find the showtime title in its catalog (${warningLabel(title)}); it was omitted because its movie_id cannot be confirmed.`);
       return;
     }
     const movie = matches[0];
@@ -473,11 +473,11 @@ export function parseCinexCinemaShowtimes(html: string, movies: DataItem[], cine
       const match = raw.match(/checkLogin\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]\s*\)/i);
       const epoch = number($(e).attr('alt'));
       if (!match || epoch === undefined || !Number.isInteger(epoch) || epoch < 1e9 || epoch > 1e11) {
-        c.partial = true; providerWarning(c, 'cinex-cinema-malformed-session', () => `Cinex omitió una función malformada de ${warningLabel(title || 'película sin título')}.`); return;
+        c.partial = true; providerWarning(c, 'cinex-cinema-malformed-session', () => `Cinex omitted a malformed showtime of ${warningLabel(title || 'untitled movie')}.`); return;
       }
       const sessionId = match[1], sourceCinema = match[2];
       if (!Id.safeParse(sessionId).success || sourceCinema !== cinemaId) {
-        c.partial = true; providerWarning(c, 'cinex-cinema-invalid-id', () => `Cinex omitió una función con identificador de sede o sesión no verificable (${warningLabel(sessionId)}).`); return;
+        c.partial = true; providerWarning(c, 'cinex-cinema-invalid-id', () => `Cinex omitted a showtime with an unverifiable venue or session identifier (${warningLabel(sessionId)}).`); return;
       }
       const local = new Date(epoch * 1000 - 4 * 3600000).toISOString().slice(0, 19);
       if (local.slice(0, 10) !== date) return;
@@ -490,13 +490,13 @@ export function parseCinexCinemaShowtimes(html: string, movies: DataItem[], cine
       if (suppressed.has(key)) return;
       const previous = items.get(key);
       if (contradictory.has(key) || (previous && cinexSessionConflict(previous, item))) {
-        c.partial = true; providerWarning(c, 'cinex-cinema-conflict', () => `Cinex devolvió horarios contradictorios para la función ${warningLabel(sessionId)}; se omitió.`); items.delete(key); suppressed.add(key); return;
+        c.partial = true; providerWarning(c, 'cinex-cinema-conflict', () => `Cinex returned contradictory times for showtime ${warningLabel(sessionId)}; it was omitted.`); items.delete(key); suppressed.add(key); return;
       }
       items.set(key, item);
     });
   });
-  if (!blocks) throw new DataError('error', 'No se reconoció la estructura de funciones de Cinex.');
-  if (!nodes) providerWarning(c, 'cinex-cinema-no-sessions', 'Cinex no devolvió funciones para la fecha solicitada.');
+  if (!blocks) throw new DataError('error', 'Unrecognized Cinex showtime structure.');
+  if (!nodes) providerWarning(c, 'cinex-cinema-no-sessions', 'Cinex returned no showtimes for the requested date.');
   providerWarningSummary(c);
   return [...items.values()];
 }
@@ -509,19 +509,19 @@ export async function cinex(op: Operation, q: Query, c: ReadContext, catalog = n
   if (op === 'prices') {
     // Cinex publishes ticket prices only on the authenticated function page.
     const sessionId = requireArg(q, 'session_id');
-    if ((await c.authenticated('cinex', `${CX}/checklogin.php`)).trim() !== 'on') throw new DataError('auth_required', 'La sesión Cinex expiró. Ejecuta npm run login -- cinex en una terminal local.');
+    if ((await c.authenticated('cinex', `${CX}/checklogin.php`)).trim() !== 'on') throw new DataError('auth_required', 'The Cinex session expired. Run npm run login -- cinex in a local terminal.');
     const url = `${CX}/boletos.php?${new URLSearchParams({ sessionid: sessionId, cinemaid: requireArg(q, 'cinema_id') })}`;
-    c.warnings.push('Importe VES de la función, con boleto y otros cargos desglosados; no es un total final de compra.');
+    c.warnings.push('VES amount for the showtime, with the ticket and other charges itemized; not a final purchase total.');
     return parseCinexPrices(await c.authenticated('cinex', url), q, url);
   }
   if (op === 'concessions') {
-    if ((await c.authenticated('cinex', `${CX}/checklogin.php`)).trim() !== 'on') throw new DataError('auth_required', 'La sesión Cinex expiró. Ejecuta npm run login -- cinex en una terminal local.');
+    if ((await c.authenticated('cinex', `${CX}/checklogin.php`)).trim() !== 'on') throw new DataError('auth_required', 'The Cinex session expired. Run npm run login -- cinex in a local terminal.');
     const url = `${CX}/concesiones.php?${new URLSearchParams({ cinemaid: requireArg(q, 'cinema_id') })}`;
-    c.warnings.push('Precios VES del catálogo de sede. La cantidad máxima del formulario no se interpreta como stock; cargos finales no verificados.');
+    c.warnings.push('VES prices from the venue catalog. The form\'s maximum quantity is not interpreted as stock; final charges not verified.');
     return parseCinexConcessions(await c.authenticated('cinex', url), q, url);
   }
   if (op === 'movies') {
-    c.warnings.push('Cinex devuelve el catálogo general; consulta funciones para confirmar fecha y sede.');
+    c.warnings.push('Cinex returns the general catalog; look up showtimes to confirm date and venue.');
     return parseCinexMovies(await c.get(`${CX}/cartelera.html`));
   }
   const date = isoDate(q);
@@ -532,7 +532,7 @@ export async function cinex(op: Operation, q: Query, c: ReadContext, catalog = n
     try {
       return parseCinexShowtimes(await c.get(`${CX}/sinopsis-${encodeURIComponent(mid)}.html`), mid, date, c);
     } catch (error) {
-      if (error instanceof DataError && error.status === 'unavailable') throw new DataError('unavailable', 'La ficha Cinex de esta película no lista funciones. Consulta get_showtimes con el cinema_id de cada sede (list_cinemas), que lee la programación de la sede.');
+      if (error instanceof DataError && error.status === 'unavailable') throw new DataError('unavailable', 'The Cinex page for this movie lists no showtimes. Call get_showtimes with the cinema_id of each venue (list_cinemas), which reads the venue\'s schedule.');
       throw error;
     }
   }
@@ -564,17 +564,17 @@ async function cinexCityShowtimes(q: Query, c: ReadContext, catalog: CinexCinema
   const venues = listed.filter((v): v is DataItem & { cinema_id: string } => v.code_status === 'verified' && !!v.cinema_id);
   // Known venues without a verified code are unread schedules, not an empty
   // city: report a failure. Only a city with no Cinex venue at all is empty.
-  if (listed.length && !venues.length) throw new DataError('unavailable', 'No se pudo verificar el código de ninguna sede Cinex de esta ciudad, así que no se leyó su programación; consulta list_cinemas y sus enlaces oficiales.');
+  if (listed.length && !venues.length) throw new DataError('unavailable', 'No Cinex venue code in this city could be verified, so their schedules were not read; check list_cinemas and its official links.');
   if (!venues.length) {
-    c.warnings.push('No se encontraron sedes Cinex en esta ciudad; consulta list_cities para ver los nombres disponibles.');
+    c.warnings.push('No Cinex venues were found in this city; check list_cities for the available names.');
     return [];
   }
   const work = venues.slice(0, cinexCityVenues);
   if (venues.length > work.length) {
     c.partial = true;
-    c.warnings.push(`Se consultaron ${work.length} de ${venues.length} sedes Cinex de la ciudad; usa cinema_id para las demás.`);
+    c.warnings.push(`${work.length} of ${venues.length} Cinex venues in the city were queried; use cinema_id for the rest.`);
   }
-  const timedOut = () => new DataError('unavailable', 'Se agotó el tiempo de consulta de las sedes Cinex de la ciudad; consulta get_showtimes con el cinema_id de cada sede (list_cinemas).');
+  const timedOut = () => new DataError('unavailable', 'The query of the city\'s Cinex venues timed out; call get_showtimes with the cinema_id of each venue (list_cinemas).');
   if (Date.now() >= deadline) throw timedOut();
   const movies = parseCinexMovies(await c.get(`${CX}/cartelera.html`, 120000));
   const items: DataItem[] = [], failed: string[] = [];
@@ -590,7 +590,7 @@ async function cinexCityShowtimes(q: Query, c: ReadContext, catalog: CinexCinema
       } catch (error) {
         failed.push(v.name); firstError ??= error;
       }
-      c.progress(`Cinex: ${succeeded + failed.length} de ${work.length} sedes leídas.`);
+      c.progress(`Cinex: ${succeeded + failed.length} of ${work.length} venues read.`);
     }
   };
   await Promise.all(Array.from({ length: Math.min(cinexCityWorkers, work.length) }, worker));
@@ -598,11 +598,11 @@ async function cinexCityShowtimes(q: Query, c: ReadContext, catalog: CinexCinema
   const names = (list: string[]) => list.map(n => warningLabel(n, 60)).join(', ');
   if (failed.length) {
     c.partial = true;
-    c.warnings.push(`No se pudieron leer las funciones de ${failed.length} sedes Cinex (${names(failed)}); consulta su cinema_id por separado.`);
+    c.warnings.push(`Showtimes could not be read for ${failed.length} Cinex venues (${names(failed)}); query their cinema_id separately.`);
   }
   if (skipped.length) {
     c.partial = true;
-    c.warnings.push(`Se agotó el tiempo de consulta antes de leer ${skipped.length} sedes Cinex (${names(skipped)}); consulta su cinema_id por separado.`);
+    c.warnings.push(`The query timed out before reading ${skipped.length} Cinex venues (${names(skipped)}); query their cinema_id separately.`);
   }
   // No venue read means no schedule was observed: that is a failure, not "empty".
   if (!succeeded) throw firstError ?? timedOut();

@@ -4,7 +4,7 @@ import { DataError, text } from './core.js';
 export type Obj = Record<string, unknown>;
 export const object = (v: unknown): Obj => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Obj : {};
 export function rows(v: unknown, name: string): Obj[] {
-  if (!Array.isArray(v) || v.some(r => !r || typeof r !== 'object' || Array.isArray(r))) throw new DataError('error', `Cambió la estructura del proveedor: ${name}.`);
+  if (!Array.isArray(v) || v.some(r => !r || typeof r !== 'object' || Array.isArray(r))) throw new DataError('error', `The provider\'s structure changed: ${name}.`);
   return v as Obj[];
 }
 /** Parses JSON only; never evaluates page scripts. Concatenation handles split Flight records. */
@@ -40,7 +40,7 @@ export function flight(html: string): unknown[] {
     const i = line.indexOf(':'); if (i < 0) continue;
     try { result.push(JSON.parse(line.slice(i + 1))); } catch { /* Import and length-prefixed text records aren't JSON. */ }
   }
-  if (!result.length) throw new DataError('error', 'No se encontraron datos Next.js legibles; posible cambio del proveedor.');
+  if (!result.length) throw new DataError('error', 'No readable Next.js data was found; the provider may have changed.');
   return result;
 }
 export function findField(roots: unknown[], key: string): unknown {
@@ -52,11 +52,11 @@ function* nodes(root: unknown): Generator<unknown> {
   const stack = [{ value: root, depth: 0 }]; let visited = 0;
   while (stack.length) {
     const { value, depth } = stack.pop()!;
-    if (++visited > 100000 || depth > 64) throw new DataError('error', 'Los datos del proveedor exceden los límites de estructura.');
+    if (++visited > 100000 || depth > 64) throw new DataError('error', 'The provider\'s data exceeds the structure limits.');
     if (!value || typeof value !== 'object') continue;
     yield value;
     const children = Object.values(value);
-    if (stack.length + children.length > 100000) throw new DataError('error', 'Los datos del proveedor exceden los límites de estructura.');
+    if (stack.length + children.length > 100000) throw new DataError('error', 'The provider\'s data exceeds the structure limits.');
     for (let i = children.length - 1; i >= 0; i--) stack.push({ value: children[i], depth: depth + 1 });
   }
 }
@@ -84,7 +84,7 @@ export function decodeLabel(value: unknown): string {
 }
 export function requiredText(row: Obj, key: string): string {
   const value = text(row[key]);
-  if (!value) throw new DataError('error', `Campo obligatorio ausente: ${key}.`);
+  if (!value) throw new DataError('error', `Required field is missing: ${key}.`);
   return value;
 }
 

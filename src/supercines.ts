@@ -29,10 +29,10 @@ export function parseSupercinesVenues(data: unknown, c: ReadContext): Venue[] {
   }
   if (skipped) {
     c.partial = true;
-    c.warnings.push(`Supercines devolvió ${skipped} sedes sin identificador, nombre o ciudad reconocibles; se omitieron.`);
+    c.warnings.push(`Supercines returned ${skipped} venues without a recognizable identifier, name or city; they were omitted.`);
   }
-  if (new Set(venues.map(v => v.id)).size !== venues.length) throw new DataError('error', 'El directorio de Supercines repite identificadores de sede.');
-  if (!venues.length) throw new DataError('error', 'No se reconoció ninguna sede activa en el directorio de Supercines.');
+  if (new Set(venues.map(v => v.id)).size !== venues.length) throw new DataError('error', 'The Supercines directory repeats venue identifiers.');
+  if (!venues.length) throw new DataError('error', 'No active venue was recognized in the Supercines directory.');
   return venues;
 }
 async function venues(c: ReadContext): Promise<Venue[]> {
@@ -44,7 +44,7 @@ export function parseSupercinesMovies(data: unknown, cinemaId?: string, c?: Pick
   const payload = object(data);
   // Presale titles already have bookable functions; "proximamente" do not.
   const list = [...rows(payload.cartelera ?? [], 'cartelera'), ...rows(payload.preventa ?? [], 'preventa')];
-  if (!Array.isArray(payload.cartelera)) throw new DataError('error', 'No se reconoció la cartelera de Supercines.');
+  if (!Array.isArray(payload.cartelera)) throw new DataError('error', 'Unrecognized Supercines listings.');
   const movies = new Map<string, Movie>();
   let skipped = 0;
   for (const r of list) {
@@ -62,7 +62,7 @@ export function parseSupercinesMovies(data: unknown, cinemaId?: string, c?: Pick
   }
   if (skipped && c) {
     c.partial = true;
-    c.warnings.push(`Supercines devolvió ${skipped} títulos de cartelera sin identificador o nombre reconocibles; se omitieron.`);
+    c.warnings.push(`Supercines returned ${skipped} listing titles without a recognizable identifier or name; they were omitted.`);
   }
   return [...movies.values()];
 }
@@ -78,7 +78,7 @@ export function parseSupercinesShowtimes(html: string, movie: { id: string; name
   const $ = load(html), items: Showtime[] = [];
   // A day without functions is a redirect (see schedule()); a page without
   // any venue block means the markup changed, not that nothing is on.
-  if (!$('.st_calender_row_cont').length) throw new DataError('error', 'No se reconoció la programación de Supercines (cambió la estructura de la página).');
+  if (!$('.st_calender_row_cont').length) throw new DataError('error', 'Unrecognized Supercines schedule (the page structure changed).');
   let malformed = 0, lateNight = 0;
   // The fragment also carries an older layout inside HTML comments, which the
   // parser ignores: only the live blocks are read.
@@ -109,9 +109,9 @@ export function parseSupercinesShowtimes(html: string, movie: { id: string; name
   });
   if (malformed) {
     c.partial = true;
-    c.warnings.push(`Supercines devolvió ${malformed} funciones de ${movie.name} con identificador u hora no reconocibles; se omitieron.`);
+    c.warnings.push(`Supercines returned ${malformed} showtimes of ${movie.name} with an unrecognized identifier or time; they were omitted.`);
   }
-  if (lateNight) c.warnings.push('Supercines agrupa las funciones por fecha comercial; en las de madrugada se omite starts_at porque la fecha calendario no está confirmada.');
+  if (lateNight) c.warnings.push('Supercines groups showtimes by business date; for after-midnight ones starts_at is omitted because the calendar date is not confirmed.');
   return items;
 }
 
@@ -149,18 +149,18 @@ async function showtimes(q: Query, c: ReadContext): Promise<DataItem[]> {
   const date = q.date ?? today();
   if (isPastDate(date)) {
     // The upstream still answers for past dates; its pages never show them.
-    c.warnings.push('Esa fecha ya pasó: Supercines solo muestra funciones de hoy en adelante.');
+    c.warnings.push('That date has passed: Supercines only shows showtimes from today onward.');
     return [];
   }
   const all = await venues(c);
   let allowed: Set<string> | undefined;
   if (q.cinema_id) {
-    if (!all.some(v => v.id === q.cinema_id)) throw new DataError('unavailable', 'Sede Supercines no reconocida; consulta list_cinemas.');
+    if (!all.some(v => v.id === q.cinema_id)) throw new DataError('unavailable', 'Supercines venue not recognized; check list_cinemas.');
     allowed = new Set([q.cinema_id]);
   } else if (q.city) {
     allowed = new Set(all.filter(v => folded(v.city) === folded(q.city!)).map(v => v.id));
     if (!allowed.size) {
-      c.warnings.push('Supercines no tiene sedes en esta ciudad; consulta list_cities.');
+      c.warnings.push('Supercines has no venues in this city; check list_cities.');
       return [];
     }
   }
@@ -172,7 +172,7 @@ async function showtimes(q: Query, c: ReadContext): Promise<DataItem[]> {
   if (q.movie_id) {
     const name = names.get(q.movie_id) ?? (q.cinema_id ? undefined : (await movies(c)).find(m => m.id === q.movie_id)?.name);
     if (!name) {
-      c.warnings.push('Esta película no aparece en la cartelera vigente de Supercines para la consulta.');
+      c.warnings.push('This movie does not appear in the current Supercines listings for the query.');
       return [];
     }
     work = [{ id: q.movie_id, name }];
@@ -181,7 +181,7 @@ async function showtimes(q: Query, c: ReadContext): Promise<DataItem[]> {
   }
   if (work.length > titlesLimit) {
     c.partial = true;
-    c.warnings.push(`Se consultaron ${titlesLimit} de ${work.length} títulos de Supercines; usa movie_id o query para los demás.`);
+    c.warnings.push(`${titlesLimit} of ${work.length} Supercines titles were queried; use movie_id or query for the rest.`);
     work = work.slice(0, titlesLimit);
   }
   const items: DataItem[] = [], offline: OfflineFunction[] = [], elsewhere = new Set<string>();
@@ -194,39 +194,39 @@ async function showtimes(q: Query, c: ReadContext): Promise<DataItem[]> {
       if (!allowed || allowed.has(s.cinema_id)) items.push(s);
       else elsewhere.add(s.cinema_id);
     }
-  }, { deadline, minRemainingMs: readMs, workers, onStep: () => c.progress(`Supercines: ${++steps} de ${work.length} títulos consultados.`) });
+  }, { deadline, minRemainingMs: readMs, workers, onStep: () => c.progress(`Supercines: ${++steps} of ${work.length} titles queried.`) });
   const boxOffice = offlineWarning(offline, all, allowed, date, c);
   if (done && !items.length && !boxOffice) {
-    const scope = [q.movie_id ? 'de ese título' : '', q.cinema_id ? 'en esta sede' : q.city ? 'en esta ciudad' : ''].filter(Boolean).join(' ');
+    const scope = [q.movie_id ? 'for that title' : '', q.cinema_id ? 'at this venue' : q.city ? 'in this city' : ''].filter(Boolean).join(' ');
     const others = all.filter(v => elsewhere.has(v.id)).map(v => `${v.name} (${v.city})`);
     // The date is published, just not here: say where it is on instead.
-    if (others.length) c.warnings.push(`Supercines no tiene funciones${scope ? ` ${scope}` : ''} para ${date}; sí las tiene en: ${others.join(', ')}.`);
+    if (others.length) c.warnings.push(`Supercines has no showtimes${scope ? ` ${scope}` : ''} for ${date}; it does have them at: ${others.join(', ')}.`);
     // Observed November 2026: the next day's schedule is loaded during the
     // day, venue by venue; later days only for presales.
-    else if (!published && date > today()) c.warnings.push(`Supercines aún no publica funciones${scope ? ` ${scope}` : ''} para ${date}: carga la programación poco antes (la del día siguiente, sede por sede durante el día) y las preventas en sus propias fechas. Vuelve a consultar en unos minutos (Cinve guarda esta respuesta 1 minuto; refresh=true la relee).`);
-    else c.warnings.push(`Supercines no tiene funciones${scope ? ` ${scope}` : ''} para ${date}.`);
+    else if (!published && date > today()) c.warnings.push(`Supercines has not yet published showtimes${scope ? ` ${scope}` : ''} for ${date}: it loads the schedule shortly before (the next day\'s, venue by venue during the day) and presales on their own dates. Check again in a few minutes (Cinve keeps this response for 1 minute; refresh=true reads it again).`);
+    else c.warnings.push(`Supercines has no showtimes${scope ? ` ${scope}` : ''} for ${date}.`);
     // One title: its page lists the dates it has functions on (any venue).
     if (q.movie_id && work.length === 1) {
       // A hint only: a failed read leaves the answer as it is.
       const page = await c.get(`${SC}/booking/${q.movie_id}`, 600000).catch(() => undefined);
       const dates = page === undefined ? [] : parseSupercinesDates(page).filter(d => d !== date && !isPastDate(d));
-      if (dates.length) c.warnings.push(`Fechas con funciones publicadas de este título en Supercines (en alguna sede): ${dates.join(', ')}. Consulta get_showtimes con date.`);
+      if (dates.length) c.warnings.push(`Dates with published showtimes for this title at Supercines (at some venue): ${dates.join(', ')}. Call get_showtimes with date.`);
     }
   }
   const skipped = left.length;
   if (stopped) {
     c.partial = true;
-    c.warnings.push('Supercines rechazó o no respondió a varias consultas seguidas; Cinve dejó de consultar los títulos restantes para no sobrecargarlo.');
+    c.warnings.push('Supercines rejected or did not answer several queries in a row; Cinve stopped querying the remaining titles to avoid overloading it.');
   }
   if (failures.length) {
     c.partial = true;
-    c.warnings.push(`No se pudieron consultar las funciones de ${failures.length} de ${work.length} títulos de Supercines; el resultado es parcial.`);
+    c.warnings.push(`Showtimes could not be queried for ${failures.length} of ${work.length} Supercines titles; the result is partial.`);
   }
   if (skipped && !stopped) {
     c.partial = true;
-    c.warnings.push(`Se agotó el tiempo de consulta antes de leer ${skipped} de ${work.length} títulos de Supercines; usa movie_id para consultarlos.`);
+    c.warnings.push(`The query timed out before reading ${skipped} of ${work.length} Supercines titles; use movie_id to look them up.`);
   }
-  if (work.length && !done) throw stopped ?? failures[0] ?? new DataError('unavailable', 'Se agotó el tiempo de consulta de Supercines; usa movie_id.');
+  if (work.length && !done) throw stopped ?? failures[0] ?? new DataError('unavailable', 'The Supercines query timed out; use movie_id.');
   return items;
 }
 
@@ -248,8 +248,8 @@ function offlineWarning(offline: OfflineFunction[], all: Venue[], allowed: Set<s
     byVenue.set(venue.name, list);
   }
   for (const [venue, list] of byVenue) {
-    const shown = list.slice(0, 20).join(', ') + (list.length > 20 ? ` y ${list.length - 20} más` : '');
-    c.warnings.push(`${venue} lista ${list.length} funciones sin venta en línea (sin identificador; se compran en taquilla): ${shown}.`);
+    const shown = list.slice(0, 20).join(', ') + (list.length > 20 ? ` and ${list.length - 20} more` : '');
+    c.warnings.push(`${venue} lists ${list.length} showtimes without online sales (no identifier; bought at the box office): ${shown}.`);
   }
   return byVenue.size;
 }
@@ -262,7 +262,7 @@ export function parseSupercinesDates(html: string): string[] {
 /** The booking page publishes the exchange rate and whether the title is 3D. */
 export function parseSupercinesBooking(html: string): { rate?: number; threeD: '0' | '1' } {
   const threeD = html.match(/listBoletos["'`]\s*,\s*`[^`]*?&tresD=([01])&/)?.[1];
-  if (threeD !== '0' && threeD !== '1') throw new DataError('error', 'No se reconoció la página de compra de Supercines.');
+  if (threeD !== '0' && threeD !== '1') throw new DataError('error', 'Unrecognized Supercines purchase page.');
   const rate = number(html.match(/const\s+tasa\s*=\s*'([0-9]+(?:\.[0-9]+)?)'/)?.[1]);
   return { rate: rate !== undefined && rate > 0 ? rate : undefined, threeD };
 }
@@ -271,7 +271,7 @@ const amount = (value: string) => { const m = value.match(/(\d{1,3}(?:,\d{3})*|\
 
 export function parseSupercinesPrices(html: string, q: Query, rate: number | undefined, url: string, c: ReadContext): DataItem[] {
   const $ = load(html), items: DataItem[] = [];
-  if (!$('#seleccionboletos').length) throw new DataError('error', 'No se reconoció la lista de tarifas de Supercines (cambió la estructura de la página).');
+  if (!$('#seleccionboletos').length) throw new DataError('error', 'Unrecognized Supercines price list (the page structure changed).');
   let unrecognized = 0;
   $('#seleccionboletos > .row').each((_, row) => {
     // Signed in, the list ends with the account's courtesy tickets ("Mis
@@ -288,7 +288,7 @@ export function parseSupercinesPrices(html: string, q: Query, rate: number | und
     const sum = Math.round((Number(m[3]) + Number(m[4])) * 100) / 100;
     if (shown === undefined || Math.abs(shown - sum) > 0.011) {
       c.partial = true;
-      c.warnings.push(`Supercines mostró un importe inconsistente para la tarifa ${name}; se omitió.`);
+      c.warnings.push(`Supercines showed an inconsistent amount for the ${name} ticket type; it was omitted.`);
       return;
     }
     const prices: NonNullable<DataItem['prices']> = [{ currency: 'VES', amount: shown, basis: 'provider' }];
@@ -298,7 +298,7 @@ export function parseSupercinesPrices(html: string, q: Query, rate: number | und
   });
   if (unrecognized) {
     c.partial = true;
-    c.warnings.push(`Supercines mostró ${unrecognized} tarifas con un formato no reconocido; se omitieron.`);
+    c.warnings.push(`Supercines showed ${unrecognized} prices in an unrecognized format; they were omitted.`);
   }
   return items;
 }
@@ -307,11 +307,11 @@ export function parseSupercinesConcessions(html: string, cinemaId: string, c: Re
   // A venue without online concessions answers with an empty body, and its
   // page shows no products.
   if (!html.trim()) {
-    c.warnings.push('Supercines no ofrece caramelería en línea para esta sede: su web no muestra productos.');
+    c.warnings.push('Supercines offers no online concessions for this venue: its website shows no products.');
     return [];
   }
   const $ = load(html), categories = new Map<string, string>(), items: DataItem[] = [];
-  if (!$('#carameleria-products').length) throw new DataError('error', 'No se reconoció el catálogo de caramelería de Supercines (cambió la estructura de la página).');
+  if (!$('#carameleria-products').length) throw new DataError('error', 'Unrecognized Supercines concessions catalog (the page structure changed).');
   $('button[data-filtro]').each((_, b) => { const id = $(b).attr('data-filtro') ?? '', name = label($(b).text()); if (/^\d{1,6}$/.test(id) && name) categories.set(id, name); });
   let skipped = 0;
   $('.card-body[data-id]').each((_, card) => {
@@ -326,7 +326,7 @@ export function parseSupercinesConcessions(html: string, cinemaId: string, c: Re
   });
   if (skipped) {
     c.partial = true;
-    c.warnings.push(`Supercines devolvió ${skipped} productos sin identificador, nombre o precio reconocibles; se omitieron.`);
+    c.warnings.push(`Supercines returned ${skipped} products without a recognizable identifier, name or price; they were omitted.`);
   }
   return items;
 }
@@ -341,22 +341,22 @@ export async function supercines(op: Operation, q: Query, c: ReadContext): Promi
       .map(v => ({ kind: 'cinema', id: v.id, cinema_id: v.id, code_status: 'verified', name: v.name, city: v.city, url: `${SC}/cines` }));
   }
   if (op === 'movies') {
-    if (q.cinema_id && !(await venues(c)).some(v => v.id === q.cinema_id)) throw new DataError('unavailable', 'Sede Supercines no reconocida; consulta list_cinemas.');
-    c.warnings.push('Cartelera vigente de Supercines (incluye preventa), sin fecha; confirma fecha y sede con get_showtimes.');
+    if (q.cinema_id && !(await venues(c)).some(v => v.id === q.cinema_id)) throw new DataError('unavailable', 'Supercines venue not recognized; check list_cinemas.');
+    c.warnings.push('Current Supercines listings (including presales), without a date; confirm date and venue with get_showtimes.');
     return movies(c, q.cinema_id);
   }
   if (op === 'showtimes') return showtimes(q, c);
   if (op === 'prices') {
     const cinemaId = requireArg(q, 'cinema_id'), sessionId = requireArg(q, 'session_id'), movieId = requireArg(q, 'movie_id');
     const date = q.date ?? today();
-    if (isPastDate(date)) throw new DataError('unavailable', 'Esa fecha ya pasó: Supercines solo vende funciones de hoy en adelante.');
+    if (isPastDate(date)) throw new DataError('unavailable', 'That date has passed: Supercines only sells showtimes from today onward.');
     // Fares depend on the date and the venue: confirm the function first, so
     // a mismatched ID never returns another function's fares.
     // Only the function's identity matters here: no title lookup, and the
     // schedule's own warnings (late night, disabled sales) stay out of fares.
     const html0 = await schedule(c, movieId, date);
-    const functions = html0 === undefined ? [] : parseSupercinesShowtimes(html0, { id: movieId, name: `Película ${movieId}` }, date, { partial: false, warnings: [] });
-    if (!functions.some(s => s.id === sessionId && s.cinema_id === cinemaId)) throw new DataError('unavailable', 'La función no aparece en la programación de Supercines para esa sede, película y fecha; consulta get_showtimes (y pasa date si no es hoy).');
+    const functions = html0 === undefined ? [] : parseSupercinesShowtimes(html0, { id: movieId, name: `Movie ${movieId}` }, date, { partial: false, warnings: [] });
+    if (!functions.some(s => s.id === sessionId && s.cinema_id === cinemaId)) throw new DataError('unavailable', 'The showtime does not appear in the Supercines schedule for that venue, movie and date; call get_showtimes (and pass date if it is not today).');
     const booking = `${SC}/booking/${movieId}`;
     const { rate, threeD } = parseSupercinesBooking(await c.get(booking, 600000));
     const fields = { idFuncion: sessionId, fecha: date, unico: movieId, tresD: threeD, idEmpresa: cinemaId };
@@ -368,21 +368,21 @@ export async function supercines(op: Operation, q: Query, c: ReadContext): Promi
       try { html = await c.authenticatedForm('supercines', `${SC}/listBoletos`, fields); account = true; }
       catch (error) {
         if (!(error instanceof DataError && error.status === 'auth_required')) throw error;
-        c.warnings.push('Supercines no reconoció la sesión de tu cuenta (expiró o se cerró): se muestran las tarifas públicas. Conecta de nuevo la cuenta para ver las de tu cuenta.');
+        c.warnings.push('Supercines did not recognize your account\'s session (it expired or was closed): public prices are shown. Connect the account again to see your account\'s prices.');
       }
     }
     html ??= await c.form(`${SC}/listBoletos`, fields, 60000);
     c.warnings.push(account
-      ? 'Tarifas leídas con tu cuenta de Supercines: pueden incluir tarifas o canjes propios de la cuenta.'
-      : 'Tarifas públicas de Supercines, sin cuenta (las mismas que su web muestra tras iniciar sesión, salvo tarifas o canjes propios de una cuenta).');
-    c.warnings.push('Tarifas VES de Supercines para la fecha consultada (varían por día y formato). Incluyen el cargo por boleto mostrado en la web; impuestos y total final de compra no verificados.');
-    if (rate) c.warnings.push('USD calculado con la tasa publicada en la página de compra de Supercines, no con una tasa BCV verificada.');
-    else c.warnings.push('Supercines no publicó una tasa de cambio positiva; se omite la equivalencia USD.');
+      ? 'Prices read with your Supercines account: they may include prices or redemptions specific to the account.'
+      : 'Public Supercines prices, without an account (the same ones its website shows after signing in, except prices or redemptions specific to an account).');
+    c.warnings.push('Supercines VES prices for the queried date (they vary by day and format). They include the per-ticket charge shown on the website; taxes and final purchase total not verified.');
+    if (rate) c.warnings.push('USD calculated with the rate published on the Supercines purchase page, not with a verified BCV rate.');
+    else c.warnings.push('Supercines did not publish a positive exchange rate; the USD equivalent is omitted.');
     return parseSupercinesPrices(html, { ...q, date }, rate, booking, c);
   }
   const cinemaId = requireArg(q, 'cinema_id');
-  if (!(await venues(c)).some(v => v.id === cinemaId)) throw new DataError('unavailable', 'Sede Supercines no reconocida; consulta list_cinemas.');
+  if (!(await venues(c)).some(v => v.id === cinemaId)) throw new DataError('unavailable', 'Supercines venue not recognized; check list_cinemas.');
   const products = parseSupercinesConcessions(await c.form(`${SC}/listCarameleria`, { idEmpresa: cinemaId }, 600000), cinemaId, c);
-  if (products.length) c.warnings.push('Precios VES del catálogo de caramelería de la sede; la existencia por producto y los cargos finales no se verifican.');
+  if (products.length) c.warnings.push('VES prices from the venue\'s concessions catalog; per-product stock and final charges are not verified.');
   return products;
 }

@@ -256,7 +256,7 @@ test('stdio bridge forwards tools to authenticated hosted MCP with fresh retriev
   const hostedTools = await client.listTools();
   assert.equal(hostedTools.tools.length, 11);
   assert.ok(hostedTools.tools.every(tool => tool.title));
-  assert.match(client.getInstructions() ?? '', /Servidor alojado/);
+  assert.match(client.getInstructions() ?? '', /Hosted server/);
   assert.deepEqual(client.getServerVersion(), { name: 'cinve', version: '0.1.0' });
   const result = await client.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos' } });
   assert.equal(Result.parse(result.structuredContent).status, 'available');
@@ -510,8 +510,8 @@ test('the install guide is served with safe HTTP methods and no downloadable hel
   const guide = await fetch(f.origin + '/install');
   assert.equal(guide.status, 200); assert.equal(guide.headers.get('cache-control'), 'no-store');
   const text = await guide.text();
-  assert.match(text, /available=0 con unknown>0 NO significa agotado/);
-  assert.match(text, /bloque de texto monoespaciado/);
+  assert.match(text, /available=0 with unknown>0 does NOT mean sold out/);
+  assert.match(text, /monospaced text block/);
   assert.equal((await fetch(f.origin + '/install', { method: 'POST' })).status, 405);
   assert.equal((await fetch(f.origin + '/codex-client.mjs')).status, 404);
 });
@@ -796,7 +796,7 @@ test('cleanup never orphans a connection whose request row is locked while it ru
 test('every HTML page allows only its own stylesheet, never inline styles', async t => {
   const f = await fixture(t);
   const client_id = await register(f.origin);
-  const pages = [f.origin + '/', f.origin + '/connect', f.origin + '/instrucciones', (await authorizationRequest(f.origin, client_id)).url.href, f.origin + '/oauth/authorize?client_id=unknown'];
+  const pages = [f.origin + '/', f.origin + '/connect', f.origin + '/instrucciones', f.origin + '/privacidad', (await authorizationRequest(f.origin, client_id)).url.href, f.origin + '/oauth/authorize?client_id=unknown'];
   const install = await fetch(f.origin + '/install', { headers: { Accept: 'text/html' } });
   for (const r of [...await Promise.all(pages.map(u => fetch(u))), install]) {
     const csp = r.headers.get('content-security-policy')!, html = await r.text();
@@ -973,9 +973,10 @@ test('crawlers get robots.txt, a sitemap of the public pages and llms.txt; brows
   assert.match(rules, /Disallow: \/connect\//); assert.doesNotMatch(rules, /Disallow: \/connect\n/);
   assert.match(rules, new RegExp(`Sitemap: ${f.origin}/sitemap.xml`));
   const map = await (await fetch(f.origin + '/sitemap.xml')).text();
-  for (const path of ['/', '/install', '/instrucciones']) assert.ok(map.includes(`<loc>${f.origin}${path}</loc>`), path);
+  for (const path of ['/', '/install', '/instrucciones', '/privacidad']) assert.ok(map.includes(`<loc>${f.origin}${path}</loc>`), path);
   assert.doesNotMatch(map, /connect|oauth/);
-  assert.match(await (await fetch(f.origin + '/llms.txt')).text(), /^# Cinve/);
+  const llms = await (await fetch(f.origin + '/llms.txt')).text();
+  assert.match(llms, /^# Cinve/); assert.ok(llms.includes(`${f.origin}/privacidad`));
   const security = await (await fetch(f.origin + '/.well-known/security.txt')).text();
   assert.match(security, /^Contact: https:\/\/github\.com\/0bkevin\/cinve\/security\/advisories\/new$/m);
   assert.match(security, new RegExp(`^Canonical: ${f.origin}/\\.well-known/security\\.txt$`, 'm'));
@@ -990,7 +991,7 @@ test('crawlers get robots.txt, a sitemap of the public pages and llms.txt; brows
 test('public pages may be cached briefly by the CDN; the agent guide and private pages may not', async t => {
   const f = await fixture(t);
   const html = { headers: { Accept: 'text/html' } };
-  for (const path of ['/', '/instrucciones', '/install']) assert.match((await fetch(f.origin + path, html)).headers.get('cache-control')!, /s-maxage=300/, path);
+  for (const path of ['/', '/instrucciones', '/privacidad', '/install']) assert.match((await fetch(f.origin + path, html)).headers.get('cache-control')!, /s-maxage=300/, path);
   assert.equal((await fetch(f.origin + '/install')).headers.get('cache-control'), 'no-store');
   assert.equal((await fetch(f.origin + '/connect', html)).headers.get('cache-control'), 'no-store');
 });
@@ -1107,7 +1108,7 @@ test('an exhausted anonymous global refresh budget does not block authenticated 
   }
   const blocked = await refresh('203.0.113.13');
   assert.equal(blocked.status, 429, 'a fresh anonymous caller is held back by the global cap');
-  assert.match(await blocked.text(), /Demasiadas consultas con refresh=true/);
+  assert.match(await blocked.text(), /Too many requests with refresh=true/);
   const alice = await f.client(f.alice.token);
   const result = await alice.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos', refresh: true } });
   assert.equal((result.structuredContent as { status: string }).status, 'available');
@@ -1244,8 +1245,8 @@ test('rate-limit keys are stored as HMACs under a derived key, never as plain di
   const other = new ConnectionLinks(f.pool, { budgetKey: randomBytes(32), linkKey: randomBytes(32) });
   assert.notEqual(other.keyHash('signin-fail:global'), f.links.keyHash('signin-fail:global'));
   const unkeyed = new ConnectionLinks(f.pool);
-  await assert.rejects(unkeyed.budget('x', 1), /clave/);
-  await assert.rejects(unkeyed.issue(f.alice.id, (await f.users.hash(f.alice.id))!, 'cinex'), /clave/);
+  await assert.rejects(unkeyed.budget('x', 1), /key is missing/);
+  await assert.rejects(unkeyed.issue(f.alice.id, (await f.users.hash(f.alice.id))!, 'cinex'), /key is missing/);
   await unkeyed.cleanup();
 });
 
@@ -1329,6 +1330,28 @@ test('OAuth quotas also apply per IPv6 /48, so rotating /64s does not multiply t
   assert.equal(statuses.filter(s => s === 200).length, 240); assert.equal(statuses.filter(s => s === 429).length, 10);
   assert.equal((await fetch(f.origin + '/oauth/revoke', from('2001:db8:6::1', { method: 'POST',
     body: new URLSearchParams({ token: 'cva_' + randomBytes(32).toString('base64url'), client_id: 'cvapp_x' }) }))).status, 200, 'another /48');
+});
+
+test('shared HTTP errors use English for MCP and localize the connection page', async t => {
+  const f = await fixture(t);
+  const invite = await f.links.issue(f.alice.id, (await f.users.hash(f.alice.id))!, 'cinex');
+  const browser = await (await f.post('/connect/exchange', invite.token)).json() as { browser_token: string };
+  const invalidBodies = [
+    ['text/plain', '{}', 415], ['application/json', '{', 400], ['application/json', 'x'.repeat(65537), 413],
+  ] as const;
+  for (const [path, headers, messages] of [
+    ['/mcp', {}, ['JSON is required.', 'Invalid request.', 'Request is too large.']],
+    ['/connect/login', { Origin: f.origin, 'X-Cinev-Connection': browser.browser_token }, ['Se requiere JSON.', 'Solicitud no válida.', 'Solicitud demasiado grande.']],
+    ['/connect/login?lang=en', { Origin: f.origin, 'X-Cinev-Connection': browser.browser_token }, ['JSON is required.', 'Invalid request.', 'Request is too large.']],
+  ] as const) {
+    for (const [index, [type, body, status]] of invalidBodies.entries()) {
+      const response = await fetch(f.origin + path, { method: 'POST', headers: { ...headers, 'Content-Type': type }, body });
+      assert.equal(response.status, status);
+      assert.deepEqual(await response.json(), { error: messages[index],
+        ...(path.startsWith('/connect/') ? { error_key: ['jsonRequired', 'invalidRequest', 'requestTooLarge'][index] } : {}),
+      });
+    }
+  }
 });
 
 test('JSON-RPC batches are refused, so one request is one call for every limit', async t => {
@@ -1686,7 +1709,7 @@ test('dead signed tokens buy no headroom, and signed traffic is also capped per 
   assert.ok(!statuses.includes(401));
   // A twelfth, unused connection (its own database budget untouched) is held back by the /48 cap alone.
   const over = await mcp(many[11].tokens.access_token, '2001:db8:77:ffff::1');
-  assert.equal(over.status, 429); assert.match(await over.text(), /Demasiadas consultas/);
+  assert.equal(over.status, 429); assert.match(await over.text(), /Too many requests/);
   const elsewhere = await mcp(many[11].tokens.access_token, '2001:db8:78::1');
   assert.notEqual(elsewhere.status, 429, 'another /48'); assert.notEqual(elsewhere.status, 401);
 });
@@ -1807,7 +1830,7 @@ test('a device id planted in a browser never becomes a proof for the account sig
 test('all browser routes negotiate languages, keep explicit choices, and retain security headers', async t => {
   const f = await fixture(t);
   const securityHeaders = ['content-security-policy', 'referrer-policy', 'x-content-type-options', 'x-frame-options', 'permissions-policy', 'cross-origin-opener-policy', 'cross-origin-resource-policy', 'cross-origin-embedder-policy'];
-  for (const path of ['/', '/instrucciones', '/install', '/connect', '/missing', '/oauth/authorize?client_id=unknown']) {
+  for (const path of ['/', '/instrucciones', '/install', '/privacidad', '/connect', '/missing', '/oauth/authorize?client_id=unknown']) {
     const es = await fetch(f.origin + path, { headers: { Accept: 'text/html', 'Accept-Language': 'es-VE' } });
     const en = await fetch(f.origin + path, { headers: { Accept: 'text/html', 'Accept-Language': 'en-GB,en;q=0.9' } });
     assert.equal(en.status, es.status, path);
@@ -1832,14 +1855,16 @@ test('all browser routes negotiate languages, keep explicit choices, and retain 
 test('English sitemap alternates, answer-engine links and social image resolve on the hosted origin', async t => {
   const f = await fixture(t);
   const xml = load(await (await fetch(f.origin + '/sitemap.xml')).text(), { xml: true });
-  assert.equal(xml('url').length, 6);
-  for (const path of ['/', '/install', '/instrucciones']) {
+  assert.equal(xml('url').length, 8);
+  for (const path of ['/', '/install', '/instrucciones', '/privacidad']) {
     const url = `${f.origin}${path}?lang=en`;
     assert.equal(xml('loc').filter((_, node) => xml(node).text() === url).length, 1);
   }
   for (const node of xml('url').toArray()) assert.equal(xml(node).find('xhtml\\:link').length, 3);
   const llms = await (await fetch(f.origin + '/llms.txt')).text();
   assert.match(llms, /Venezuela/); assert.ok(llms.includes(`${f.origin}/instrucciones?lang=en`));
+  assert.ok(llms.includes(`${f.origin}/privacidad?lang=en`));
+  assert.doesNotMatch(llms, /results remain in Spanish/);
   const $ = load(await (await fetch(f.origin + '/?lang=en')).text());
   const image = await fetch($('meta[property="og:image"]').attr('content')!);
   assert.equal(image.headers.get('content-type'), 'image/png');
@@ -1901,7 +1926,7 @@ test('public pages pin negotiated English for sharing and serve matching default
     { query: '?lang=en', language: 'es-VE,es;q=0.9', locale: 'en' },
   ] as const;
   const images = new Set<string>();
-  for (const path of ['/', '/install', '/instrucciones']) {
+  for (const path of ['/', '/install', '/instrucciones', '/privacidad']) {
     const negotiated = await fetch(f.origin + path + '?source=share', { redirect: 'manual', headers: { Accept: 'text/html', 'Accept-Language': 'en-US' } });
     assert.equal(negotiated.status, 307);
     assert.equal(negotiated.headers.get('cache-control'), 'no-store');

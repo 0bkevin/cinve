@@ -1,4 +1,4 @@
-import { instructionsPage, landingPage, notFoundPage, publicPageCache, servePublicAsset, setSecurityHeaders } from './public-web.js';
+import { instructionsPage, landingPage, privacyPage, notFoundPage, publicPageCache, servePublicAsset, setSecurityHeaders } from './public-web.js';
 import { hostedAuthInstructions } from './hosted-auth-guidance.js';
 import { HostedOAuth, accessTokenFormat } from './oauth.js';
 import { LocalLimiter, LocalSet } from './local-limit.js';
@@ -56,7 +56,7 @@ class HostedService extends CinemaService {
   override async query(op: Operation, q: Query, call?: CallOptions) {
     const result = await super.query(op, q, call);
     await this.rejected(result.status, q.provider);
-    if (result.status === 'auth_required') result.warnings = ['Conecta tu cuenta con connect_account. Introduce tus credenciales solo en el enlace privado, nunca en el chat.'];
+    if (result.status === 'auth_required') result.warnings = ['Connect your account with connect_account. Enter your credentials only through the private link, never in chat.'];
     return result;
   }
   override async seats(q: Query, call?: CallOptions) {
@@ -93,16 +93,17 @@ export function hostedKeys(key: Buffer) {
 }
 class HttpError extends Error { constructor(readonly status: number, message: string) { super(message); } }
 async function body(req: IncomingMessage, max: number, deadlineMs = 10000): Promise<unknown> {
-  if (req.headers['content-type']?.split(';')[0].trim() !== 'application/json') throw new HttpError(415, 'Se requiere JSON.');
-  if (Number(req.headers['content-length'] ?? 0) > max) throw new HttpError(413, 'Solicitud demasiado grande.');
+  const message = (english: string, spanish: string) => req.url === '/mcp' ? english : spanish;
+  if (req.headers['content-type']?.split(';')[0].trim() !== 'application/json') throw new HttpError(415, message('JSON is required.', 'Se requiere JSON.'));
+  if (Number(req.headers['content-length'] ?? 0) > max) throw new HttpError(413, message('Request is too large.', 'Solicitud demasiado grande.'));
   const chunks: Buffer[] = []; let size = 0;
   // A slow sender must not hold a request slot indefinitely. On Vercel the
   // node:http server timeouts do not apply to the exported handler.
-  const timer = setTimeout(() => req.destroy(new HttpError(408, 'La solicitud tardó demasiado.')), deadlineMs);
+  const timer = setTimeout(() => req.destroy(new HttpError(408, message('The request timed out.', 'La solicitud tardó demasiado.'))), deadlineMs);
   try {
-    for await (const chunk of req) { size += chunk.length; if (size > max) throw new HttpError(413, 'Solicitud demasiado grande.'); chunks.push(Buffer.from(chunk)); }
+    for await (const chunk of req) { size += chunk.length; if (size > max) throw new HttpError(413, message('Request is too large.', 'Solicitud demasiado grande.')); chunks.push(Buffer.from(chunk)); }
   } finally { clearTimeout(timer); }
-  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new HttpError(400, 'Solicitud no válida.'); }
+  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new HttpError(400, message('Invalid request.', 'Solicitud no válida.')); }
 }
 /** Whether a (single) JSON-RPC message is a tool call that asks to bypass the public cache. */
 function refreshCall(message: unknown): boolean {
@@ -117,8 +118,8 @@ export async function createHostedApp(options: {
 }) {
   const publicUrl = new URL(options.publicUrl);
   if (publicUrl.pathname !== '/' || publicUrl.search || publicUrl.hash || publicUrl.username || publicUrl.password ||
-      (publicUrl.protocol !== 'https:' && !(options.allowLocal && publicUrl.protocol === 'http:' && publicUrl.hostname === '127.0.0.1'))) throw new Error('CINEV_PUBLIC_URL debe ser un origen HTTPS.');
-  if (options.key.length !== 32) throw new Error('Clave de cifrado no válida.');
+      (publicUrl.protocol !== 'https:' && !(options.allowLocal && publicUrl.protocol === 'http:' && publicUrl.hostname === '127.0.0.1'))) throw new Error('CINEV_PUBLIC_URL must be an HTTPS origin.');
+  if (options.key.length !== 32) throw new Error('Invalid encryption key.');
   let origin = publicUrl.origin;
   const { tokenKey, budgetKey, linkKey } = hostedKeys(options.key);
   const links = new ConnectionLinks(options.pool, { budgetKey, linkKey });
@@ -151,7 +152,9 @@ export async function createHostedApp(options: {
   const localTokenRequests = new LocalLimiter(600), localSignedRequests = new LocalLimiter(3000), localSignedBlockRequests = new LocalLimiter(6000);
   const oauthRoutes = new Set(['/oauth/register', '/oauth/authorize', '/oauth/token', '/oauth/revoke']);
   const localAuthFailures = new LocalLimiter(30), knownTokens = new LocalSet(30 * 60000), deadTokens = new LocalSet(60 * 60000);
-  const tooManyFailures = () => new HttpError(429, 'Demasiados intentos con credenciales no válidas. Inténtalo en un minuto.');
+  const tooManyFailures = (req: IncomingMessage) => new HttpError(429, req.url === '/mcp'
+    ? 'Too many attempts with invalid credentials. Try again in one minute.'
+    : 'Demasiados intentos con credenciales no válidas. Inténtalo en un minuto.');
   const storeFor = (id: string) => new EncryptedSessionStore(options.pool, id, options.key);
   const handler = async (req: IncomingMessage, res: ServerResponse) => {
     setSecurityHeaders(res, publicUrl.protocol === 'https:');
@@ -163,15 +166,15 @@ export async function createHostedApp(options: {
       route = requestUrl.pathname;
       if (servePublicAsset(req, res) || serveInstall(req, res, origin) || serveDiscovery(req, res, origin)) return;
       if (req.method === 'GET' && req.url === '/health') { send(200, { status: 'ok' }); return; }
-      if (req.headers.host !== publicUrl.host) throw new HttpError(403, 'Origen no permitido.');
+      if (req.headers.host !== publicUrl.host) throw new HttpError(403, req.url === '/mcp' ? 'Origin not allowed.' : 'Origen no permitido.');
       // Static pages cost no database work, so they are served before any
       // limit: a user behind a shared address can always open the link page.
       const pagePath = req.url?.split('?')[0];
-      if (['GET', 'HEAD'].includes(req.method ?? '') && (pagePath === '/connect' || pagePath === '/' || pagePath === '/instrucciones')) {
+      if (['GET', 'HEAD'].includes(req.method ?? '') && (pagePath === '/connect' || pagePath === '/' || pagePath === '/instrucciones' || pagePath === '/privacidad')) {
         const locale = pageLocale(req, res);
         if (pagePath !== '/connect' && redirectNegotiatedEnglish(req, res, locale)) return;
         if (pagePath !== '/connect') res.setHeader('Cache-Control', publicPageCache);
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(req.method === 'HEAD' ? undefined : pagePath === '/' ? landingPage(origin, locale) : pagePath === '/instrucciones' ? instructionsPage(origin, locale) : loginPage(locale)); return;
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(req.method === 'HEAD' ? undefined : pagePath === '/' ? landingPage(origin, locale) : pagePath === '/instrucciones' ? instructionsPage(origin, locale) : pagePath === '/privacidad' ? privacyPage(origin, locale) : loginPage(locale)); return;
       }
       const forwarded = options.trustedVercelProxy ? req.headers['x-vercel-forwarded-for'] : undefined;
       const ip = rateLimitNetwork(typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : req.socket.remoteAddress ?? 'unknown');
@@ -188,7 +191,10 @@ export async function createHostedApp(options: {
       // OAuth routes apply these limits themselves, after their free checks.
       if (!oauthRoutes.has(pagePath ?? '') && !(credential
         ? localTokenRequests.hit(credential) && localSignedRequests.hit(ip) && (!block || localSignedBlockRequests.hit(block))
-        : localRequests.hit(ip) && (!block || localBlockRequests.hit(block)))) throw new HttpError(429, 'Demasiadas consultas. Inténtalo más tarde.');
+        : localRequests.hit(ip) && (!block || localBlockRequests.hit(block)))) {
+        const excludedWebError = pagePath === '/connect' || pagePath?.startsWith('/connect/') || pagePath?.startsWith('/oauth/');
+        throw new HttpError(429, excludedWebError ? 'Demasiadas consultas. Inténtalo más tarde.' : 'Too many requests. Try again later.');
+      }
       if (await oauth.handle(req, res, ip, {
         // OAuth routes skip the general filter above and apply these after
         // their free checks, so a signed code or refresh token is limited by
@@ -201,7 +207,7 @@ export async function createHostedApp(options: {
         // so any web origin may call it. The Host check above blocks DNS
         // rebinding; a present but malformed Origin is still refused, as the
         // Streamable HTTP transport requires for invalid origins.
-        if (req.headers.origin !== undefined && !wellFormedOrigin(req.headers.origin)) throw new HttpError(403, 'Origen no permitido.');
+        if (req.headers.origin !== undefined && !wellFormedOrigin(req.headers.origin)) throw new HttpError(403, 'Origin not allowed.');
         res.setHeader('Access-Control-Allow-Origin', '*');
         // The endpoint is stateless: it answers POST only (GET and DELETE get
         // 405) and never issues a session, so the session and SSE-resumption
@@ -213,14 +219,14 @@ export async function createHostedApp(options: {
         if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
       } else if (req.headers.origin && req.headers.origin !== origin) throw new HttpError(403, 'Origen no permitido.');
       if (req.method === 'GET' && req.url === '/internal/cleanup') {
-        if (!options.cleanupSecret || !timingSafeEqual(Buffer.from(digest(req.headers.authorization ?? '')), Buffer.from(digest(`Bearer ${options.cleanupSecret}`)))) throw new HttpError(401, 'Acceso requerido.');
+        if (!options.cleanupSecret || !timingSafeEqual(Buffer.from(digest(req.headers.authorization ?? '')), Buffer.from(digest(`Bearer ${options.cleanupSecret}`)))) throw new HttpError(401, 'Access is required.');
         await links.cleanup(); send(200, { cleaned: true }); return;
       }
       if (req.url === '/mcp') {
         const tokenId = bearer === undefined ? undefined : digest(bearer);
-        const refuse = () => { res.setHeader('WWW-Authenticate', oauth.challenge(true)); return new HttpError(401, 'Acceso Cinev requerido.'); };
+        const refuse = () => { res.setHeader('WWW-Authenticate', oauth.challenge(true)); return new HttpError(401, 'Cinve access is required.'); };
         if (tokenId && deadTokens.has(tokenId)) throw refuse();
-        if (authorization && !signedBearer && !(tokenId && knownTokens.has(tokenId)) && localAuthFailures.exhausted(ip)) throw tooManyFailures();
+        if (authorization && !signedBearer && !(tokenId && knownTokens.has(tokenId)) && localAuthFailures.exhausted(ip)) throw tooManyFailures(req);
         const principal = bearer ? await oauth.authenticate(bearer) ?? await users.authenticate(bearer) : undefined;
         if (authorization && !principal) {
           if (signedBearer) deadTokens.add(tokenId!); else localAuthFailures.hit(ip);
@@ -228,7 +234,7 @@ export async function createHostedApp(options: {
         }
         if (principal && !signedBearer) knownTokens.add(tokenId!);
         const clientKey = principal?.id ?? `anonymous:${ip}`;
-        if (!await links.budget(`mcp:${clientKey}`, 120) || (active.get(clientKey) ?? 0) >= 4 || totalActive >= 32) throw new HttpError(429, 'Demasiadas consultas. Inténtalo más tarde.');
+        if (!await links.budget(`mcp:${clientKey}`, 120) || (active.get(clientKey) ?? 0) >= 4 || totalActive >= 32) throw new HttpError(429, 'Too many requests. Try again later.');
         // Reserve capacity synchronously with the check, before awaiting the
         // body, so concurrent slow uploads cannot all pass the same admission.
         active.set(clientKey, (active.get(clientKey) ?? 0) + 1); totalActive++;
@@ -240,7 +246,7 @@ export async function createHostedApp(options: {
           // multiply them (one request carrying 100 refresh=true calls).
           if (Array.isArray(parsed)) {
             res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-            res.end(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Las solicitudes por lotes (batch) no están admitidas.' } }));
+            res.end(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Batch requests are not supported.' } }));
             return;
           }
           // Discover public tools anonymously. Calling the connection tool triggers
@@ -256,7 +262,7 @@ export async function createHostedApp(options: {
           // provider reads (for example, Cinex venue discovery). Keep it scarce so
           // one client cannot get the shared egress address blocked upstream.
           // A service-wide cap too, since many addresses could each use their own.
-          if (refreshCall(parsed) && (!await links.budget(`refresh:${clientKey}`, 10) || !await links.budget(principal ? 'refresh:global' : 'refresh:global:anon', 120))) throw new HttpError(429, 'Demasiadas consultas con refresh=true. Repite sin refresh o inténtalo en un minuto.');
+          if (refreshCall(parsed) && (!await links.budget(`refresh:${clientKey}`, 10) || !await links.budget(principal ? 'refresh:global' : 'refresh:global:anon', 120))) throw new HttpError(429, 'Too many requests with refresh=true. Retry without refresh or try again in one minute.');
           const store = principal ? storeFor(principal.id) : new AnonymousSessions(origin);
           const service = new HostedService(new HostedHttpClient(options.request ?? fetch, 15000, store, publicHttp), cinexCatalog,
             store instanceof EncryptedSessionStore ? store : undefined);
@@ -264,7 +270,7 @@ export async function createHostedApp(options: {
             connect: async provider => {
               // An account connected while authorizing (or earlier) needs no link.
               if ((await store.status(provider)).status === 'configured') return { connected: true as const };
-              if (!await links.budget(`link:${principal.id}`, 12)) throw new Error('Demasiados enlaces. Inténtalo en un minuto.');
+              if (!await links.budget(`link:${principal.id}`, 12)) throw new Error('Too many links. Try again in one minute.');
               const link = await links.issue(principal.id, principal.tokenHash, provider);
               return { connected: false as const, url: `${origin}/connect#${link.token}`, expires_at: link.expires_at };
             },
@@ -287,7 +293,7 @@ export async function createHostedApp(options: {
       const linkFailed = () => { if (format === 'signed') deadTokens.add(digest(token)); else localAuthFailures.hit(ip); };
       if (format === 'signed' ? deadTokens.has(digest(token)) : localAuthFailures.exhausted(ip)) {
         if (format === 'signed') throw new HttpError(410, 'Enlace vencido o utilizado.');
-        throw tooManyFailures();
+        throw tooManyFailures(req);
       }
       if (route === '/connect/exchange') {
         await body(req, 512);
@@ -341,7 +347,7 @@ export async function createHostedApp(options: {
         const locale = pageLocale(req, res);
         res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(req.method === 'HEAD' ? undefined : notFoundPage(locale, requestUrl.pathname + requestUrl.search)); return;
       }
-      const message = error instanceof HttpError ? error.message : 'No se pudo completar la solicitud.';
+      const message = error instanceof HttpError ? error.message : route === '/mcp' ? 'Could not complete the request.' : 'No se pudo completar la solicitud.';
       send(error instanceof HttpError ? error.status : 500, route.startsWith('/connect/') ? webError(message, pageLocale(req, res)) : { error: message });
     }
   };

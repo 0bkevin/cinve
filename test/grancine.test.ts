@@ -47,7 +47,7 @@ test('Gran Cine reads only its directory and venue pages by GET', () => {
   assert.doesNotThrow(() => assertPublicRead(`${GC}/salas`));
   assert.doesNotThrow(() => assertPublicRead(`${GC}/sedes/sede.php?slug=lder&fecha=${D}`));
   for (const url of [`${GC}/sedes/sede.php?slug=lder`, `${GC}/sedes/sede.php?slug=../x&fecha=${D}`, `${GC}/sedes/sede.php?slug=lder&fecha=${D}&x=1`, `${GC}/contacto.php`, `${GC}/salas?x=1`])
-    assert.throws(() => assertPublicRead(url), /no permitida/);
+    assert.throws(() => assertPublicRead(url), /not allowed/);
 });
 
 test('Gran Cine directory: slugs as IDs, known or stated cities only, unsafe slugs dropped', async () => {
@@ -56,7 +56,7 @@ test('Gran Cine directory: slugs as IDs, known or stated cities only, unsafe slu
   assert.deepEqual(cinemas.items.map(c => [c.id, c.name, c.city ?? null]), [
     ['lder', 'Líder', 'Caracas'], ['nuevasala', 'Nueva Sala (Maracaibo)', 'Maracaibo'], ['otra', 'Otra Sala', null],
     ['paseo-las-mercedes', 'Paseo Las Mercedes', 'Caracas'], ['villaplanchartelcerrito', 'Villa Planchart (El Cerrito)', 'Caracas']]);
-  assert.ok(cinemas.warnings.some(w => /no indica la ciudad de: Otra Sala/.test(w)));
+  assert.ok(cinemas.warnings.some(w => /does not state the city of: Otra Sala/.test(w)));
   const cities = await service.query('cities', { provider: 'grancine' });
   assert.deepEqual(cities.items.map(c => c.name), ['Caracas', 'Maracaibo']);
 });
@@ -70,7 +70,7 @@ test('Gran Cine functions: cleaned titles, 12-hour clock, rooms, stable syntheti
   ]);
   assert.ok(first.items.every(s => /^gc-[0-9a-f]{20}$/.test(s.id)));
   assert.equal(first.partial, true);
-  assert.ok(first.warnings.some(w => /no publica identificadores de función/.test(w)));
+  assert.ok(first.warnings.some(w => /does not publish showtime identifiers/.test(w)));
   // A separate client (no shared cache) computes the same IDs for the same listing.
   const again = await provider().service.query('showtimes', { provider: 'grancine', cinema_id: 'paseo-las-mercedes', date: `${D}` });
   assert.deepEqual(again.items.map(s => s.id), first.items.map(s => s.id));
@@ -80,17 +80,17 @@ test('Gran Cine city fan-out, partner-venue warning, and unpublished or mismatch
   const { service, calls } = provider();
   const city = await service.query('showtimes', { provider: 'grancine', city: 'Caracas', date: `${D}` });
   assert.deepEqual([...new Set(city.items.map(s => s.cinema_id))].sort(), ['lder', 'paseo-las-mercedes']);
-  assert.ok(city.warnings.some(w => /En salas de Cines Unidos/.test(w)));
+  assert.ok(city.warnings.some(w => /At Cines Unidos theaters/.test(w)));
   assert.equal(calls.filter(c => c.startsWith('GET /sedes/')).length, 3);
   const far = await service.query('showtimes', { provider: 'grancine', cinema_id: 'lder', date: `${DFAR}` });
   assert.equal(far.status, 'empty');
-  assert.ok(far.warnings.some(w => /aún no publica la programación/.test(w)));
+  assert.ok(far.warnings.some(w => /has not yet published the schedule/.test(w)));
   // A page showing another date than requested is a failure, not an empty schedule.
   const mismatch = await service.query('showtimes', { provider: 'grancine', cinema_id: 'lder', date: `${D1}` });
   assert.equal(mismatch.status, 'error');
   const movies = await service.query('movies', { provider: 'grancine', cinema_id: 'lder', date: `${D}` });
   assert.deepEqual(movies.items.map(m => [m.id, m.name, m.rating]), [['12', 'El nuevo pez que fuma', 'B']]);
-  assert.ok(!movies.warnings.some(w => /no publica identificadores/.test(w)));
+  assert.ok(!movies.warnings.some(w => /does not publish showtime identifiers/.test(w)));
 });
 
 test('Gran Cine fares and concessions are reported as not published, without reading the provider', async () => {
@@ -115,7 +115,7 @@ test('Gran Cine past dates are answered without reading the provider', async () 
   const { service, calls } = provider();
   const result = await service.query('showtimes', { provider: 'grancine', cinema_id: 'lder', date: shiftDate(D, -3) });
   assert.equal(result.status, 'empty');
-  assert.ok(result.warnings.some(w => /ya pasó/.test(w)));
-  assert.ok(!result.warnings.some(w => /aún no publica/.test(w)));
+  assert.ok(result.warnings.some(w => /has passed/.test(w)));
+  assert.ok(!result.warnings.some(w => /has not yet published/.test(w)));
   assert.equal(calls.length, 0);
 });

@@ -6,6 +6,7 @@ import { canonicalUrl, localeUrl, resolveLocale, type Locale } from '../src/web/
 import { landingPage, installationPage, instructionsPage, authorizationPage, authorizationErrorPage, notFoundPage } from '../src/public-web.js';
 import { loginPage } from '../src/auth-web.js';
 import { serverInstructions } from '../src/agent-instructions.js';
+import { privacyPage } from '../src/web/pages/privacy.js';
 
 const origin = 'https://cinve.example';
 
@@ -42,7 +43,7 @@ test('both catalogs contain the same nonempty keys, including browser and server
 
 test('every view localizes visible text and provides a working language switcher', () => {
   for (const locale of ['es', 'en'] as const) {
-    const pages = [landingPage(origin, locale), installationPage(origin, locale), instructionsPage(origin, locale), loginPage(locale), notFoundPage(locale, '/missing?x=1'), authorizationErrorPage(locale),
+    const pages = [landingPage(origin, locale), installationPage(origin, locale), instructionsPage(origin, locale), privacyPage(origin, locale), loginPage(locale), notFoundPage(locale, '/missing?x=1'), authorizationErrorPage(locale),
       authorizationPage({ app: 'App', destination: 'https://app.example', id: 'id', csrf: 'csrf', recognized: false, cinemaLogin: true }, locale)];
     for (const html of pages) {
       const $ = load(html);
@@ -71,7 +72,7 @@ test('every view localizes visible text and provides a working language switcher
 
 test('localized canonical URLs, reciprocal alternates and social images agree', () => {
   for (const locale of ['es', 'en'] as const) {
-    for (const [render, path] of [[landingPage, '/'], [installationPage, '/install'], [instructionsPage, '/instrucciones']] as const) {
+    for (const [render, path] of [[landingPage, '/'], [installationPage, '/install'], [instructionsPage, '/instrucciones'], [privacyPage, '/privacidad']] as const) {
       const $ = load(render(origin, locale));
       assert.equal($('link[rel="canonical"]').attr('href'), canonicalUrl(origin + path, locale));
       for (const [target, language] of [['es', 'es'], ['en', 'en'], ['x-default', 'es']] as const) assert.equal($(`link[hreflang="${target}"]`).attr('href'), canonicalUrl(origin + path, language));
@@ -80,7 +81,43 @@ test('localized canonical URLs, reciprocal alternates and social images agree', 
       assert.equal($('meta[property="og:url"]').attr('content'), $('link[rel="canonical"]').attr('href'));
     }
     const $ = load(instructionsPage(origin, locale));
-    assert.ok($('pre[lang="es"]').text().includes(serverInstructions({ publicHosted: true })));
+    assert.ok($('pre[lang="en"]').text().includes(serverInstructions({ publicHosted: true })));
+  }
+});
+
+test('privacy page content and metadata are localized', () => {
+  const spanish = load(privacyPage(origin, 'es'));
+  const spanishText = spanish('body').text();
+  assert.equal(spanish('html').attr('lang'), 'es');
+  assert.match(spanishText, /Tu privacidad en Cinve\./);
+  assert.match(spanishText, /Última actualización: 11 de noviembre de 2026/);
+  assert.match(spanishText, /Cinve consulta la cartelera por ti y guarda lo mínimo para hacerlo/);
+  assert.match(spanishText, /tu contraseña se usa una vez para iniciar sesión y no se guarda/i);
+  assert.equal(spanish('code').filter((_, element) => spanish(element).text() === 'disconnect_account').length, 1);
+  assert.equal(spanish('section.policy').map((_, element) => spanish(element).find('h2').attr('id')).get().join(','),
+    'resumen,consultas,cuenta,asistente,abuso,cookies,terceros,conservacion,borrar,local,contacto');
+
+  const english = load(privacyPage(origin, 'en'));
+  const englishText = english('body').text();
+  assert.equal(english('html').attr('lang'), 'en');
+  assert.match(englishText, /Your privacy at Cinve\./);
+  assert.match(englishText, /Last updated: November 11, 2026/);
+  assert.match(englishText, /Cinve checks movie listings for you and stores only what it needs/);
+  assert.match(englishText, /Your password is sent once over HTTPS/);
+  assert.doesNotMatch(englishText, /Tu privacidad|Última actualización|Cinve consulta|tu contraseña|Qué datos guarda|abre un issue|repórtalo en privado/);
+  assert.equal(english('code').filter((_, element) => english(element).text() === 'disconnect_account').length, 1);
+
+  for (const [page, locale] of [[spanish, 'es'], [english, 'en']] as const) {
+    const path = '/privacidad';
+    const expectedCanonical = canonicalUrl(origin + path, locale);
+    assert.equal(page('title').text(), `${locale === 'es' ? 'Política de privacidad' : 'Privacy policy'} · Cinve`);
+    assert.equal(page('meta[name="description"]').attr('content'), catalog(locale).privacy.description);
+    assert.equal(page('link[rel="canonical"]').attr('href'), expectedCanonical);
+    assert.equal(page('meta[property="og:url"]').attr('content'), expectedCanonical);
+    for (const [target, language] of [['es', 'es'], ['en', 'en'], ['x-default', 'es']] as const) {
+      assert.equal(page(`link[hreflang="${target}"]`).attr('href'), canonicalUrl(origin + path, language));
+    }
+    assert.equal(page('meta[property="og:locale"]').attr('content'), locale === 'es' ? 'es_VE' : 'en_US');
   }
 });
 

@@ -6,7 +6,7 @@ import { escapeHtml } from './web/jsx.js';
 import { canonicalUrl } from './web/locale.js';
 
 /** Public, indexable pages. /connect, OAuth and errors stay out (noindex). */
-export const indexedPaths = ['/', '/install', '/instrucciones'];
+export const indexedPaths = ['/', '/install', '/instrucciones', '/privacidad'];
 
 // /connect stays crawlable so its noindex can be read; only the POST API
 // under /connect/ is disallowed. AI crawlers get the same rules as everyone.
@@ -38,6 +38,7 @@ const llms = (origin: string) => `# Cinve
 - [Guía de instalación para asistentes](${origin}/install?format=text)
 - [Cómo añadir Cinve a mano](${origin}/install)
 - [Instrucciones que recibe el asistente](${origin}/instrucciones)
+- [Política de privacidad](${origin}/privacidad)
 - [Código fuente](https://github.com/0bkevin/cinve)
 - Endpoint MCP (Streamable HTTP): ${origin}/mcp
 
@@ -54,9 +55,11 @@ Cinve only reads information: it does not buy tickets or reserve seats.
 - [Installation for visitors](${origin}/install?lang=en)
 - [Assistant installation guide (English)](${origin}/install?format=text)
 - [Assistant instructions and original source text](${origin}/instrucciones?lang=en)
+- [Privacy policy](${origin}/privacidad?lang=en)
 
 The website supports Spanish and English through ?lang=es and ?lang=en.
-MCP tool descriptions, server instructions, and results remain in Spanish.
+MCP tool descriptions, server instructions, and diagnostic messages are in English.
+The assistant answers in the language of the user’s prompt.
 `;
 
 // RFC 9116. Expires is required and must stay under a year away, so it is

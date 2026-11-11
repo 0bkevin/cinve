@@ -42,7 +42,7 @@ const formSessionPage = 'https://supercines.com.ve/cartelera';
 type FormSession = { cookies: Map<string, string>; token: string; expires: number };
 type FormRequest = { method: 'GET' | 'POST'; body?: string; headers: Record<string, string>; onResponse?: (response: Response) => void };
 /** Laravel answers an expired anti-forgery token with HTTP 419. */
-class FormTokenExpired extends DataError { constructor() { super('error', 'El proveedor rechazó el token de consulta pública (HTTP 419).'); } }
+class FormTokenExpired extends DataError { constructor() { super('error', 'The provider rejected the public query token (HTTP 419).'); } }
 
 function sessionCookies(response: Response, into: Map<string, string>) {
   const values = typeof response.headers.getSetCookie === 'function' ? response.headers.getSetCookie() : [];
@@ -162,7 +162,7 @@ export class HttpClient {
     } catch (error) {
       if (error instanceof FormTokenExpired || (error instanceof DataError && error.status === 'auth_required')) {
         this.rejectedSessions.add(provider);
-        throw new DataError('auth_required', 'El cine no reconoció la sesión de tu cuenta (expiró o se cerró); conéctala de nuevo.');
+        throw new DataError('auth_required', 'The cinema did not recognize your account\'s session (it expired or was closed); connect it again.');
       }
       throw error;
     }
@@ -181,7 +181,7 @@ export class HttpClient {
   }
   async get(url: string, ttl = 120000, refresh = false): Promise<Page> {
     const parsed = new URL(url);
-    if (parsed.protocol !== 'https:' || !hosts.has(parsed.hostname) || parsed.port || parsed.username || parsed.password || parsed.hash) throw new DataError('error', 'Origen de consulta no permitido.');
+    if (parsed.protocol !== 'https:' || !hosts.has(parsed.hostname) || parsed.port || parsed.username || parsed.password || parsed.hash) throw new DataError('error', 'Query origin not allowed.');
     // Fresh reads never consume a cached response or an older in-flight read.
     // Invalidate the old entry, but do not let overlapping requests overwrite
     // each other's cache with responses obtained in an indeterminate order.
@@ -238,7 +238,7 @@ export class HttpClient {
    */
   async post(url: string, fields: Record<string, string>, ttl: Ttl = 120000, refresh = false): Promise<Page> {
     const parsed = new URL(url);
-    if (parsed.protocol !== 'https:' || parsed.hostname !== 'supercines.com.ve' || parsed.port || parsed.username || parsed.password || parsed.hash || parsed.search) throw new DataError('error', 'Origen de consulta no permitido.');
+    if (parsed.protocol !== 'https:' || parsed.hostname !== 'supercines.com.ve' || parsed.port || parsed.username || parsed.password || parsed.hash || parsed.search) throw new DataError('error', 'Query origin not allowed.');
     const body = new URLSearchParams(Object.entries(fields).sort(([a], [b]) => a.localeCompare(b))).toString();
     const key = body ? `${url}?${body}` : url;
     if (refresh) this.invalidate(key);
@@ -282,7 +282,7 @@ export class HttpClient {
     const page = await this.read(formSessionPage, origin, undefined, false, undefined,
       { method: 'GET', headers: {}, onResponse: response => sessionCookies(response, cookies) });
     const token = page.body.match(/<meta\s+name="csrf-token"\s+content="([A-Za-z0-9]{20,128})"/)?.[1];
-    if (!token || !cookies.size) throw new DataError('error', 'El proveedor no abrió una sesión de consulta pública reconocible.');
+    if (!token || !cookies.size) throw new DataError('error', 'The provider did not open a recognizable public query session.');
     return { cookies, token, expires: Date.now() + formSessionMs };
   }
   private async readForm(url: string, key: string, body: string, origin: string, refresh: boolean): Promise<Page> {
@@ -413,12 +413,12 @@ export class HttpClient {
         cancel: () => {
           signal.removeEventListener('abort', waiting.cancel);
           const i = q.indexOf(waiting); if (i >= 0) q.splice(i, 1);
-          reject(new DataError('error', 'Se agotó el tiempo de espera en la cola de consultas.'));
+          reject(new DataError('error', 'Timed out waiting in the query queue.'));
         },
       };
       if (signal.aborted) { waiting.cancel(); return; }
       if ((this.active.get(origin) ?? 0) < 2) { waiting.start(); return; }
-      if (q.length >= 32) { reject(new DataError('rate_limited', 'La cola local de consultas está llena; inténtalo de nuevo más tarde.')); return; }
+      if (q.length >= 32) { reject(new DataError('rate_limited', 'The local query queue is full; try again later.')); return; }
       q.push(waiting); signal.addEventListener('abort', waiting.cancel, { once: true });
     });
   }
@@ -477,34 +477,34 @@ export class HttpClient {
         if (form?.method === 'POST' && new URL(url).pathname === '/listCartelerafecha' && redirect?.origin === origin && redirect.pathname === '/' && !redirect.search) {
           return { body: '', empty: true, source: { url, fetched_at: new Date().toISOString(), cached: false } };
         }
-        if (authorize && redirect?.origin === origin && /^\/(?:clearsession\.html|api\/auth\/signin|login)(?:\/|$)/.test(redirect.pathname)) throw new DataError('auth_required', 'El proveedor redirigió al login; conecta de nuevo tu cuenta en la terminal local.');
-        throw new DataError('unavailable', 'El proveedor redirigió la consulta; no se siguió el destino.');
+        if (authorize && redirect?.origin === origin && /^\/(?:clearsession\.html|api\/auth\/signin|login)(?:\/|$)/.test(redirect.pathname)) throw new DataError('auth_required', 'The provider redirected to the login; connect your account again in the local terminal.');
+        throw new DataError('unavailable', 'The provider redirected the query; the destination was not followed.');
       }
       if (!response.ok) {
         const status = response.status === 401 ? 'auth_required' : response.status === 403 ? 'blocked' : response.status === 429 ? 'rate_limited' : response.status === 404 ? 'unavailable' : 'error';
         cancelBody(response.body);
         if (response.status === 429 && !authorize) {
-          const error = new DataError('rate_limited', `El proveedor limitó las consultas en ${new URL(url).hostname} (HTTP 429); Cinve espera antes de volver a consultarlo.`);
+          const error = new DataError('rate_limited', `The provider rate-limited queries on ${new URL(url).hostname} (HTTP 429); Cinve waits before querying it again.`);
           this.challenged.set(origin, { until: Date.now() + retryAfterMs(response), error });
           throw error;
         }
         // An interactive anti-bot challenge is an explicit refusal of automated
         // clients. Report it as such; Cinve never tries to solve or evade it.
         if (response.status === 403 && response.headers.get('cf-mitigated')?.toLowerCase() === 'challenge') {
-          const error = new DataError('blocked', `El proveedor exige un desafío anti-bots (Cloudflare) en ${new URL(url).hostname} y no admite consultas automatizadas. Cinve no evade esa protección; consulta la programación en su web o redes oficiales.`);
+          const error = new DataError('blocked', `The provider requires an anti-bot challenge (Cloudflare) on ${new URL(url).hostname} and does not allow automated queries. Cinve does not bypass that protection; check the schedule on its website or official social media.`);
           if (!authorize) this.challenged.set(origin, { until: Date.now() + challengeMemoryMs, error });
           throw error;
         }
-        throw new DataError(status, `El proveedor respondió HTTP ${response.status} en ${url}.`);
+        throw new DataError(status, `The provider responded HTTP ${response.status} at ${url}.`);
       }
       const reader = response.body?.getReader();
-      if (!reader) throw new DataError('error', 'Respuesta HTTP sin cuerpo.');
+      if (!reader) throw new DataError('error', 'HTTP response without a body.');
       const chunks: Uint8Array[] = []; let size = 0;
       try {
         while (true) {
           const { done, value } = await withSignal(reader.read(), signal); if (done) break;
           size += value.length;
-          if (size > 4 * 1024 * 1024) { cancelReader(reader); throw new DataError('error', 'Respuesta del proveedor demasiado grande.'); }
+          if (size > 4 * 1024 * 1024) { cancelReader(reader); throw new DataError('error', 'Provider response too large.'); }
           chunks.push(value);
         }
       } catch (error) {
@@ -516,8 +516,8 @@ export class HttpClient {
       return { body: authorize ? text : compactBody(url, text), source: { url, fetched_at: new Date().toISOString(), cached: false } };
     } catch (error) {
       if (error instanceof DataError) throw error;
-      if (signal.aborted) throw new DataError('error', `Se agotó el plazo total de la consulta a ${url}.`);
-      throw new DataError('error', `No se pudo leer ${url} (conexión, redirección o tiempo de espera).`);
+      if (signal.aborted) throw new DataError('error', `The overall time limit for the query to ${url} ran out.`);
+      throw new DataError('error', `Could not read ${url} (connection, redirect or timeout).`);
     } finally {
       release();
     }
@@ -585,7 +585,7 @@ export function assertPublicRead(value: string) {
         return false;
     }
   })();
-  if (!allowed) throw new DataError('error', 'Ruta de consulta pública no permitida.');
+  if (!allowed) throw new DataError('error', 'Public query path not allowed.');
 }
 
 const digits = (value: string | undefined) => value !== undefined && /^\d{1,12}$/.test(value);
@@ -604,7 +604,7 @@ const supercinesForms: Record<string, Record<string, (value: string | undefined)
 export function assertPublicForm(value: string, fields: Record<string, string>) {
   const u = new URL(value), rules = u.hostname === 'supercines.com.ve' && !u.search && !u.hash ? supercinesForms[u.pathname] : undefined;
   const allowed = !!rules && Object.keys(fields).every(key => Object.hasOwn(rules, key)) && Object.entries(rules).every(([key, valid]) => valid(fields[key]));
-  if (!allowed) throw new DataError('error', 'Ruta de consulta pública no permitida.');
+  if (!allowed) throw new DataError('error', 'Public query path not allowed.');
 }
 
 /** Per-call options from the MCP request: its cancellation and progress reporting. */
@@ -621,7 +621,7 @@ export class ReadContext {
    */
   constructor(private http: HttpClient, private refresh = false, private call: CallOptions = {}) {}
   private checkCancelled() {
-    if (this.call.signal?.aborted) throw new DataError('error', 'La consulta fue cancelada por el cliente.');
+    if (this.call.signal?.aborted) throw new DataError('error', 'The query was cancelled by the client.');
   }
   /** Reports one completed step of a fan-out, when the client asked for progress. */
   progress(message: string) {
@@ -655,7 +655,7 @@ export class ReadContext {
   }
   async json(url: string): Promise<unknown> {
     try { return JSON.parse(await this.get(url)); }
-    catch (e) { if (e instanceof DataError) throw e; throw new DataError('error', 'El proveedor no devolvió JSON válido.'); }
+    catch (e) { if (e instanceof DataError) throw e; throw new DataError('error', 'The provider did not return valid JSON.'); }
   }
   /** A public listing read sent as a form POST; see HttpClient.post. */
   async form(url: string, fields: Record<string, string>, ttl?: Ttl): Promise<string> {
@@ -671,6 +671,6 @@ export class ReadContext {
   }
   async formJson(url: string, fields: Record<string, string>, ttl?: Ttl): Promise<unknown> {
     try { return JSON.parse(await this.form(url, fields, ttl)); }
-    catch (e) { if (e instanceof DataError) throw e; throw new DataError('error', 'El proveedor no devolvió JSON válido.'); }
+    catch (e) { if (e instanceof DataError) throw e; throw new DataError('error', 'The provider did not return valid JSON.'); }
   }
 }

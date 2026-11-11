@@ -41,7 +41,7 @@ test('429/auth errors are explicit and never cached as successful empty lists', 
 });
 test('oversize response is cancelled', async () => {
   const http = new HttpClient(async () => new Response('x'.repeat(4 * 1024 * 1024 + 1)));
-  await assert.rejects(http.get(origin + '/large'), /demasiado grande/);
+  await assert.rejects(http.get(origin + '/large'), /too large/);
 });
 
 test('refresh bypasses warm cache, requests revalidation and never falls back on failure', async () => {
@@ -281,20 +281,20 @@ test('configured deadline covers injected request, authorization and response-bo
   const never = <T>() => new Promise<T>(() => {});
   let requests = 0;
   const stalledRequest = new HttpClient(async () => { requests++; return never<Response>(); }, 20);
-  await assert.rejects(stalledRequest.get(origin + '/request-stall'), e => e instanceof DataError && /plazo total/.test(e.message));
-  await assert.rejects(stalledRequest.get(origin + '/request-stall-again'), e => e instanceof DataError && /plazo total/.test(e.message));
+  await assert.rejects(stalledRequest.get(origin + '/request-stall'), e => e instanceof DataError && /overall time limit/.test(e.message));
+  await assert.rejects(stalledRequest.get(origin + '/request-stall-again'), e => e instanceof DataError && /overall time limit/.test(e.message));
   assert.equal(requests, 2, 'a timed-out request must release its active slot');
 
   const { SessionStore } = await import('../src/auth.js');
   class StalledStore extends SessionStore { override async headers() { return never<Record<string, string>>(); } }
   const stalledHeaders = new HttpClient(async () => new Response('must not reach transport'), 20, new StalledStore());
-  await assert.rejects(stalledHeaders.getAuthenticated('cinesunidos', 'https://gateway.cinesunidos.com/tickets/www/theaters/1005/sessions/s1/'), e => e instanceof DataError && /plazo total/.test(e.message));
+  await assert.rejects(stalledHeaders.getAuthenticated('cinesunidos', 'https://gateway.cinesunidos.com/tickets/www/theaters/1005/sessions/s1/'), e => e instanceof DataError && /overall time limit/.test(e.message));
 
   const stalledBody = new ReadableStream<Uint8Array>({
     start() {}, cancel() { return never<void>(); },
   });
   const stalledResponse = new HttpClient(async () => new Response(stalledBody), 20);
-  await assert.rejects(stalledResponse.get(origin + '/body-stall'), e => e instanceof DataError && /plazo total/.test(e.message));
+  await assert.rejects(stalledResponse.get(origin + '/body-stall'), e => e instanceof DataError && /overall time limit/.test(e.message));
 });
 
 test('Cinex ticket redirects cannot change identity, escape the route or loop', async () => {

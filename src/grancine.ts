@@ -45,7 +45,7 @@ export function parseGranCineVenues(html: string): Venue[] {
     const city = knownCities[slug] ?? cityNames.find(c => hint && folded(c) === folded(hint));
     venues.set(slug, { id: slug, name: display, city });
   });
-  if (!venues.size) throw new DataError('error', 'No se reconoció el directorio de salas de Gran Cine.');
+  if (!venues.size) throw new DataError('error', 'Unrecognized Gran Cine theater directory.');
   return [...venues.values()];
 }
 async function venues(c: ReadContext): Promise<Venue[]> {
@@ -68,9 +68,9 @@ export function parseGranCineVenuePage(html: string, venue: Venue, date: string,
   const $ = load(html);
   const strip = $('a.caja-fecha-roja').map((_, a) => new URLSearchParams(($(a).attr('href') ?? '').split('?')[1] ?? '').get('fecha') ?? '').get();
   const shown = $('a.caja-fecha-roja.hoy').map((_, a) => new URLSearchParams(($(a).attr('href') ?? '').split('?')[1] ?? '').get('fecha') ?? '').get();
-  if (!strip.length) throw new DataError('error', 'No se reconoció la página de sala de Gran Cine.');
+  if (!strip.length) throw new DataError('error', 'Unrecognized Gran Cine theater page.');
   if (!strip.includes(date)) return { items: [], published: false };
-  if (shown.length !== 1 || shown[0] !== date) throw new DataError('error', 'La página de Gran Cine no corresponde a la fecha solicitada.');
+  if (shown.length !== 1 || shown[0] !== date) throw new DataError('error', 'The Gran Cine page does not match the requested date.');
   const address = $('.btn-ubicacion-estilo').first().text().replace(/\s+/g, ' ').trim() || undefined;
   const items: Showtime[] = [];
   let skipped = 0, lateNight = 0;
@@ -98,9 +98,9 @@ export function parseGranCineVenuePage(html: string, venue: Venue, date: string,
   });
   if (skipped) {
     c.partial = true;
-    c.warnings.push(`Gran Cine (${venue.name}): se omitieron ${skipped} funciones o títulos sin hora, título o ficha reconocibles.`);
+    c.warnings.push(`Gran Cine (${venue.name}): ${skipped} showtimes or titles without a recognizable time, title or movie record were omitted.`);
   }
-  if (lateNight) c.warnings.push('Gran Cine: en funciones de madrugada se omite starts_at porque la fecha calendario no está confirmada.');
+  if (lateNight) c.warnings.push('Gran Cine: for after-midnight showtimes starts_at is omitted because the calendar date is not confirmed.');
   return { items, published: true, address };
 }
 
@@ -111,22 +111,22 @@ async function showtimes(q: Query, c: ReadContext, listing = false): Promise<Sho
   const deadline = Date.now() + budgetMs;
   const date = q.date ?? today();
   if (isPastDate(date)) {
-    c.warnings.push('Esa fecha ya pasó: Gran Cine solo publica la programación de hoy en adelante.');
+    c.warnings.push('That date has passed: Gran Cine only publishes the schedule from today onward.');
     return [];
   }
   const all = await venues(c);
   let work: Venue[];
   if (q.cinema_id) {
     const venue = all.find(v => v.id === q.cinema_id);
-    if (!venue) throw new DataError('unavailable', 'Sala Gran Cine no reconocida; consulta list_cinemas.');
+    if (!venue) throw new DataError('unavailable', 'Gran Cine theater not recognized; check list_cinemas.');
     work = [venue];
   } else if (q.city) {
     work = all.filter(v => v.city && folded(v.city) === folded(q.city!));
-    if (!work.length) { c.warnings.push('Gran Cine no tiene salas en esta ciudad; consulta list_cities.'); return []; }
+    if (!work.length) { c.warnings.push('Gran Cine has no theaters in this city; check list_cities.'); return []; }
   } else work = all;
   if (work.length > venueLimit) {
     c.partial = true;
-    c.warnings.push(`Se consultaron ${venueLimit} de ${work.length} salas de Gran Cine; usa cinema_id para las demás.`);
+    c.warnings.push(`${venueLimit} of ${work.length} Gran Cine theaters were queried; use cinema_id for the rest.`);
     work = work.slice(0, venueLimit);
   }
   const items: Showtime[] = [], failed: string[] = [], unpublished: string[] = [];
@@ -137,16 +137,16 @@ async function showtimes(q: Query, c: ReadContext, listing = false): Promise<Sho
       if (!page.published) unpublished.push(venue.name);
       items.push(...page.items.filter(s => !q.movie_id || s.movie_id === q.movie_id));
     } catch (error) { failed.push(venue.name); throw error; }
-  }, { deadline, minRemainingMs: readMs, workers, onStep: () => c.progress(`Gran Cine: ${++steps} de ${work.length} salas leídas.`) });
+  }, { deadline, minRemainingMs: readMs, workers, onStep: () => c.progress(`Gran Cine: ${++steps} of ${work.length} theaters read.`) });
   const skipped = left.map(v => v.name);
   const firstError = stopped ?? failures[0];
-  if (unpublished.length) c.warnings.push(`Gran Cine aún no publica la programación de esa fecha (publica unos 20 días desde hoy) para: ${unpublished.join(', ')}.`);
-  if (failed.length) { c.partial = true; c.warnings.push(`No se pudo leer la programación de Gran Cine en: ${failed.join(', ')}.`); }
-  if (skipped.length) { c.partial = true; c.warnings.push(stopped ? `Gran Cine rechazó o no respondió a varias consultas seguidas; no se leyó: ${skipped.join(', ')}.` : `Se agotó el tiempo antes de leer: ${skipped.join(', ')}; consulta su cinema_id.`); }
-  if (!done) throw firstError ?? new DataError('unavailable', 'Se agotó el tiempo de consulta de Gran Cine.');
+  if (unpublished.length) c.warnings.push(`Gran Cine has not yet published the schedule for that date (it publishes about 20 days ahead of today) for: ${unpublished.join(', ')}.`);
+  if (failed.length) { c.partial = true; c.warnings.push(`Could not read the Gran Cine schedule at: ${failed.join(', ')}.`); }
+  if (skipped.length) { c.partial = true; c.warnings.push(stopped ? `Gran Cine rejected or did not answer several queries in a row; not read: ${skipped.join(', ')}.` : `Timed out before reading: ${skipped.join(', ')}; query their cinema_id.`); }
+  if (!done) throw firstError ?? new DataError('unavailable', 'The Gran Cine query timed out.');
   const partners = [...new Set(work.filter(v => hostedBy[v.id] && items.some(s => s.cinema_id === v.id)).map(v => hostedBy[v.id]))];
-  if (partners.length) c.warnings.push(`En salas de ${partners.join(' y ')}, Gran Cine lista solo los títulos de su circuito; la programación completa de esas salas está en ese proveedor.`);
-  if (!listing) c.warnings.push('Gran Cine no publica identificadores de función: el id de cada función lo calcula Cinve y no sirve para tarifas ni asientos. Confirma horarios en la sala antes de ir.');
+  if (partners.length) c.warnings.push(`At ${partners.join(' and ')} theaters, Gran Cine lists only the titles of its circuit; the full schedule of those theaters is at that provider.`);
+  if (!listing) c.warnings.push('Gran Cine does not publish showtime identifiers: each showtime\'s id is computed by Cinve and cannot be used for prices or seats. Confirm times with the theater before going.');
   return items;
 }
 
@@ -155,7 +155,7 @@ export async function grancine(op: Operation, q: Query, c: ReadContext): Promise
   if (op === 'cinemas') {
     const list = await venues(c);
     const unknown = list.filter(v => !v.city);
-    if (unknown.length) c.warnings.push(`Gran Cine no indica la ciudad de: ${unknown.map(v => v.name).join(', ')}.`);
+    if (unknown.length) c.warnings.push(`Gran Cine does not state the city of: ${unknown.map(v => v.name).join(', ')}.`);
     return list.filter(v => !q.city || (v.city && folded(v.city) === folded(q.city)))
       .map(v => ({ kind: 'cinema', id: v.id, cinema_id: v.id, code_status: 'verified', name: v.name, city: v.city, url: `${GC}/sedes/sede.php?slug=${v.id}` }));
   }
@@ -168,7 +168,7 @@ export async function grancine(op: Operation, q: Query, c: ReadContext): Promise
   }
   if (op === 'prices' || op === 'concessions') {
     requireArg(q, 'cinema_id');
-    throw new DataError('unavailable', 'Gran Cine solo publica la programación: no publica tarifas ni caramelería. Consulta la sala (o Supercines/Cines Unidos en sus salas asociadas).');
+    throw new DataError('unavailable', 'Gran Cine only publishes the schedule: it publishes neither prices nor concessions. Ask the theater (or Supercines/Cines Unidos at their associated theaters).');
   }
   return showtimes(q, c);
 }
