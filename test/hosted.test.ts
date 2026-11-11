@@ -17,7 +17,7 @@ import type { login } from '../src/auth.js';
 import type { ClientMetadataFetcher } from '../src/client-metadata.js';
 
 async function fixture(t: { after(fn: () => Promise<void>): void }, authenticate?: typeof login,
-  request: typeof fetch = async () => new Response('["Caracas"]'), extra: { bodyTimeoutMs?: number; clientMetadata?: ClientMetadataFetcher } = {}) {
+  request: typeof fetch = async () => new Response('["Caracas"]'), extra: { bodyTimeoutMs?: number; clientMetadata?: ClientMetadataFetcher; trustedVercelProxy?: boolean } = {}) {
   const schema = 'test_' + randomBytes(12).toString('hex');
   const admin = new Pool({ connectionString: process.env.TEST_DATABASE_URL });
   await admin.query(`CREATE SCHEMA ${schema}`);
@@ -834,8 +834,10 @@ test('one address exhausting its OAuth quota cannot consume the shared OAuth quo
   const f = await fixture(t);
   const { digest } = await import('../src/hosted-store.js');
   await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 minute',61)", [f.links.keyHash('oauth:127.0.0.1')]);
-  for (let i = 0; i < 20; i++) assert.equal((await form(f.origin, '/oauth/token', { grant_type: 'refresh_token' })).status, 429);
-  const global = await f.pool.query('SELECT count FROM cinev_budgets WHERE key_hash=$1', [f.links.keyHash('oauth:global')]);
+  const registration = () => fetch(f.origin + '/oauth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ client_name: 'T', redirect_uris: ['https://assistant.example/callback'] }) });
+  for (let i = 0; i < 20; i++) assert.equal((await registration()).status, 429);
+  const global = await f.pool.query('SELECT count FROM cinev_budgets WHERE key_hash=ANY($1)', [['oauth:global', 'oauth:register:global'].map(k => f.links.keyHash(k))]);
   assert.equal(global.rows.length, 0, 'rejected requests must not charge the global budget');
 });
 
@@ -1112,7 +1114,7 @@ test('refresh tokens are signed: forgeries are refused and revocations ignored w
   assert.equal(refused.status, 400); assert.equal((await refused.json() as { error: string }).error, 'invalid_grant');
   assert.equal(revoked.status, 200);
   assert.equal(connections, 0, 'no transaction is opened');
-  assert.ok(texts.every(sql => sql.includes('cinev_budgets')), `only rate-limit writes: ${texts.join(' | ')}`);
+  assert.deepEqual(texts, [], 'not even a rate-limit write');
   // The genuine token was not affected by the forgery, and still rotates.
   const rotated = await refresh(tokens.refresh_token);
   assert.equal(rotated.status, 200);
@@ -1187,4 +1189,56 @@ test('only refused credentials count as failures; an unreachable cinema refunds 
   // A thrown value of unknown kind fails closed: it counts.
   await attempt(new Error('bug'));
   assert.equal(await count('signin-fail:global'), 2);
+});
+
+// Requests as if from another client network, through the trusted Vercel proxy header.
+const from = (network: string, init: RequestInit = {}) => ({ ...init, headers: { ...(init.headers as Record<string, string> ?? {}), 'x-vercel-forwarded-for': network } });
+
+test('a spent service-wide OAuth quota never blocks refreshing, exchanging codes or revoking', async t => {
+  const f = await fixture(t, undefined, undefined, { trustedVercelProxy: true });
+  const { client_id, tokens } = await enrolled(f.origin);
+  const pending = await authorizationRequest(f.origin, client_id), callback = await approve(f.origin, pending.url);
+  // Ten networks spending their own quotas on new authorizations exhaust the shared one...
+  await f.pool.query(`INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 minute',601)
+    ON CONFLICT(key_hash) DO UPDATE SET count=601, expires_at=now()+interval '1 minute'`, [f.links.keyHash('oauth:global')]);
+  assert.equal((await fetch(pending.url, from('192.0.2.7'))).status, 429, 'starting an authorization is shared');
+  // ...but connected clients keep working, from any network.
+  const refreshed = await fetch(f.origin + '/oauth/token', from('198.51.100.70', { method: 'POST',
+    body: new URLSearchParams({ grant_type: 'refresh_token', client_id, refresh_token: tokens.refresh_token, resource: f.origin + '/mcp' }) }));
+  assert.equal(refreshed.status, 200);
+  const exchanged = await fetch(f.origin + '/oauth/token', from('198.51.100.71', { method: 'POST', body: new URLSearchParams({
+    grant_type: 'authorization_code', client_id, code: callback.searchParams.get('code')!, code_verifier: pending.verifier,
+    resource: f.origin + '/mcp', redirect_uri: pending.params.redirect_uri }) }));
+  assert.equal(exchanged.status, 200, 'an approval already given completes');
+  const next = await refreshed.json() as { access_token: string };
+  assert.equal((await fetch(f.origin + '/oauth/revoke', from('198.51.100.72', { method: 'POST', body: new URLSearchParams({ token: next.access_token, client_id }) }))).status, 200);
+  assert.equal((await f.pool.query('SELECT revoked_at FROM cinev_clients c JOIN cinev_oauth_tokens t ON t.user_id=c.id WHERE t.token_hash=$1',
+    [(await import('../src/hosted-store.js')).digest(next.access_token)])).rows[0].revoked_at !== null, true);
+});
+
+test('malformed and forged token-endpoint requests are refused before any database work', async t => {
+  const f = await fixture(t);
+  const query = f.pool.query.bind(f.pool), texts: string[] = [];
+  f.pool.query = ((...args: Parameters<typeof query>) => { texts.push(String(args[0])); return query(...args); }) as typeof f.pool.query;
+  const token = (data: Record<string, string>) => form(f.origin, '/oauth/token', { client_id: 'cvapp_x', resource: f.origin + '/mcp', ...data });
+  const statuses = [
+    (await token({ grant_type: 'refresh_token' })).status,
+    (await token({ grant_type: 'refresh_token', refresh_token: 'cvr_' + 'A'.repeat(43) + '.' + 'B'.repeat(43) })).status,
+    (await token({ grant_type: 'authorization_code', code: 'short', code_verifier: 'v'.repeat(43), redirect_uri: 'https://assistant.example/callback' })).status,
+    (await token({ grant_type: 'password' })).status,
+    (await form(f.origin, '/oauth/revoke', { token: 'cva_forged', client_id: 'cvapp_x' })).status,
+  ];
+  f.pool.query = query;
+  assert.deepEqual(statuses, [400, 400, 400, 400, 200]);
+  assert.deepEqual(texts, []);
+});
+
+test('OAuth quotas also apply per IPv6 /48, so rotating /64s does not multiply them', async t => {
+  const f = await fixture(t, undefined, undefined, { trustedVercelProxy: true });
+  const statuses = [];
+  for (let i = 0; i < 250; i++) statuses.push((await fetch(f.origin + '/oauth/revoke', from(`2001:db8:5:${i.toString(16)}::1`, { method: 'POST',
+    body: new URLSearchParams({ token: 'cva_' + randomBytes(32).toString('base64url'), client_id: 'cvapp_x' }) }))).status);
+  assert.equal(statuses.filter(s => s === 200).length, 240); assert.equal(statuses.filter(s => s === 429).length, 10);
+  assert.equal((await fetch(f.origin + '/oauth/revoke', from('2001:db8:6::1', { method: 'POST',
+    body: new URLSearchParams({ token: 'cva_' + randomBytes(32).toString('base64url'), client_id: 'cvapp_x' }) }))).status, 200, 'another /48');
 });

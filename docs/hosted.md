@@ -183,9 +183,13 @@ hasta el 1 de diciembre de 2026 (acceso) y el 1 de enero de 2027 (renovación);
 si se despliega después del 2 de diciembre de 2026, retrasa la fecha de
 renovación al menos 30 días tras el despliegue. Las sesiones de
 cine se cifran con AES-256-GCM y se vinculan criptográficamente a su propietario
-y proveedor. El registro, la aprobación y la emisión de tokens tienen límites
-persistentes por IP y globales. El límite global solo se consume cuando la IP
-todavía tiene cupo, para que una sola dirección no agote el servicio para todos.
+y proveedor. El registro, la aprobación y la emisión de tokens tienen límites persistentes
+por red y por prefijo IPv6 /48. Solo el registro (60 por minuto) y el inicio de
+una autorización (600 por minuto) tienen además un cupo global, que se consume
+cuando la red todavía tiene cupo: renovar tokens, canjear un código ya aprobado
+o revocar nunca dependen de lo que hagan otras redes. Las comprobaciones que no
+necesitan la base (formato y firma de los tokens) se hacen antes de cobrar
+cualquier cupo, así que una solicitud malformada o falsificada no cuesta nada.
 
 Antes de cualquier consulta a la base, cada instancia aplica en memoria un
 primer filtro por red: 600 solicitudes por minuto y 30 credenciales rechazadas

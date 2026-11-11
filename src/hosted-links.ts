@@ -25,9 +25,12 @@ export const signInRefusalMessage: Record<SignInRefusal, string> = {
 export const cinemaUnavailableMessage = 'El cine no está respondiendo en este momento. Inténtalo de nuevo en unos minutos.';
 const globalFailures = 'signin-fail:global';
 const accountKey = (s: SignInSubject) => `signin:account:${s.provider}:${s.username.trim().toLowerCase()}`;
+/** The /48 an IPv6 /64 rate-limit network belongs to; undefined for IPv4. Catches rotation across a larger IPv6 allocation. */
+export function ipv6Block(network: string) {
+  return network.endsWith('::/64') ? network.split(':').slice(0, 3).join(':') + '::/48' : undefined;
+}
 function failureKeys(network: string) {
-  // A /64 network also belongs to its /48, which catches rotation across a larger IPv6 allocation.
-  const block = network.endsWith('::/64') ? network.split(':').slice(0, 3).join(':') + '::/48' : undefined;
+  const block = ipv6Block(network);
   return { day: `signin-fail:day:${network}`, recent: `signin-fail:recent:${network}`, block, blockDay: block && `signin-fail:day:${block}` };
 }
 export class ConnectionLinks {

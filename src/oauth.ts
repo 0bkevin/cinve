@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Pool, PoolClient } from 'pg';
 import * as z from 'zod';
 import { digest, lockUser, transaction } from './hosted-store.js';
-import { ConnectionLinks, cinemaUnavailableMessage, signInRefusalMessage } from './hosted-links.js';
+import { ConnectionLinks, cinemaUnavailableMessage, ipv6Block, signInRefusalMessage } from './hosted-links.js';
 import { ClientMetadataCache, isClientIdUrl, redirectUri } from './client-metadata.js';
 import { AuthProvider, SessionStore } from './auth.js';
 import type { AuthProviderId, AuthSession, login } from './auth.js';
@@ -169,14 +169,20 @@ export class HostedOAuth {
   private async touch(app: string) {
     await this.pool.query('UPDATE cinev_oauth_apps SET last_used_at=now() WHERE id=$1', [app]).catch(() => {});
   }
-  private async exchange(p: URLSearchParams) {
+  /**
+   * admit charges the caller's rate limits. It runs after every check that
+   * needs no database, so malformed or forged requests cost nothing, and
+   * before the first query.
+   */
+  private async exchange(p: URLSearchParams, admit: () => Promise<void>) {
     const app = required(p.get('client_id'));
     if (p.get('resource') !== this.resource) throw new OAuthError('invalid_target');
     if (p.has('client_secret')) throw new OAuthError('invalid_client');
     const grant = p.get('grant_type');
     if (grant === 'authorization_code') {
       const code = required(p.get('code')), verifier = required(p.get('code_verifier'));
-      if (!/^[A-Za-z0-9._~-]{43,128}$/.test(verifier)) throw new OAuthError('invalid_grant');
+      if (!/^[A-Za-z0-9._~-]{43,128}$/.test(verifier) || !/^[A-Za-z0-9_-]{43}$/.test(code)) throw new OAuthError('invalid_grant');
+      await admit();
       const result = await transaction(this.pool, async client => {
         // Expiry is judged on the database clock, the same one cleanup uses.
         const { rows } = await client.query('SELECT *, expires_at>clock_timestamp() AS live FROM cinev_oauth_requests WHERE code_hash=$1 FOR UPDATE', [digest(code)]);
@@ -201,6 +207,7 @@ export class HostedOAuth {
       const token = required(p.get('refresh_token'));
       if (!refreshTokenFormat(token, this.tokenKey)) throw new OAuthError('invalid_grant'); // Forged: no database work.
       if (p.has('scope') && p.get('scope') !== scope) throw new OAuthError('invalid_scope');
+      await admit();
       const result = await transaction(this.pool, async client => {
         const find = () => client.query(`SELECT t.*,g.app_id,g.resource,g.expires_at AS grant_expiry FROM cinev_oauth_tokens t
           JOIN cinev_oauth_grants g ON g.user_id=t.user_id WHERE t.token_hash=$1 AND t.kind='refresh'`, [digest(token)]);
@@ -250,10 +257,19 @@ export class HostedOAuth {
         });
         return true;
       }
-      // Charge the shared quota only for requests the caller's own quota admits;
-      // otherwise one address could exhaust OAuth for every other user.
-      if (!await this.budgets.budget(`oauth:${ip}`, 60) || !await this.budgets.budget('oauth:global', 600)) throw new OAuthError('temporarily_unavailable', 429);
+      // Per network (and IPv6 /48), then a service-wide quota charged only when
+      // the caller's own admits the request, so one network cannot spend it.
+      // The shared quota applies only where new rows are created (registration
+      // and starting an authorization): refreshing, exchanging a code or
+      // revoking never depends on what other networks do.
+      const admit = async (shared?: { key: string; limit: number }) => {
+        const block = ipv6Block(ip);
+        if (!await this.budgets.budget(`oauth:${ip}`, 60) || (block && !await this.budgets.budget(`oauth:${block}`, 240)) ||
+            (shared && !await this.budgets.budget(shared.key, shared.limit))) throw new OAuthError('temporarily_unavailable', 429);
+      };
       if (path === '/oauth/register' && req.method === 'POST') {
+        // Registrations are rare (once per installed client) and each adds a row kept up to 90 days.
+        await admit({ key: 'oauth:register:global', limit: 60 });
         if (!await this.budgets.budget(`oauth:register:${ip}`, 10)) throw new OAuthError('temporarily_unavailable', 429);
         const parsed = registration.safeParse(await payload(req, true));
         if (!parsed.success || !parsed.data.grant_types.includes('authorization_code') || !parsed.data.response_types.includes('code')) throw new OAuthError('invalid_client_metadata');
@@ -264,17 +280,19 @@ export class HostedOAuth {
       if (path === '/oauth/authorize' && req.method === 'GET') {
         const p = url.searchParams;
         for (const key of p.keys()) if (p.getAll(key).length !== 1) throw new OAuthError('invalid_request');
-        const clientId = required(p.get('client_id'));
-        const app = isClientIdUrl(clientId) ? await this.metadataApp(clientId, ip)
-          : (await this.pool.query('SELECT * FROM cinev_oauth_apps WHERE id=$1', [clientId])).rows[0];
-        const redirect = required(p.get('redirect_uri'));
-        // Never redirect errors to an unvalidated client URI.
-        if (!app || !app.redirect_uris.includes(redirect)) throw new OAuthError('invalid_request');
+        const clientId = required(p.get('client_id')), redirect = required(p.get('redirect_uri'));
+        // Checks that need no database come first. Errors are rendered here and
+        // never redirected, so their order does not matter to the client.
         if (p.get('response_type') !== 'code') throw new OAuthError('unsupported_response_type');
         if (p.get('resource') !== this.resource) throw new OAuthError('invalid_target');
         if (p.has('scope') && p.get('scope') !== scope) throw new OAuthError('invalid_scope');
         if (p.get('code_challenge_method') !== 'S256' || !/^[A-Za-z0-9_-]{43}$/.test(p.get('code_challenge') ?? '')) throw new OAuthError('invalid_request');
         if ((p.get('state')?.length ?? 0) > 2048) throw new OAuthError('invalid_request');
+        await admit({ key: 'oauth:global', limit: 600 });
+        const app = isClientIdUrl(clientId) ? await this.metadataApp(clientId, ip)
+          : (await this.pool.query('SELECT * FROM cinev_oauth_apps WHERE id=$1', [clientId])).rows[0];
+        // Never redirect errors to an unvalidated client URI.
+        if (!app || !app.redirect_uris.includes(redirect)) throw new OAuthError('invalid_request');
         const id = randomBytes(16).toString('hex'), csrf = secret();
         await this.pool.query(`INSERT INTO cinev_oauth_requests(id,app_id,redirect_uri,resource,state,challenge,csrf_hash,expires_at)
           VALUES($1,$2,$3,$4,$5,$6,$7,now()+interval '10 minutes')`, [id, app.id, redirect, this.resource, p.get('state'), p.get('code_challenge'), digest(csrf)]);
@@ -284,6 +302,7 @@ export class HostedOAuth {
       }
       if (path === '/oauth/authorize' && req.method === 'POST') {
         if (req.headers.origin !== origin) throw new OAuthError('invalid_request', 403);
+        await admit();
         const p = await payload(req) as URLSearchParams;
         const id = required(p.get('request_id')), csrf = required(p.get('csrf')), decision = p.get('decision') ?? '';
         if (!/^[a-f0-9]{32}$/.test(id) || !/^[A-Za-z0-9_-]{43}$/.test(csrf) || !['connect', 'approve', 'deny'].includes(decision) ||
@@ -385,13 +404,14 @@ export class HostedOAuth {
         } finally { if (claimed) await release(); }
       }
       if (path === '/oauth/token' && req.method === 'POST') {
-        send(200, await this.exchange(await payload(req) as URLSearchParams)); return true;
+        send(200, await this.exchange(await payload(req) as URLSearchParams, () => admit())); return true;
       }
       if (path === '/oauth/revoke' && req.method === 'POST') {
         const p = await payload(req) as URLSearchParams;
         const token = required(p.get('token')), app = required(p.get('client_id'));
         // RFC 7009: an invalid token is answered like a revoked one, here without database work.
         if (!accessTokenFormat(token, this.tokenKey) && !refreshTokenFormat(token, this.tokenKey)) { send(200, {}); return true; }
+        await admit();
         await transaction(this.pool, async client => {
           const { rows } = await client.query(`SELECT t.user_id FROM cinev_oauth_tokens t JOIN cinev_oauth_grants g ON g.user_id=t.user_id
             WHERE t.token_hash=$1 AND g.app_id=$2 AND g.resource=$3`, [digest(token), app, this.resource]);
