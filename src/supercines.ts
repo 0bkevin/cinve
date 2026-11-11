@@ -171,21 +171,34 @@ async function showtimes(q: Query, c: ReadContext): Promise<DataItem[]> {
     c.warnings.push(`Se consultaron ${titlesLimit} de ${work.length} títulos de Supercines; usa movie_id o query para los demás.`);
     work = work.slice(0, titlesLimit);
   }
-  const items: DataItem[] = [], offline: OfflineFunction[] = [];
-  let steps = 0;
+  const items: DataItem[] = [], offline: OfflineFunction[] = [], elsewhere = new Set<string>();
+  let steps = 0, published = 0;
   const { done, failures, skipped: left, stopped } = await fanOut(work, async movie => {
     const html = await schedule(c, movie.id, date);
     if (html === undefined) return;
-    items.push(...parseSupercinesShowtimes(html, movie, date, c, offline).filter(s => !allowed || allowed.has(s.cinema_id)));
+    published++;
+    for (const s of parseSupercinesShowtimes(html, movie, date, c, offline)) {
+      if (!allowed || allowed.has(s.cinema_id)) items.push(s);
+      else elsewhere.add(s.cinema_id);
+    }
   }, { deadline, minRemainingMs: readMs, workers, onStep: () => c.progress(`Supercines: ${++steps} de ${work.length} títulos consultados.`) });
   const boxOffice = offlineWarning(offline, all, allowed, date, c);
   if (done && !items.length && !boxOffice) {
+    const scope = [q.movie_id ? 'de ese título' : '', q.cinema_id ? 'en esta sede' : q.city ? 'en esta ciudad' : ''].filter(Boolean).join(' ');
+    const others = all.filter(v => elsewhere.has(v.id)).map(v => `${v.name} (${v.city})`);
+    // The date is published, just not here: say where it is on instead.
+    if (others.length) c.warnings.push(`Supercines no tiene funciones${scope ? ` ${scope}` : ''} para ${date}; sí las tiene en: ${others.join(', ')}.`);
     // Observed November 2026: the next day's schedule is loaded during the
     // day, venue by venue; later days only for presales.
-    const scope = [q.movie_id ? 'de ese título' : '', q.cinema_id ? 'en esta sede' : q.city ? 'en esta ciudad' : ''].filter(Boolean).join(' ');
-    c.warnings.push(date > today()
-      ? `Supercines aún no publica funciones${scope ? ` ${scope}` : ''} para ${date}: carga la programación poco antes (la del día siguiente, sede por sede durante el día) y las preventas en sus propias fechas. Vuelve a consultar más tarde.`
-      : `Supercines no publica funciones${scope ? ` ${scope}` : ''} para ${date}.`);
+    else if (!published && date > today()) c.warnings.push(`Supercines aún no publica funciones${scope ? ` ${scope}` : ''} para ${date}: carga la programación poco antes (la del día siguiente, sede por sede durante el día) y las preventas en sus propias fechas. Vuelve a consultar más tarde.`);
+    else c.warnings.push(`Supercines no tiene funciones${scope ? ` ${scope}` : ''} para ${date}.`);
+    // One title: its page lists the dates it has functions on (any venue).
+    if (q.movie_id && work.length === 1) {
+      // A hint only: a failed read leaves the answer as it is.
+      const page = await c.get(`${SC}/booking/${q.movie_id}`, 600000).catch(() => undefined);
+      const dates = page === undefined ? [] : parseSupercinesDates(page).filter(d => d !== date && !isPastDate(d));
+      if (dates.length) c.warnings.push(`Fechas con funciones publicadas de este título en Supercines (en alguna sede): ${dates.join(', ')}. Consulta get_showtimes con date.`);
+    }
   }
   const skipped = left.length;
   if (stopped) {
@@ -226,6 +239,11 @@ function offlineWarning(offline: OfflineFunction[], all: Venue[], allowed: Set<s
     c.warnings.push(`${venue} lista ${list.length} funciones sin venta en línea (sin identificador; se compran en taquilla): ${shown}.`);
   }
   return byVenue.size;
+}
+
+/** The dates a title's page offers (its date strip), in order. */
+export function parseSupercinesDates(html: string): string[] {
+  return [...new Set([...html.matchAll(/listCartelerafecha\(\s*'(\d{4}-\d{2}-\d{2})'/g)].map(m => m[1]))].sort().slice(0, 60);
 }
 
 /** The booking page publishes the exchange rate and whether the title is 3D. */

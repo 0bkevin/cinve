@@ -18,6 +18,7 @@ const directory = [
   { id: 7, nombre: 'LA GRANJA', ciudad: 'VALENCIA', estatus: 1, ip: 'granja.internal:8000', merchantB: 123 },
   { id: 9, nombre: 'UNICENTRO', ciudad: 'MARACAY', estatus: 1, ip: 'unicentro.internal:8000' },
   { id: 4, nombre: 'LOS AVIADORES', ciudad: 'MARACAY', estatus: 1 },
+  { id: 2, nombre: 'LA CASCADA', ciudad: 'VALENCIA', estatus: 1 },
   { id: 6, nombre: 'CERRADA', ciudad: 'VALENCIA', estatus: 0 },
 ];
 const billboard = {
@@ -38,7 +39,8 @@ const schedule3991 = (date: string) => `<!-- ${block('LA GRANJA', slot(7, 999, 3
     slot(7, 103, 4000, date, '7:00 PM')) +
   block('UNICENTRO', slot(9, 200, 3991, date, '12:30 PM')) +
   block('LOS AVIADORES', off('4:00 PM') + off('6:25 PM'));
-const booking = (threeD: '0' | '1') => `<meta name="csrf-token" content="TOKEN0000000000000000000000000000000000">
+const strip = (dates: string[]) => dates.map((d, i) => `<div class="date-card" id="fecha_${i}" onclick="listCartelerafecha('${d}','${i}')">${d}</div>`).join('');
+const booking = (threeD: '0' | '1', dates = [D, D1]) => `${strip(dates)}<meta name="csrf-token" content="TOKEN0000000000000000000000000000000000">
 <script>const tasa = '901.62';
 const listBoletosPromise = postRequest("/listBoletos",\`idFuncion=\${idTurno}&fecha=\${fechaInicial}&unico=3991&tresD=${threeD}&idEmpresa=\${idEmpresa}\`);</script>`;
 const fare = (id: number, name: string, a: string, b: string, shown: string) => `<div class="row align-items-center mb-3"><div class="col-6 col-md-5"><h6>${name}</h6></div>
@@ -66,6 +68,7 @@ function fetcherFor(options: Options = {}) {
         ['set-cookie', `XSRF-TOKEN=x${sessions}; path=/; secure`], ['set-cookie', `supercines_session=s${sessions}; path=/; httponly`]] });
     }
     if (call.method === 'GET' && call.path === '/booking/3991') return new Response(booking('0'));
+    if (call.method === 'GET' && call.path === '/booking/3976') return new Response(booking('0', [DFAR]));
     if (call.method !== 'POST') throw new Error(`Unexpected ${call.method} ${call.path}`);
     if (!call.token.startsWith('TOKEN') || !call.cookie.includes('supercines_session=')) return new Response('', { status: 419 });
     if (options.expireOnce && !expired) { expired = true; return new Response('', { status: 419 }); }
@@ -298,7 +301,15 @@ test('an empty schedule says whether Supercines has not published it yet, and a 
   const { service } = provider();
   const presale = await service.query('showtimes', { provider: 'supercines', movie_id: '3976', date: D });
   assert.equal(presale.status, 'empty');
-  assert.ok(presale.warnings.some(w => /no publica funciones de ese título/.test(w)));
+  assert.ok(presale.warnings.some(w => /no tiene funciones de ese título para/.test(w)));
+  // Without a date the question is often "when": the title's own dates are listed.
+  assert.ok(presale.warnings.some(w => w.includes(`Fechas con funciones publicadas de este título en Supercines (en alguna sede): ${DFAR}`)));
+  // A published date where the title plays elsewhere names those venues, not "later".
+  const elsewhere = await service.query('showtimes', { provider: 'supercines', cinema_id: '2', movie_id: '3991', date: D });
+  assert.equal(elsewhere.status, 'empty');
+  assert.ok(elsewhere.warnings.some(w => w.includes('sí las tiene en: Supercines La Granja (Valencia), Supercines Unicentro (Maracay)')));
+  assert.ok(!elsewhere.warnings.some(w => /aún no publica/.test(w)));
+  assert.ok(elsewhere.warnings.some(w => w.includes(`(en alguna sede): ${D1}`)));
   // A venue still without functions on a future date, while another has them.
   const ahead = await service.query('showtimes', { provider: 'supercines', cinema_id: '7', movie_id: '3976', date: D1 });
   assert.ok(ahead.warnings.some(w => /aún no publica funciones de ese título en esta sede para .*Vuelve a consultar más tarde/.test(w)));
