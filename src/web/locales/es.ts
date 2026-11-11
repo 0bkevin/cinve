@@ -11,6 +11,14 @@ const es = {
   landing: {
     title: 'Cartelera, precios y asientos de cines en Venezuela', description: 'Consulta películas, horarios, precios y asientos de cines en Venezuela desde tu asistente.',
     ogAlt: 'Cinve. Pregúntale a tu asistente por el cine. Ejemplo de conversación con un mapa de sala y dos asientos libres juntos. Gratis y de código abierto.',
+    og: {
+      title1: 'Pregúntale a', title2: 'tu asistente', title3a: 'por el ', title3b: 'cine.',
+      description1: 'Cartelera, horarios, precios y', description2: 'asientos de los cines de Venezuela.',
+      question1: '¿Quedan dos asientos juntos', question2: 'esta noche?', assistant: 'Tu asistente', withCinve: 'con Cinve',
+      answer: 'Sí, en la fila C quedan dos juntos:', available: 'Libre', occupied: 'Ocupado', together: 'Juntos',
+      worksWith: 'FUNCIONA CON', footer1: 'y cualquier asistente', footer2: 'compatible con MCP',
+      tagline: 'Gratis y de código abierto',
+    },
     heroTitle: ['¿Qué', 'vemos hoy?'], heroLead: 'Pregúntaselo a tu asistente. Con Cinve consulta la cartelera, los precios y los asientos de los principales cines de Venezuela.',
     addAssistant: 'Añadir Cinve a mi asistente', viewCinemas: 'Ver cines',
     askTitle: 'Qué puedes preguntar', coverageSummary: 'Ver qué ofrece cada cine', coverageCaption: 'Qué puede consultar tu asistente en cada cine',

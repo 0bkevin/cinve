@@ -27,6 +27,8 @@ de vistas previas sin `Accept: text/html`; `?format=text` siempre fuerza la guí
 Los catálogos están en `src/web/locales/es.ts` y `en.ts`; las claves y las listas
 deben coincidir y `npm run check` verifica su estructura. Los mensajes del
 navegador se serializan desde esos catálogos sin scripts ejecutables en línea.
+Los recursos sociales de 1200 × 630 se regeneran manualmente con `npm run build:og`;
+el generador usa las fuentes y marcas vendorizadas en `src/assets`.
 El cambio de idioma de `/connect` se realiza en la misma página para conservar
 el enlace de un solo uso o el token ya canjeado en memoria.
 

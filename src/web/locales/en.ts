@@ -10,6 +10,14 @@ const en = {
   landing: {
     title: 'Venezuelan cinema listings, prices, and seats', description: 'Check movie listings, showtimes, prices, and seats at cinemas in Venezuela from your assistant.',
     ogAlt: 'Cinve. Ask your assistant about the movies. A sample chat with a cinema seat map and two adjacent available seats. Free and open source.',
+    og: {
+      title1: 'Ask your', title2: 'assistant about', title3a: 'the ', title3b: 'movies.',
+      description1: 'Listings, showtimes, prices, and', description2: 'seats at cinemas in Venezuela.',
+      question1: 'Are two seats together', question2: 'still available tonight?', assistant: 'Your assistant', withCinve: 'with Cinve',
+      answer: 'Yes, two seats together in row C:', available: 'Available', occupied: 'Occupied', together: 'Together',
+      worksWith: 'WORKS WITH', footer1: 'and any assistant', footer2: 'that supports MCP',
+      tagline: 'Free and open source',
+    },
     heroTitle: ['What’s', 'on today?'], heroLead: 'Ask your assistant. With Cinve, check listings, prices, and seats at major cinemas in Venezuela.',
     addAssistant: 'Add Cinve to my assistant', viewCinemas: 'View cinemas', askTitle: 'What you can ask', coverageSummary: 'See what each cinema offers', coverageCaption: 'What your assistant can check at each cinema',
     accountNoteTitle: 'With your account.', accountNote: 'Your assistant gives you a private link to connect your cinema account.', seatsNoteTitle: 'Seats.', seatsNote: 'The map distinguishes available, occupied, and unconfirmed seats. Availability can change before you buy.', readOnlyTitle: 'Read-only.', readOnly: 'Cinve does not buy tickets or reserve seats.',
