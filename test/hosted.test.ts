@@ -1159,3 +1159,32 @@ test('rate-limit keys are stored as HMACs under a derived key, never as plain di
   assert.ok(await unkeyed.exchange(invite.token));
   await unkeyed.cleanup();
 });
+
+test('only refused credentials count as failures; an unreachable cinema refunds the attempt and says so', async t => {
+  const { CredentialsRejected, CinemaUnavailable, LoginError } = await import('../src/auth.js');
+  let next: Error = new Error();
+  const f = await fixture(t, async () => { throw next; });
+  const client = await f.client(f.alice.token);
+  const attempt = async (error: Error) => {
+    next = error;
+    const browser = ((await (await f.post('/connect/exchange', await link(client))).json()) as { browser_token: string }).browser_token;
+    const response = await f.post('/connect/login', browser, { username: 'person@example.test', password: 'x' });
+    return { status: response.status, error: (await response.json() as { error: string }).error };
+  };
+  const count = async (key: string) => (await f.pool.query('SELECT count FROM cinev_budgets WHERE key_hash=$1', [f.links.keyHash(key)])).rows[0]?.count ?? 0;
+  const account = 'signin:account:cinesunidos:person@example.test';
+  const down = await attempt(new CinemaUnavailable('down'));
+  assert.equal(down.status, 503); assert.match(down.error, /no está respondiendo/);
+  assert.equal(await count('signin-fail:global'), 0); assert.equal(await count(account), 0, 'the attempt is refunded');
+  // After the credentials were sent, an outage is answered exactly like a refusal but not counted.
+  const unclear = await attempt(new LoginError('timeout'));
+  const refused = await attempt(new CredentialsRejected('no'));
+  assert.deepEqual(unclear, refused, 'the response never reveals whether the password was right');
+  assert.equal(refused.status, 401);
+  assert.equal(await count('signin-fail:global'), 1, 'only the refusal is a failure');
+  assert.equal(await count('signin-fail:day:127.0.0.1'), 1);
+  assert.equal(await count(account), 2, 'both used an attempt');
+  // A thrown value of unknown kind fails closed: it counts.
+  await attempt(new Error('bug'));
+  assert.equal(await count('signin-fail:global'), 2);
+});

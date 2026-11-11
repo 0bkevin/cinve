@@ -56,6 +56,14 @@ enlaces comparten estos límites:
   las redes sin fallos recientes. Los inicios correctos no tienen tope global,
   así que un ataque no bloquea a quien introduce bien sus datos.
 
+Solo cuenta como fallo un rechazo del cine: Cinex responde que el login no es
+válido, Cines Unidos devuelve su formulario de acceso, o el envío de las
+credenciales recibe HTTP 400, 401, 403 o 422. Si el cine falla antes de recibir
+las credenciales, Cinve responde que el cine no está disponible (503), no cuenta
+el fallo y devuelve el intento a la cuenta. Un error posterior al envío
+(tiempo de espera, 429 o 5xx) no cuenta como fallo, pero se responde igual que
+un rechazo, para no revelar si la contraseña era correcta.
+
 Las claves de todos los límites (que nombran direcciones IP y correos de cuentas
 del cine) se guardan solo como HMAC-SHA256 con una subclave derivada de
 `CINEV_ENCRYPTION_KEY`, así que no se pueden confirmar calculando el resumen

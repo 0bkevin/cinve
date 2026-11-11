@@ -1,6 +1,7 @@
 import { createHmac, randomBytes } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { digest, EncryptedSessionStore, lockUser, transaction } from './hosted-store.js';
+import { CinemaUnavailable, CredentialsRejected, LoginError } from './auth.js';
 import type { AuthProviderId, AuthSession } from './auth.js';
 
 type Connection = { user: string; tokenHash: string; provider: AuthProviderId; expires: number; attempts: number; busy: boolean };
@@ -20,6 +21,8 @@ export const signInRefusalMessage: Record<SignInRefusal, string> = {
   network: 'Demasiados intentos desde tu red. Espera unos minutos y vuelve a intentarlo.',
   strained: 'Demasiados intentos fallidos en Cinve en este momento. Espera 15 minutos y vuelve a intentarlo.',
 };
+/** For a sign-in whose credentials never reached the cinema. */
+export const cinemaUnavailableMessage = 'El cine no está respondiendo en este momento. Inténtalo de nuevo en unos minutos.';
 const globalFailures = 'signin-fail:global';
 const accountKey = (s: SignInSubject) => `signin:account:${s.provider}:${s.username.trim().toLowerCase()}`;
 function failureKeys(network: string) {
@@ -158,6 +161,21 @@ export class ConnectionLinks {
   async signInFailed(subject: SignInSubject) {
     const keys = failureKeys(subject.network), day = 86400, recent = signInLimits.recentWindowSeconds;
     await this.record([[keys.day, day], [keys.recent, recent], [globalFailures, recent], ...(keys.blockDay ? [[keys.blockDay, day] as [string, number]] : [])]);
+  }
+  /** The credentials never reached the cinema: give that account its attempt back (nothing was tested). */
+  async signInUnavailable(subject: SignInSubject) {
+    await this.pool.query('UPDATE cinev_budgets SET count=GREATEST(count-1,0) WHERE key_hash=$1 AND expires_at>now()', [this.keyHash(accountKey(subject))]);
+  }
+  /**
+   * How a failed sign-in counts. Only a refusal counts as a failure (and a
+   * thrown value of unknown kind, failing closed); outages do not. A cinema
+   * error after the credentials were sent is answered like a refusal, so a
+   * response never reveals whether they were right.
+   */
+  async signInError(subject: SignInSubject, error: unknown): Promise<'unavailable' | 'refused'> {
+    if (error instanceof CinemaUnavailable) { await this.signInUnavailable(subject); return 'unavailable'; }
+    if (!(error instanceof LoginError) || error instanceof CredentialsRejected) await this.signInFailed(subject);
+    return 'refused';
   }
   /** Correct credentials: clear that account's attempts (network and service-wide counts are never cleared). */
   async signInSucceeded(subject: SignInSubject) {

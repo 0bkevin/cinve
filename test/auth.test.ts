@@ -4,7 +4,7 @@ import { mkdtemp, rm, stat, readFile, chmod, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CookieJar } from 'tough-cookie';
-import { SessionStore, LoginHttp, login } from '../src/auth.js';
+import { SessionStore, LoginHttp, login, LoginError, CredentialsRejected, CinemaUnavailable } from '../src/auth.js';
 import { HttpClient } from '../src/http.js';
 import { CinemaService } from '../src/service.js';
 import { DataError } from '../src/core.js';
@@ -118,4 +118,40 @@ test('authenticated 401 returns auth_required without leaking bearer or response
   const service = new CinemaService(new HttpClient(async () => new Response('PRIVATE_PROFILE', { status: 401 }), 1000, store));
   const result = await service.query('prices', { provider: 'cinesunidos', cinema_id: '1002', session_id: 's1' });
   assert.equal(result.status, 'auth_required'); assert.ok(!/SYNTHETIC_TOKEN|PRIVATE_PROFILE/.test(JSON.stringify(result)));
+});
+
+test('login errors say whether the cinema refused the credentials, never saw them, or is unclear', async t => {
+  const store = await fixture(t);
+  const kind = async (provider: 'cinex' | 'cinesunidos', request: typeof fetch) => {
+    try { await login(provider, 'person@example.test', 'SYNTHETIC_PASSWORD', store, request); return 'ok'; } catch (e) {
+      assert.ok(!/SYNTHETIC_PASSWORD/.test((e as Error).message));
+      return e instanceof CredentialsRejected ? 'refused' : e instanceof CinemaUnavailable ? 'unavailable' : e instanceof LoginError ? 'unclear' : 'other';
+    }
+  };
+  const cinex = (validate: () => Response | Promise<Response>, home = () => new Response('<html>home</html>')): typeof fetch => async input =>
+    String(input).endsWith('validatelogin.php') ? validate() : String(input).endsWith('checklogin.php') ? new Response('off') : home();
+  assert.equal(await kind('cinex', cinex(() => new Response('{"result":"ERROR"}'))), 'refused');
+  for (const status of [400, 401, 403, 422]) assert.equal(await kind('cinex', cinex(() => new Response('', { status }))), 'refused', String(status));
+  // Before the credentials are sent nothing reflects on them.
+  assert.equal(await kind('cinex', cinex(() => new Response('{"result":"OK"}'), () => new Response('', { status: 503 }))), 'unavailable');
+  assert.equal(await kind('cinex', async () => { throw new TypeError('fetch failed'); }), 'unavailable');
+  // After they are sent, outages and throttling are unclear, never refusals...
+  for (const status of [429, 500, 503]) assert.equal(await kind('cinex', cinex(() => new Response('', { status }))), 'unclear', String(status));
+  assert.equal(await kind('cinex', cinex(() => { throw new TypeError('fetch failed'); })), 'unclear');
+  // ...and so is a password Cinex accepted without establishing a session.
+  assert.equal(await kind('cinex', cinex(() => new Response('{"result":"OK"}'))), 'unclear');
+  const unidos = (authenticate: () => Response): typeof fetch => async input => {
+    const u = new URL(String(input));
+    if (u.pathname === '/api/auth/csrf') return new Response('{"csrfToken":"CSRF"}');
+    if (u.pathname === '/api/auth/signin/keycloak') return new Response('{"url":"https://keycloak.cinesunidos.com/realms/cinesunidos/protocol/openid-connect/auth"}');
+    if (u.pathname.endsWith('/openid-connect/auth')) return new Response('<form action="/realms/cinesunidos/login-actions/authenticate?state=S"><input type="password" name="password"></form>');
+    if (u.pathname.endsWith('/login-actions/authenticate')) return authenticate();
+    throw new Error('Unexpected fixture route');
+  };
+  // Keycloak re-rendering its form (on its own origin) is a refusal, as is a 401.
+  assert.equal(await kind('cinesunidos', unidos(() => new Response('<form><input type="password"></form>'))), 'refused');
+  assert.equal(await kind('cinesunidos', unidos(() => new Response('', { status: 401 }))), 'refused');
+  assert.equal(await kind('cinesunidos', unidos(() => new Response('', { status: 502 }))), 'unclear');
+  assert.equal(await kind('cinesunidos', async () => new Response('', { status: 503 })), 'unavailable');
+  assert.equal(await store.read('cinex'), undefined); assert.equal(await store.read('cinesunidos'), undefined);
 });

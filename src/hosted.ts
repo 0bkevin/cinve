@@ -21,7 +21,7 @@ import { SessionStore, login } from './auth.js';
 import type { AuthSession, AuthProviderId } from './auth.js';
 import type { Operation, Query } from './core.js';
 import type { CallOptions } from './http.js';
-import { ConnectionLinks, signInRefusalMessage } from './hosted-links.js';
+import { ConnectionLinks, cinemaUnavailableMessage, signInRefusalMessage } from './hosted-links.js';
 import type { SignInSubject } from './hosted-links.js';
 import { EncryptedSessionStore, HostedUsers, digest } from './hosted-store.js';
 import { loginPage, loginScript } from './auth-web.js';
@@ -266,11 +266,12 @@ export async function createHostedApp(options: {
         try {
           const result = await (options.authenticate ?? login)(connection.provider, data.username.trim(), data.password, staged);
           profile = result.profile_update_requested;
-        } catch {
-          await links.signInFailed(subject);
+        } catch (error) {
+          if (await links.signInError(subject, error) === 'unavailable') throw new HttpError(503, cinemaUnavailableMessage);
           throw new HttpError(401, 'No se pudo conectar. Revisa tus datos o comprueba en la web del cine si requiere una verificación adicional.');
         }
-        if (!stagedSession || stagedSession.provider !== connection.provider) { await links.signInFailed(subject); throw new HttpError(502, 'El cine no entregó una sesión válida.'); }
+        // Not a refusal of the credentials, so it is not counted as a failure.
+        if (!stagedSession || stagedSession.provider !== connection.provider) throw new HttpError(502, 'El cine no entregó una sesión válida.');
         await links.signInSucceeded(subject);
         if (!await links.complete(token, stagedSession, options.key)) throw new HttpError(410, 'Conexión cancelada, vencida o revocada.');
         send(200, { connected: true, profile_update_requested: profile });

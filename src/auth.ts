@@ -8,7 +8,21 @@ import { load } from 'cheerio';
 import * as z from 'zod';
 import { DataError } from './core.js';
 
-class LoginError extends Error {}
+/**
+ * A sign-in that did not complete; its message is safe to show. A plain
+ * LoginError is ambiguous: the cinema may have evaluated the credentials
+ * (an error after they were sent), so it says nothing about them.
+ */
+export class LoginError extends Error {
+  constructor(message: string, readonly status?: number) { super(message); }
+}
+/** The cinema evaluated the credentials and refused them (or demanded a step Cinve cannot complete). */
+export class CredentialsRejected extends LoginError {}
+/** The credentials never reached the cinema: it failed, or changed its login flow, before that step. */
+export class CinemaUnavailable extends LoginError {}
+// Answers to the credential submission that mean the cinema refused it. 429
+// (the cinema throttling Cinve) and 5xx are outages, not verdicts.
+const refusalStatuses = new Set([400, 401, 403, 422]);
 
 export const AuthProvider = z.enum(['cinex', 'cinesunidos']);
 export type AuthProviderId = z.infer<typeof AuthProvider>;
@@ -128,7 +142,7 @@ export class LoginHttp {
           if (body && next.origin !== new URL(url).origin) throw new Error('No se reenvían credenciales entre orígenes.');
           url = next.href; continue;
         }
-        if (!r.ok) { await r.body?.cancel(); throw new LoginError(`El login respondió HTTP ${r.status}.`); }
+        if (!r.ok) { await r.body?.cancel(); throw new LoginError(`El login respondió HTTP ${r.status}.`, r.status); }
         const reader = r.body?.getReader(); if (!reader) throw new Error('Respuesta de login vacía.');
         const chunks: Uint8Array[] = []; let size = 0;
         while (true) { const { done, value } = await reader.read(); if (done) break;
@@ -145,15 +159,25 @@ export class LoginHttp {
 export async function login(provider: AuthProviderId, username: string, password: string, store = new SessionStore(), request: typeof fetch = fetch) {
   AuthProvider.parse(provider);
   const http = new LoginHttp(provider, request);
+  // Whether the credentials have been submitted: errors before that cannot
+  // reflect on them, and errors after it may.
+  let sent = false;
+  const submit = async (url: string, init: RequestInit) => {
+    sent = true;
+    try { return await http.read(url, init); } catch (e) {
+      if (e instanceof LoginError && e.status !== undefined && refusalStatuses.has(e.status)) throw new CredentialsRejected('El cine rechazó el login.');
+      throw e;
+    }
+  };
   try {
     if (provider === 'cinex') {
       const base = 'https://www.cinex.com.ve';
       await http.read(`${base}/`);
       const form = new FormData(); form.set('username', username); form.set('password', password);
-      const r = await http.read(`${base}/assets/php/validatelogin.php`, { method: 'POST', body: form,
+      const r = await submit(`${base}/assets/php/validatelogin.php`, { method: 'POST', body: form,
         headers: { Origin: base, Referer: `${base}/`, 'X-Requested-With': 'XMLHttpRequest' } });
       let data; try { data = JSON.parse(r.body); } catch { throw new LoginError('Cinex no aceptó la solicitud de login.'); }
-      if (data.result !== 'OK') throw new LoginError('Cinex no aceptó el login. Revisa las credenciales en su sitio.');
+      if (data.result !== 'OK') throw new CredentialsRejected('Cinex no aceptó el login. Revisa las credenciales en su sitio.');
       if ((await http.read(`${base}/checklogin.php`)).body.trim() !== 'on') throw new LoginError('Cinex no estableció una sesión válida.');
       await store.save({ version: 1, provider, expires_at: Date.now() + 24 * 3600000, cookie_jar: JSON.stringify(await http.jar.serialize()) });
       return { provider, authenticated: true, profile_update_requested: data.usuario_dataupdate !== 'S' };
@@ -172,8 +196,8 @@ export async function login(provider: AuthProviderId, username: string, password
     const fields = new URLSearchParams();
     loginForm.find('input[type=hidden][name]').each((_, el) => { fields.set($(el).attr('name')!, $(el).attr('value') ?? ''); });
     fields.set('username', username); fields.set('password', password); fields.set('login', 'Sign In');
-    const callback = await http.read(target.href, { method: 'POST', body: fields });
-    if (new URL(callback.url).origin !== base) throw new LoginError('Login incompleto: credenciales rechazadas o verificación adicional requerida.');
+    const callback = await submit(target.href, { method: 'POST', body: fields });
+    if (new URL(callback.url).origin !== base) throw new CredentialsRejected('Login incompleto: credenciales rechazadas o verificación adicional requerida.');
     const data = JSON.parse((await http.read(`${base}/api/auth/session`)).body);
     if (typeof data.access_token !== 'string') throw new LoginError('Cines Unidos no entregó una sesión autenticada.');
     // Only inspect expiry to bound local reuse; the upstream API validates the token itself.
@@ -184,7 +208,8 @@ export async function login(provider: AuthProviderId, username: string, password
     return { provider, authenticated: true, profile_update_requested: false };
   } catch (e) {
     // Never surface provider HTML, personal data, request objects, or credential-bearing URLs.
-    if (e instanceof LoginError) throw e;
-    throw new LoginError('No se pudo completar el login HTTP. Revisa la conexión o inicia sesión en el sitio para comprobar pasos adicionales.');
+    if (e instanceof CredentialsRejected) throw e;
+    const message = e instanceof LoginError ? e.message : 'No se pudo completar el login HTTP. Revisa la conexión o inicia sesión en el sitio para comprobar pasos adicionales.';
+    throw sent ? new LoginError(message) : new CinemaUnavailable(message);
   }
 }
