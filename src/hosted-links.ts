@@ -4,6 +4,31 @@ import { digest, EncryptedSessionStore, lockUser, transaction } from './hosted-s
 import type { AuthProviderId, AuthSession } from './auth.js';
 
 type Connection = { user: string; tokenHash: string; provider: AuthProviderId; expires: number; attempts: number; busy: boolean };
+
+/** Cinema sign-in limits; see ConnectionLinks.admitSignIn. */
+export const signInLimits = {
+  networkPerMinute: 20, blockPerMinute: 60,
+  networkFailuresPerDay: 100, blockFailuresPerDay: 300,
+  accountAttempts: 5, accountWindowSeconds: 900,
+  globalFailures: 300, recentWindowSeconds: 900,
+};
+/** network: a rate-limit network (rateLimitNetwork); username as typed, compared case-insensitively. */
+export type SignInSubject = { network: string; provider: AuthProviderId; username: string };
+export type SignInRefusal = 'account' | 'network' | 'strained';
+export const signInRefusalMessage: Record<SignInRefusal, string> = {
+  account: 'Demasiados intentos para esta cuenta. Espera 15 minutos o comprueba tus datos en la web del cine.',
+  network: 'Demasiados intentos desde tu red. Espera unos minutos y vuelve a intentarlo.',
+  strained: 'Demasiados intentos fallidos en Cinve en este momento. Espera 15 minutos y vuelve a intentarlo.',
+};
+const globalFailures = 'signin-fail:global';
+// Budget keys are stored only as SHA-256 digests and expire within 15 minutes;
+// a digest of a known email can still be confirmed by hashing it.
+const accountKey = (s: SignInSubject) => `signin:account:${s.provider}:${s.username.trim().toLowerCase()}`;
+function failureKeys(network: string) {
+  // A /64 network also belongs to its /48, which catches rotation across a larger IPv6 allocation.
+  const block = network.endsWith('::/64') ? network.split(':').slice(0, 3).join(':') + '::/48' : undefined;
+  return { day: `signin-fail:day:${network}`, recent: `signin-fail:recent:${network}`, block, blockDay: block && `signin-fail:day:${block}` };
+}
 export class ConnectionLinks {
   constructor(readonly pool: Pool) {}
   async issue(user: string, tokenHash: string, provider: AuthProviderId) {
@@ -67,22 +92,65 @@ export class ConnectionLinks {
       await client.query('DELETE FROM cinev_links WHERE user_id=$1 AND provider=$2', [user, provider]);
     });
   }
-  async budget(key: string, limit: number) {
+  /** Charges one use of a fixed window (one minute by default); false once the limit is spent. */
+  async budget(key: string, limit: number, windowSeconds = 60) {
     const { rows } = await this.pool.query(`INSERT INTO cinev_budgets(key_hash,expires_at,count)
-      VALUES($1,now()+interval '1 minute',1) ON CONFLICT(key_hash) DO UPDATE SET
+      VALUES($1,now()+make_interval(secs => $3),1) ON CONFLICT(key_hash) DO UPDATE SET
       count=CASE WHEN cinev_budgets.expires_at<=now() THEN 1 ELSE LEAST(cinev_budgets.count+1,$2+1) END,
       expires_at=CASE WHEN cinev_budgets.expires_at<=now() THEN EXCLUDED.expires_at ELSE cinev_budgets.expires_at END
-      RETURNING count`, [digest(key), limit]);
+      RETURNING count`, [digest(key), limit, windowSeconds]);
     return rows[0].count <= limit;
   }
+  /** Current counts of live windows, without charging them (0 when absent or expired). */
+  private async counts(keys: string[]): Promise<number[]> {
+    const { rows } = await this.pool.query('SELECT key_hash,count FROM cinev_budgets WHERE key_hash=ANY($1) AND expires_at>now()', [keys.map(digest)]);
+    const found = new Map(rows.map(r => [r.key_hash as string, r.count as number]));
+    return keys.map(key => found.get(digest(key)) ?? 0);
+  }
+  /** Adds one event to each window, in one statement. Keys must be distinct. */
+  private async record(entries: Array<[key: string, windowSeconds: number]>) {
+    await this.pool.query(`INSERT INTO cinev_budgets(key_hash,expires_at,count)
+      SELECT k, now()+make_interval(secs => s), 1 FROM unnest($1::text[], $2::int[]) AS t(k, s)
+      ON CONFLICT(key_hash) DO UPDATE SET
+      count=CASE WHEN cinev_budgets.expires_at<=now() THEN 1 ELSE LEAST(cinev_budgets.count+1,1000000) END,
+      expires_at=CASE WHEN cinev_budgets.expires_at<=now() THEN EXCLUDED.expires_at ELSE cinev_budgets.expires_at END`,
+    [entries.map(([key]) => digest(key)), entries.map(([, seconds]) => seconds)]);
+  }
   /**
-   * A cinema sign-in, from either the consent page or a connection link: a
-   * per-network quota, then a service-wide one charged only when the network
-   * still has room. Connections are self-service, so per-connection limits
-   * alone would let one network test unbounded credentials through Cinve.
+   * Admission for one cinema sign-in, from the consent page or a connection
+   * link (connections are self-service, so per-connection limits alone would
+   * let one network test unbounded credentials through Cinve). Returns why it
+   * is refused, or undefined. Every outcome must be reported afterwards with
+   * signInFailed or signInSucceeded.
+   *
+   * - Per network (an IPv4 address or IPv6 /64) and per IPv6 /48: attempts
+   *   per minute, and failures per day.
+   * - Per cinema account: attempts in 15 minutes, reserved atomically so
+   *   parallel guesses cannot overshoot, and cleared by a success. This bounds
+   *   guessing one password from any number of networks, and keeps attackers
+   *   from getting the owner's account locked at the cinema.
+   * - Service-wide failures: past the threshold only networks with no recent
+   *   failure may sign in. There is no cap on successful sign-ins, so failing
+   *   attackers cannot lock out users whose sign-ins succeed.
    */
-  async signIn(network: string) {
-    return await this.budget(`oauth:login-ip:${network}`, 20) && await this.budget('login:global', 120);
+  async admitSignIn(subject: SignInSubject): Promise<SignInRefusal | undefined> {
+    const keys = failureKeys(subject.network);
+    const [day, recent, global, blockDay = 0] = await this.counts([keys.day, keys.recent, globalFailures, ...(keys.blockDay ? [keys.blockDay] : [])]);
+    if (day >= signInLimits.networkFailuresPerDay || blockDay >= signInLimits.blockFailuresPerDay) return 'network';
+    if (global >= signInLimits.globalFailures && recent > 0) return 'strained';
+    if (!await this.budget(`oauth:login-ip:${subject.network}`, signInLimits.networkPerMinute)) return 'network';
+    if (keys.block && !await this.budget(`signin:block:${keys.block}`, signInLimits.blockPerMinute)) return 'network';
+    if (!await this.budget(accountKey(subject), signInLimits.accountAttempts, signInLimits.accountWindowSeconds)) return 'account';
+    return undefined;
+  }
+  /** A sign-in that did not produce a session: rejected credentials, or a cinema that did not deliver one. */
+  async signInFailed(subject: SignInSubject) {
+    const keys = failureKeys(subject.network), day = 86400, recent = signInLimits.recentWindowSeconds;
+    await this.record([[keys.day, day], [keys.recent, recent], [globalFailures, recent], ...(keys.blockDay ? [[keys.blockDay, day] as [string, number]] : [])]);
+  }
+  /** Correct credentials: clear that account's attempts (network and service-wide counts are never cleared). */
+  async signInSucceeded(subject: SignInSubject) {
+    await this.pool.query('DELETE FROM cinev_budgets WHERE key_hash=$1', [digest(accountKey(subject))]);
   }
   async cleanup() {
     // A cinema connected on the consent page whose code was never exchanged

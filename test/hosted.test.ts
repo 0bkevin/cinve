@@ -945,23 +945,74 @@ test('rate limits group an IPv6 subscriber by /64 and keep IPv4 per address', as
   assert.equal(rateLimitNetwork('unknown'), 'unknown');
 });
 
-test('connection-link sign-ins share the per-network and service-wide sign-in quotas', async t => {
-  let calls = 0;
-  const f = await fixture(t, async () => { calls++; throw new Error('rejected'); });
+test('connection-link sign-ins are charged to the network, and failures and successes are recorded', async t => {
+  let calls = 0, accept = false;
+  const f = await fixture(t, async (...args) => { calls++; if (!accept) throw new Error('rejected'); return successfulLogin(...args); });
   const { digest } = await import('../src/hosted-store.js');
   const client = await f.client(f.alice.token);
   const browser = async () => ((await (await f.post('/connect/exchange', await link(client))).json()) as { browser_token: string }).browser_token;
+  const count = async (key: string) => (await f.pool.query('SELECT count FROM cinev_budgets WHERE key_hash=$1', [digest(key)])).rows[0]?.count ?? 0;
   // Each self-service connection has its own link budget; the network quota still applies.
   await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 minute',20)", [digest('oauth:login-ip:127.0.0.1')]);
   const limited = await f.post('/connect/login', await browser(), { username: 'x', password: 'x' });
-  assert.equal(limited.status, 429); assert.equal(calls, 0);
+  assert.equal(limited.status, 429); assert.equal(calls, 0); assert.match(await limited.text(), /desde tu red/);
   await f.pool.query('DELETE FROM cinev_budgets');
-  await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 minute',120)", [digest('login:global')]);
-  assert.equal((await f.post('/connect/login', await browser(), { username: 'x', password: 'x' })).status, 429);
-  assert.equal(calls, 0);
-  await f.pool.query('DELETE FROM cinev_budgets');
-  assert.equal((await f.post('/connect/login', await browser(), { username: 'x', password: 'x' })).status, 401);
-  assert.equal(calls, 1);
+  // Malformed requests never reach admission.
+  assert.equal((await f.post('/connect/login', await browser(), { username: 'x' })).status, 400);
+  assert.equal(await count('oauth:login-ip:127.0.0.1'), 0);
+  assert.equal((await f.post('/connect/login', await browser(), { username: 'Person@Example.test', password: 'WRONG' })).status, 401);
+  assert.equal(await count('signin-fail:day:127.0.0.1'), 1);
+  assert.equal(await count('signin-fail:global'), 1);
+  assert.equal(await count('signin:account:cinesunidos:person@example.test'), 1);
+  accept = true;
+  assert.equal((await f.post('/connect/login', await browser(), { username: 'person@example.test', password: 'SYNTHETIC_PASSWORD' })).status, 200);
+  assert.equal(await count('signin:account:cinesunidos:person@example.test'), 0, 'a success clears that account');
+  assert.equal(await count('signin-fail:day:127.0.0.1'), 1, 'a success never clears network failures');
+});
+
+test('one cinema account gets five attempts per 15 minutes, from any network and in any letter case', async t => {
+  const f = await fixture(t);
+  const account = (username: string, n: number) => ({ network: `198.51.100.${n}`, provider: 'cinex' as const, username });
+  const admitted = await Promise.all(Array.from({ length: 8 }, (_, i) => f.links.admitSignIn(account(i % 2 ? 'Victim@Example.test' : 'victim@example.test ', i))));
+  assert.equal(admitted.filter(r => r === undefined).length, 5, 'parallel guesses cannot overshoot');
+  assert.ok(admitted.filter(Boolean).every(r => r === 'account'));
+  assert.equal(await f.links.admitSignIn(account('other@example.test', 9)), undefined);
+  assert.equal(await f.links.admitSignIn({ ...account('victim@example.test', 9), provider: 'cinesunidos' }), undefined, 'accounts are per cinema');
+  await f.links.signInSucceeded(account('VICTIM@example.test', 0));
+  assert.equal(await f.links.admitSignIn(account('victim@example.test', 10)), undefined);
+});
+
+test('under a broad failing attack only networks without recent failures may sign in', async t => {
+  const f = await fixture(t);
+  const { digest } = await import('../src/hosted-store.js');
+  const subject = (network: string, username: string) => ({ network, provider: 'cinex' as const, username });
+  await f.links.signInFailed(subject('203.0.113.1', 'a@example.test'));
+  await f.pool.query("UPDATE cinev_budgets SET count=300 WHERE key_hash=$1", [digest('signin-fail:global')]);
+  assert.equal(await f.links.admitSignIn(subject('203.0.113.1', 'b@example.test')), 'strained');
+  assert.equal(await f.links.admitSignIn(subject('203.0.113.2', 'c@example.test')), undefined, 'a clean network still signs in');
+  // Below the threshold a single failure blocks nobody.
+  await f.pool.query("UPDATE cinev_budgets SET count=299 WHERE key_hash=$1", [digest('signin-fail:global')]);
+  assert.equal(await f.links.admitSignIn(subject('203.0.113.1', 'd@example.test')), undefined);
+});
+
+test('networks have daily failure limits, and IPv6 /64s also share their /48', async t => {
+  const f = await fixture(t);
+  const { digest } = await import('../src/hosted-store.js');
+  const { rateLimitNetwork } = await import('../src/hosted.js');
+  const subject = (address: string, username: string) => ({ network: rateLimitNetwork(address), provider: 'cinex' as const, username });
+  const fill = (key: string, count: number, interval = '1 day') =>
+    f.pool.query(`INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '${interval}',$2)`, [digest(key), count]);
+  await fill('signin-fail:day:203.0.113.5', 100);
+  assert.equal(await f.links.admitSignIn(subject('203.0.113.5', 'a@example.test')), 'network');
+  await fill('signin-fail:day:2001:0db8:0001::/48', 300);
+  assert.equal(await f.links.admitSignIn(subject('2001:db8:1:7::1', 'b@example.test')), 'network', 'a fresh /64 in a failing /48');
+  assert.equal(await f.links.admitSignIn(subject('2001:db8:2:7::1', 'c@example.test')), undefined);
+  await fill('signin:block:2001:0db8:0003::/48', 60, '1 minute');
+  assert.equal(await f.links.admitSignIn(subject('2001:db8:3:9::1', 'd@example.test')), 'network', 'per-minute /48 attempts');
+  // Failures from a /64 are counted for its /48 too.
+  await f.links.signInFailed(subject('2001:db8:4:1::1', 'e@example.test'));
+  const rows = await f.pool.query('SELECT count FROM cinev_budgets WHERE key_hash=ANY($1)', [['signin-fail:day:2001:0db8:0004:0001::/64', 'signin-fail:day:2001:0db8:0004::/48'].map(digest)]);
+  assert.deepEqual(rows.rows.map(r => r.count), [1, 1]);
 });
 
 test('refresh=true also has a service-wide budget across addresses', async t => {

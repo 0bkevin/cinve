@@ -20,7 +20,8 @@ import { SessionStore, login } from './auth.js';
 import type { AuthSession, AuthProviderId } from './auth.js';
 import type { Operation, Query } from './core.js';
 import type { CallOptions } from './http.js';
-import { ConnectionLinks } from './hosted-links.js';
+import { ConnectionLinks, signInRefusalMessage } from './hosted-links.js';
+import type { SignInSubject } from './hosted-links.js';
 import { EncryptedSessionStore, HostedUsers, digest } from './hosted-store.js';
 import { loginPage, loginScript } from './auth-web.js';
 
@@ -220,7 +221,7 @@ export async function createHostedApp(options: {
       if (!connection || await users.hash(connection.user) !== connection.tokenHash) throw new HttpError(410, 'Conexión vencida o revocada.');
       if (req.url === '/connect/cancel') { await links.consume(token); send(200, { cancelled: true }); return; }
       if (req.url !== '/connect/login') throw new HttpError(404, 'Ruta no disponible.');
-      if (connection.busy || connection.attempts >= 5 || !await links.budget(`login:${connection.user}`, 10) || !await links.signIn(ip)) throw new HttpError(429, 'Demasiados intentos. Pide un enlace nuevo más tarde.');
+      if (connection.busy || connection.attempts >= 5 || !await links.budget(`login:${connection.user}`, 10)) throw new HttpError(429, 'Demasiados intentos. Pide un enlace nuevo más tarde.');
       let claimed = false;
       let data: Record<string, unknown> = {};
       try {
@@ -228,6 +229,9 @@ export async function createHostedApp(options: {
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new HttpError(400, 'Solicitud no válida.');
         data = parsed as Record<string, unknown>;
         if (Object.keys(data).some(k => !['username', 'password'].includes(k)) || typeof data.username !== 'string' || !data.username.trim() || data.username.length > 320 || typeof data.password !== 'string' || !data.password || data.password.length > 4096) throw new HttpError(400, 'Revisa correo y contraseña.');
+        const subject: SignInSubject = { network: ip, provider: connection.provider, username: data.username };
+        const refusal = await links.admitSignIn(subject);
+        if (refusal) throw new HttpError(429, signInRefusalMessage[refusal]);
         if (!await links.claim(token)) throw new HttpError(429, 'Conexión en uso o vencida. Pide un enlace nuevo.');
         claimed = true;
         let stagedSession: AuthSession | undefined;
@@ -238,8 +242,12 @@ export async function createHostedApp(options: {
         try {
           const result = await (options.authenticate ?? login)(connection.provider, data.username.trim(), data.password, staged);
           profile = result.profile_update_requested;
-        } catch { throw new HttpError(401, 'No se pudo conectar. Revisa tus datos o comprueba en la web del cine si requiere una verificación adicional.'); }
-        if (!stagedSession || stagedSession.provider !== connection.provider) throw new HttpError(502, 'El cine no entregó una sesión válida.');
+        } catch {
+          await links.signInFailed(subject);
+          throw new HttpError(401, 'No se pudo conectar. Revisa tus datos o comprueba en la web del cine si requiere una verificación adicional.');
+        }
+        if (!stagedSession || stagedSession.provider !== connection.provider) { await links.signInFailed(subject); throw new HttpError(502, 'El cine no entregó una sesión válida.'); }
+        await links.signInSucceeded(subject);
         if (!await links.complete(token, stagedSession, options.key)) throw new HttpError(410, 'Conexión cancelada, vencida o revocada.');
         send(200, { connected: true, profile_update_requested: profile });
       } finally { data.username = ''; data.password = ''; if (claimed) await links.release(token); }

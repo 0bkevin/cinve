@@ -41,10 +41,24 @@ enlace privado, válido durante diez minutos. El usuario introduce sus
 credenciales únicamente en ese formulario y el asistente repite la consulta.
 
 Solo se ejecuta un inicio de sesión a la vez por solicitud y hay un máximo de
-cinco intentos por solicitud. Los inicios de sesión de la aprobación y de los
-enlaces comparten un cupo por red (20 por minuto) y uno global del servicio
-(120 por minuto), para que Cinve no pueda usarse para probar credenciales en
-los cines. Un doble
+cinco intentos por solicitud. Para que Cinve no pueda usarse para probar
+credenciales en los cines, los inicios de sesión de la aprobación y de los
+enlaces comparten estos límites:
+
+- por red (una IPv4 o un prefijo IPv6 /64): 20 intentos por minuto y 100 fallos
+  por día; cada /48 de IPv6 admite además 60 intentos por minuto y 300 fallos
+  por día;
+- por cuenta del cine (correo sin distinguir mayúsculas): 5 intentos cada 15
+  minutos desde cualquier red; un inicio correcto los reinicia. Así nadie puede
+  adivinar una contraseña repartiendo intentos ni hacer que el cine bloquee la
+  cuenta de su dueño;
+- en todo el servicio: con 300 fallos en 15 minutos, solo pueden iniciar sesión
+  las redes sin fallos recientes. Los inicios correctos no tienen tope global,
+  así que un ataque no bloquea a quien introduce bien sus datos.
+
+Las claves de estos límites se guardan solo como resúmenes SHA-256 y caducan
+como mucho en un día. Recomendamos añadir además reglas de límite de
+solicitudes en el firewall de Vercel para `/oauth/authorize` y `/connect/login`. Un doble
 envío espera al primero y devuelve al navegador al asistente con un código
 nuevo; el código anterior deja de ser válido.
 

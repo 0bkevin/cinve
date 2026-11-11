@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Pool, PoolClient } from 'pg';
 import * as z from 'zod';
 import { digest, lockUser, transaction } from './hosted-store.js';
-import { ConnectionLinks } from './hosted-links.js';
+import { ConnectionLinks, signInRefusalMessage } from './hosted-links.js';
 import { ClientMetadataCache, isClientIdUrl, redirectUri } from './client-metadata.js';
 import { AuthProvider, SessionStore } from './auth.js';
 import type { AuthProviderId, AuthSession, login } from './auth.js';
@@ -300,11 +300,20 @@ export class HostedOAuth {
             }
             if (claimed) {
               // The per-address budget counts sign-ins, not duplicate submits that only wait.
-              if (!await this.budgets.signIn(ip)) return again(429, 'Demasiados intentos. Espera un minuto y vuelve a intentarlo.');
+              const subject = { network: ip, provider: provider.data, username };
+              const refusal = await this.budgets.admitSignIn(subject);
+              if (refusal) return again(429, signInRefusalMessage[refusal]);
               const staged = new class extends SessionStore { override async save(value: AuthSession) { session = value; } }();
               try { await this.accounts!.authenticate(provider.data, username, password, staged); }
-              catch { return again(401, 'No se pudo iniciar sesión. Revisa tus datos o comprueba en la web del cine si pide una verificación adicional.'); }
-              if (!session || session.provider !== provider.data) return again(502, 'El cine no entregó una sesión válida. Inténtalo de nuevo.');
+              catch {
+                await this.budgets.signInFailed(subject);
+                return again(401, 'No se pudo iniciar sesión. Revisa tus datos o comprueba en la web del cine si pide una verificación adicional.');
+              }
+              if (!session || session.provider !== provider.data) {
+                await this.budgets.signInFailed(subject);
+                return again(502, 'El cine no entregó una sesión válida. Inténtalo de nuevo.');
+              }
+              await this.budgets.signInSucceeded(subject);
             }
           }
           const destination = await transaction(this.pool, async client => {
