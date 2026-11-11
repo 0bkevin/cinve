@@ -30,12 +30,11 @@ test('OG generation is deterministic', async () => {
 });
 
 
-test('checked-in social images match the shared generator in both languages', async () => {
+test('checked-in social PNGs match the shared generator in both languages', async () => {
   for (const locale of ['es', 'en'] as const) {
     const generated = await generate(locale);
     const name = locale === 'es' ? 'og' : 'og-en';
     const base = new URL(`../src/assets/${name}`, import.meta.url);
-    assert.equal(await readFile(`${base.pathname}.svg`, 'utf8'), `${generated.svg}\n`);
     assert.deepEqual(await readFile(`${base.pathname}.png`), generated.png);
   }
 });

@@ -152,11 +152,8 @@ export async function generate(locale: 'es' | 'en'): Promise<{ svg: string; png:
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   for (const locale of ['es', 'en'] as const) {
-    const { svg, png } = await generate(locale);
+    const { png } = await generate(locale);
     const suffix = locale === 'es' ? '' : '-en';
-    await Promise.all([
-      writeFile(resolve(out, `og${suffix}.svg`), `${svg}\n`),
-      writeFile(resolve(out, `og${suffix}.png`), png),
-    ]);
+    await writeFile(resolve(out, `og${suffix}.png`), png);
   }
 }
