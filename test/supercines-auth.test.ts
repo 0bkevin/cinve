@@ -122,7 +122,7 @@ test('without an account Supercines fares stay public', async t => {
   const { calls, fetcher } = site();
   const result = await new CinemaService(new HttpClient(fetcher, 15000, await store(t))).query('prices', query);
   assert.deepEqual(result.items.map(i => i.name), ['BOLETO GENERAL 2D']);
-  assert.ok(result.warnings.some(w => /Tarifas públicas de Supercines, sin cuenta/.test(w)));
+  assert.ok(result.warnings.some(w => /Public Supercines prices, without an account/.test(w)));
   assert.ok(!calls.some(c => c.xsrf));
 });
 
@@ -136,7 +136,7 @@ test('a connected Supercines account reads fares as that account, uncached', asy
   assert.deepEqual(result.items.map(i => i.name), ['BOLETO GENERAL 2D', 'CANJE SUPERPUNTOS']);
   // The courtesy-ticket section is not a fare and does not make the result partial.
   assert.equal(result.partial, false);
-  assert.ok(result.warnings.some(w => /leídas con tu cuenta de Supercines/.test(w)));
+  assert.ok(result.warnings.some(w => /Prices read with your Supercines account/.test(w)));
   // Exactly one fare read, made with the account; no guest fare read.
   assert.deepEqual(calls.filter(c => c.path === '/listBoletos').map(c => !!c.xsrf), [true]);
   await service.query('prices', query);
@@ -153,7 +153,7 @@ test('an ended Supercines session falls back to public fares and is marked refus
   const result = await new CinemaService(http).query('prices', query);
   assert.equal(result.status, 'available');
   assert.deepEqual(result.items.map(i => i.name), ['BOLETO GENERAL 2D']);
-  assert.ok(result.warnings.some(w => /no reconoció la sesión de tu cuenta/.test(w)));
+  assert.ok(result.warnings.some(w => /did not recognize your account's session/.test(w)));
   assert.deepEqual(calls.filter(c => c.path === '/listBoletos').map(c => !!c.xsrf), [true, false]);
   assert.ok(http.rejectedSessions.has('supercines'));
 });
@@ -163,6 +163,6 @@ test('an expired local Supercines session is not used', async t => {
   await memberSession(sessions, -1000);
   const { calls, fetcher } = site();
   const result = await new CinemaService(new HttpClient(fetcher, 15000, sessions)).query('prices', query);
-  assert.ok(result.warnings.some(w => /Tarifas públicas de Supercines, sin cuenta/.test(w)));
+  assert.ok(result.warnings.some(w => /Public Supercines prices, without an account/.test(w)));
   assert.ok(!calls.some(c => c.xsrf));
 });

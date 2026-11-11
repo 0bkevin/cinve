@@ -19,8 +19,8 @@ export function parseCinemaDirectory(fields: unknown[], city: string, url: strin
   }
   if (skipped) {
     c.partial = true;
-    c.warnings.push('Cines Unidos devolvió registros de sedes sin estructura o nombre reconocible; se conservan las demás sedes.');
-    if (!records.length) throw new DataError('error', 'No se pudo reconocer ninguna sede en el directorio defectuoso de Cines Unidos.');
+    c.warnings.push('Cines Unidos returned venue records without a recognizable structure or name; the other venues are kept.');
+    if (!records.length) throw new DataError('error', 'No venue could be recognized in the faulty Cines Unidos directory.');
   }
   const identities = new Map<string, Set<string>>();
   for (const r of records) {
@@ -30,7 +30,7 @@ export function parseCinemaDirectory(fields: unknown[], city: string, url: strin
     const verified = Id.safeParse(r.id).success && !r.id.startsWith('directory-') && identities.get(r.id)!.size === 1;
     if (!verified) {
       c.partial = true;
-      c.warnings.push(`Código de consulta ausente, inválido o contradictorio para ${r.name}; sede conservada con enlace oficial. Esto no indica cierre.`);
+      c.warnings.push(`Query code missing, invalid or contradictory for ${r.name}; venue kept with its official link. This does not indicate a closure.`);
     }
     return { kind: 'cinema', id: verified ? r.id : `directory-cu-${createHash('sha256').update(r.identity).digest('hex').slice(0, 24)}`,
       name: r.name, city, address: r.address, url, code_status: verified ? 'verified' : 'unverified',

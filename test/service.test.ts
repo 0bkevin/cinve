@@ -38,7 +38,7 @@ test('overnight times remain commercial dates and do not invent a calendar times
   const result = await service().query('showtimes', { provider: 'cinepic', cinema_id: '123300', date: '2026-09-11' });
   assert.equal(result.items.find(r => r.id === 'f1')?.starts_at, '2026-09-11T20:30:00-04:00');
   assert.equal(result.items.find(r => r.id === 'f2')?.starts_at, undefined);
-  assert.ok(result.warnings.some(s => s.includes('trasnoche')));
+  assert.ok(result.warnings.some(s => s.includes('late-night showing')));
 });
 test('Cines Unidos filters by day, cinema and movie; timezone has one offset', async () => {
   const result = await service().query('showtimes', { provider: 'cinesunidos', city: 'Caracas', date: '2026-09-11', cinema_id: '1005', movie_id: 'HO1' });
@@ -90,7 +90,7 @@ test('Cinex HTML separators do not merge screen number and showtime', async () =
 test('schema drift fails visibly instead of reporting an empty catalog', async () => {
   const s = new CinemaService(new HttpClient(async () => new Response(JSON.stringify({ ...cpSessions, data: { datos: [] } }))));
   const r = await s.query('movies', { provider: 'cinepic', cinema_id: '123300' });
-  assert.equal(r.status, 'error'); assert.match(r.warnings[0], /estructura/);
+  assert.equal(r.status, 'error'); assert.match(r.warnings[0], /structure/);
 });
 test('invalid ticket amount is an error rather than zero', async () => {
   const props = structuredClone(cpBuy); props.functionData.tarifas[0].precio = 'no disponible';

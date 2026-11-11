@@ -31,7 +31,7 @@ function boundedWarnings(warnings: string[]): string[] {
     characters += bounded.length;
   }
   if (omitted) {
-    const aggregate = `Se omitieron ${omitted} advertencias repetidas o excedentes; consulta partial y los datos fuente.`;
+    const aggregate = `${omitted} repeated or excess warnings were omitted; check partial and the source data.`;
     while (output.length && (output.length >= resultWarningLimit || characters + aggregate.length > resultWarningCharacters)) {
       characters -= output.pop()!.length;
       omitted++;
@@ -54,7 +54,7 @@ function boundedSources(sources: QueryResult['sources'], warnings: string[]): Qu
   const oldest = sources.reduce((a, b) => (Date.parse(b.fetched_at) < Date.parse(a.fetched_at) ? b : a));
   const kept = sources.slice(0, resultSourceLimit - 1);
   kept.push(kept.includes(oldest) ? sources[resultSourceLimit - 1] : oldest);
-  warnings.push(`Se consultaron ${sources.length} fuentes; se listan ${kept.length}, incluida la más antigua (${oldest.fetched_at}).`);
+  warnings.push(`${sources.length} sources were queried; ${kept.length} are listed, including the oldest (${oldest.fetched_at}).`);
   return kept;
 }
 
@@ -75,7 +75,7 @@ export class CinemaService {
     const c = new ReadContext(this.http, q.refresh, call);
     const result: QueryResult = { provider: q.provider, status: 'empty', queried_at: new Date().toISOString(), timezone: 'America/Caracas', sources: [], items: [], warnings: [], total: 0, next_offset: null, partial: false };
     try {
-      if (q.cinema_id?.startsWith('directory-')) throw new DataError('unavailable', 'Esta sede no tiene código de consulta verificado. Consulta el enlace oficial devuelto por list_cinemas; el ID directory- solo identifica la sede conocida.');
+      if (q.cinema_id?.startsWith('directory-')) throw new DataError('unavailable', 'This venue has no verified query code. Check the official link returned by list_cinemas; the directory- ID only identifies the known venue.');
       const data = q.provider === 'cinex' ? await cinex(op, q, c, this.cinexCatalog)
         : await ({ cinepic, cinesunidos, supercines, grancine })[q.provider](op, q, c);
       const unique = new Map<string, DataItem>();
@@ -88,7 +88,7 @@ export class CinemaService {
         const candidate = { ...raw };
         for (const key of ['url', 'image_url'] as const) {
           if (candidate[key] !== undefined && !PublicUrl.safeParse(candidate[key]).success) {
-            if (candidate[key]) c.warnings.push('Se omitió un enlace del proveedor porque no era una URL HTTPS válida sin credenciales.');
+            if (candidate[key]) c.warnings.push('A provider link was omitted because it was not a valid HTTPS URL without credentials.');
             delete candidate[key];
           }
         }
@@ -101,7 +101,7 @@ export class CinemaService {
           const previous = showtimes.get(key);
           if (previous && showtimeIdentity(previous) !== showtimeIdentity(item)) {
             conflicted.add(key); showtimes.delete(key); unique.delete(key); c.partial = true;
-            c.warnings.push(`El proveedor devolvió datos contradictorios para la función ${item.id}; se omitió porque no se puede confirmar su película u horario.`);
+            c.warnings.push(`The provider returned contradictory data for showtime ${item.id}; it was omitted because its movie or time cannot be confirmed.`);
             continue;
           }
           showtimes.set(key, item);
@@ -118,7 +118,7 @@ export class CinemaService {
     } catch (error) {
       result.items = []; result.total = 0; result.next_offset = null;
       result.status = error instanceof DataError ? error.status : 'error';
-      c.warnings.push(error instanceof DataError ? error.message : 'Falló la interpretación de la respuesta del proveedor.');
+      c.warnings.push(error instanceof DataError ? error.message : 'Interpreting the provider\'s response failed.');
     }
     result.sources = boundedSources(c.sources, c.warnings);
     result.partial = c.partial;
