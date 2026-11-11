@@ -34,9 +34,9 @@ function SocialMeta({ canonical, title, description }: { canonical?: string; tit
 }
 
 /** index pages also need canonical; description defaults to the site's. */
-export type PageOptions = { compact?: boolean; script?: '/assets/js/site.js' | '/assets/js/connect.js'; index?: boolean; canonical?: string; description?: string };
+export type PageOptions = { compact?: boolean; script?: '/assets/js/site.js' | '/assets/js/connect.js'; index?: boolean; canonical?: string; description?: string; structuredData?: object };
 
-export function Page({ title, compact, script, index, canonical, description = siteDescription, children }: PageOptions & { title: string; children?: Child }) {
+export function Page({ title, compact, script, index, canonical, description = siteDescription, structuredData, children }: PageOptions & { title: string; children?: Child }) {
   return (
     <html lang="es" class="dark">
       <head>
@@ -53,6 +53,9 @@ export function Page({ title, compact, script, index, canonical, description = s
         <link rel="preload" href="/assets/instrument-sans.woff2" as="font" type="font/woff2" crossorigin />
         <link rel="stylesheet" href={assetUrl('/assets/basecoat.css')} />
         <link rel="stylesheet" href={assetUrl('/assets/site.css')} />
+        {/* JSON-LD is a data block, never executed, so script-src 'self' does
+            not apply. "<" is escaped so the data cannot close the tag. */}
+        {structuredData && <script type="application/ld+json">{raw(JSON.stringify(structuredData).replace(/</g, '\\u003c'))}</script>}
       </head>
       <body>
         <a class="skip" href="#contenido">Ir al contenido</a>

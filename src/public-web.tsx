@@ -136,6 +136,7 @@ const safeguards: [JSX.Element, string, string][] = [
 
 // Answers must stay true to the service; see docs/hosted.md and src/install.ts.
 const faq: [string, string][] = [
+  ['¿Qué es Cinve?', 'Un servidor MCP gratuito y de código abierto. Con él, tu asistente consulta la cartelera, los horarios, los precios y los asientos de Cinex, Cines Unidos, Cinepic, Supercines y Gran Cine, según lo que publica cada cine. Solo consulta: no compra entradas.'],
   ['¿Cuánto cuesta?', 'Nada. Cinve es gratis y no muestra anuncios.'],
   ['¿Con qué asistentes funciona?', 'Con los que aceptan conexiones MCP remotas, como Claude Code, Codex u OpenCode. Si tu asistente no tiene esa opción, todavía no puede usar Cinve.'],
   ['¿Necesito crear una cuenta?', 'En Cinve, no. Para ver precios y asientos de Cinex y Cines Unidos, tu asistente te pedirá conectar tu cuenta de ese cine. En Supercines es opcional: sin ella ves las tarifas públicas.'],
@@ -145,6 +146,21 @@ const faq: [string, string][] = [
   ['¿Cómo desconecto mi cuenta del cine?', 'Escríbele a tu asistente «desconecta mi cuenta de Cinex» (o de Cines Unidos o Supercines) y borramos la sesión guardada.'],
   ['¿Cinve es oficial?', 'No. Es un proyecto independiente, sin relación con los cines.'],
 ];
+
+/** Who and what Cinve is, for search and answer engines (schema.org). No
+ *  ratings or offers: Cinve has none, so none are claimed. */
+const structuredData = (origin: string) => ({
+  '@context': 'https://schema.org',
+  '@graph': [
+    { '@type': 'WebSite', '@id': `${origin}/#website`, url: `${origin}/`, name: 'Cinve', inLanguage: 'es-VE', publisher: { '@id': 'https://kevinbravo.com/#person' } },
+    { '@type': 'SoftwareApplication', '@id': `${origin}/#app`, name: 'Cinve', url: `${origin}/`,
+      description: 'Servidor MCP gratuito y de código abierto para que tu asistente consulte cartelera, horarios, precios y asientos de cines en Venezuela.',
+      applicationCategory: 'UtilitiesApplication', operatingSystem: 'Cualquiera (servidor MCP remoto)', isAccessibleForFree: true,
+      license: 'https://opensource.org/license/mit', inLanguage: 'es-VE', areaServed: { '@type': 'Country', name: 'Venezuela' },
+      sameAs: ['https://github.com/0bkevin/cinve'], author: { '@id': 'https://kevinbravo.com/#person' } },
+    { '@type': 'Person', '@id': 'https://kevinbravo.com/#person', name: 'Kevin Bravo', url: 'https://kevinbravo.com' },
+  ],
+});
 
 export function landingPage(origin: string) {
   return page('Cartelera, precios y asientos de cines en Venezuela', <>
@@ -236,7 +252,7 @@ export function landingPage(origin: string) {
         <LinkButton href="https://github.com/0bkevin/cinve/issues/new/choose" variant="ghost">Proponer un cine</LinkButton>
       </div>
     </section>
-  </>, { index: true, canonical: origin + '/', script: '/assets/js/site.js' });
+  </>, { index: true, canonical: origin + '/', script: '/assets/js/site.js', structuredData: structuredData(origin) });
 }
 
 /** A command or setting to copy, with its own copy button. */
