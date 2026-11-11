@@ -105,7 +105,8 @@ const assistants: Assistant[] = [
 const AppMark = ({ logo }: { logo: string }) =>
   <span class="app-mark" aria-hidden="true">{logo.endsWith('claudecode.svg')
     ? <span class="logo-claudecode"></span>
-    : <img src={assetUrl(logo)} alt="" width="18" height="18" loading="lazy" />}</span>;
+    // Codex's file is a full app icon with its own padded tile: it fills the disc.
+    : <img src={assetUrl(logo)} alt="" width="18" height="18" loading="lazy" class={logo.endsWith('codex.png') ? 'logo-fill' : undefined} />}</span>;
 
 function WorksWith() {
   return <ul class="works-with" aria-label="Asistentes compatibles">
