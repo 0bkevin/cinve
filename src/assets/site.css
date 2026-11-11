@@ -511,7 +511,14 @@ button:disabled, .btn:disabled { cursor: not-allowed; }
 .demo-key span { display: inline-flex; align-items: center; gap: 6px; }
 .demo-key i { width: 12px; box-shadow: none !important; }
 
-/* Played by site.js: data-stage moves idle → typing → thinking → answer. */
+/* Played by site.js: data-stage moves idle → typing → thinking → answer.
+   Its starting state comes from CSS on the first frame when scripts run, so
+   the finished conversation never flashes before the script loads. If the
+   script never arrives, the conversation shows itself after 3s. */
+@media (scripting: enabled) and (prefers-reduced-motion: no-preference) {
+  .demo:not([data-stage]) .demo-me, .demo:not([data-stage]) .demo-bot { opacity: 0; animation: demo-fallback .4s 3s forwards; }
+}
+@keyframes demo-fallback { to { opacity: 1; } }
 .demo[data-stage=idle] .demo-me { visibility: hidden; }
 /* Text types into a bubble already at its final size, so nothing shifts. */
 .demo[data-stage] .demo-me { text-align: left; }
