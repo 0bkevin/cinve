@@ -795,7 +795,7 @@ test('cleanup never orphans a connection whose request row is locked while it ru
 test('every HTML page allows only its own stylesheet, never inline styles', async t => {
   const f = await fixture(t);
   const client_id = await register(f.origin);
-  const pages = [f.origin + '/', f.origin + '/connect', f.origin + '/instrucciones', (await authorizationRequest(f.origin, client_id)).url.href, f.origin + '/oauth/authorize?client_id=unknown'];
+  const pages = [f.origin + '/', f.origin + '/connect', f.origin + '/instrucciones', f.origin + '/privacidad', (await authorizationRequest(f.origin, client_id)).url.href, f.origin + '/oauth/authorize?client_id=unknown'];
   const install = await fetch(f.origin + '/install', { headers: { Accept: 'text/html' } });
   for (const r of [...await Promise.all(pages.map(u => fetch(u))), install]) {
     const csp = r.headers.get('content-security-policy')!, html = await r.text();
@@ -972,9 +972,10 @@ test('crawlers get robots.txt, a sitemap of the public pages and llms.txt; brows
   assert.match(rules, /Disallow: \/connect\//); assert.doesNotMatch(rules, /Disallow: \/connect\n/);
   assert.match(rules, new RegExp(`Sitemap: ${f.origin}/sitemap.xml`));
   const map = await (await fetch(f.origin + '/sitemap.xml')).text();
-  for (const path of ['/', '/install', '/instrucciones']) assert.ok(map.includes(`<loc>${f.origin}${path}</loc>`), path);
+  for (const path of ['/', '/install', '/instrucciones', '/privacidad']) assert.ok(map.includes(`<loc>${f.origin}${path}</loc>`), path);
   assert.doesNotMatch(map, /connect|oauth/);
-  assert.match(await (await fetch(f.origin + '/llms.txt')).text(), /^# Cinve/);
+  const llms = await (await fetch(f.origin + '/llms.txt')).text();
+  assert.match(llms, /^# Cinve/); assert.ok(llms.includes(`${f.origin}/privacidad`));
   const security = await (await fetch(f.origin + '/.well-known/security.txt')).text();
   assert.match(security, /^Contact: https:\/\/github\.com\/0bkevin\/cinve\/security\/advisories\/new$/m);
   assert.match(security, new RegExp(`^Canonical: ${f.origin}/\\.well-known/security\\.txt$`, 'm'));
@@ -989,7 +990,7 @@ test('crawlers get robots.txt, a sitemap of the public pages and llms.txt; brows
 test('public pages may be cached briefly by the CDN; the agent guide and private pages may not', async t => {
   const f = await fixture(t);
   const html = { headers: { Accept: 'text/html' } };
-  for (const path of ['/', '/instrucciones', '/install']) assert.match((await fetch(f.origin + path, html)).headers.get('cache-control')!, /s-maxage=300/, path);
+  for (const path of ['/', '/instrucciones', '/privacidad', '/install']) assert.match((await fetch(f.origin + path, html)).headers.get('cache-control')!, /s-maxage=300/, path);
   assert.equal((await fetch(f.origin + '/install')).headers.get('cache-control'), 'no-store');
   assert.equal((await fetch(f.origin + '/connect', html)).headers.get('cache-control'), 'no-store');
 });

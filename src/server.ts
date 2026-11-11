@@ -129,7 +129,11 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
     instructions: serverInstructions({ publicHosted, accounts: Boolean(accounts) }),
   });
   const annotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true };
-  server.registerTool('get_auth_status', {
+  // Directories (Claude's among them) read the display name from
+  // annotations.title, so mirror each tool's title there too.
+  const registerTool = ((...[name, config, cb]: Parameters<typeof server.registerTool>) => server.registerTool(name,
+    { ...config, annotations: { ...config.annotations, title: config.title } }, cb)) as typeof server.registerTool;
+  registerTool('get_auth_status', {
     title: 'Estado de autenticación',
     description: 'Estado de las sesiones Cinex, Cines Unidos y Supercines y siguiente paso de conexión. La cuenta Supercines es opcional: sin ella las tarifas son las públicas. No devuelve datos personales ni secretos. configured no garantiza que el proveedor no haya revocado la sesión.',
     inputSchema: z.object({}).strict(),
@@ -143,7 +147,7 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
       throw new Error('No se pudo leer el estado de autenticación. Inténtalo de nuevo más tarde.');
     }
   });
-  server.registerTool('list_providers', {
+  registerTool('list_providers', {
     title: 'Listar proveedores',
     description: 'Lista proveedores y cobertura implementada. Este catálogo de capacidades no realiza una comprobación de disponibilidad en vivo.',
     inputSchema: z.object({}).strict(),
@@ -154,7 +158,7 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
     return { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data };
   });
   if (accounts || publicHosted) {
-    server.registerTool('connect_account', {
+    registerTool('connect_account', {
       title: 'Conectar cuenta',
       description: 'En modo alojado, inicia automáticamente la autorización de Cinve si hace falta. Si la cuenta ya está conectada devuelve connected=true: repite la consulta original sin pedir nada al usuario. Si no, devuelve connected=false y un enlace privado y de un solo uso para que el usuario conecte su cuenta Cinex, Cines Unidos o Supercines (opcional: Supercines muestra tarifas públicas sin cuenta; solo conéctala si el usuario lo pide). Preséntalo solo al usuario de esta conversación y no lo compartas con terceros: quien lo use conecta su cuenta a este acceso. No abras ni completes el formulario como agente. Nunca pidas credenciales por chat. Caduca en 10 minutos.',
       inputSchema: z.object({ provider: AuthProvider }).strict(),
@@ -171,7 +175,7 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
         throw new Error('No se pudo crear el enlace de conexión. Inténtalo de nuevo más tarde.');
       }
     });
-    server.registerTool('disconnect_account', {
+    registerTool('disconnect_account', {
       title: 'Desconectar cuenta',
       description: 'Desconecta la cuenta de cine del usuario en Cinev y cancela enlaces pendientes. No revoca la sesión directamente en la web del cine. Usar cuando el usuario pida desconectar.',
       inputSchema: z.object({ provider: AuthProvider }).strict(),
@@ -188,7 +192,7 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
       }
     });
   }
-  server.registerTool('get_seats', {
+  registerTool('get_seats', {
     title: 'Consultar asientos y mapa ASCII',
     description: 'Mapa real sin reservar: Cinex y Cines Unidos requieren cinema_id, session_id y cuenta conectada; Cinepic requiere también movie_id, sin login. Usa IDs de get_showtimes. Devuelve contadores y el mapa ASCII completo, donde cada asiento aparece con su etiqueta y estado (O = status available); include_seats=true añade el detalle por asiento, mucho más extenso. Sin caché local. ' + seatInstructions,
     inputSchema: z.preprocess(absentNulls({ provider, cinema_id: cinemaId, session_id: sessionId, movie_id: movieId, include_seats: true }), z.object({ provider, cinema_id: cinemaId, session_id: sessionId, movie_id: movieId.optional(),
@@ -211,7 +215,7 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
     ['get_ticket_prices', 'prices', 'Consulta tarifas (Gran Cine no las publica). Cinepic requiere cinema_id, movie_id y session_id de get_showtimes. Cines Unidos requiere cinema_id, session_id y una cuenta conectada. Cinex requiere cinema_id, session_id y una cuenta conectada. Supercines requiere cinema_id, movie_id y session_id, y date si la función no es de hoy; no requiere cuenta (si el usuario conectó la suya, se leen con ella). Devuelve USD/VES cuando verificables, desglose Cinex en VES. No devuelve totales finales de compra.'],
     ['get_concessions', 'concessions', 'Consulta caramelería por sede. Cinepic y Cines Unidos requieren solo cinema_id, por API pública; Cinepic puede devolver catálogo vacío. Cinex requiere cinema_id y una cuenta conectada. Supercines requiere solo cinema_id. Stock solo cuando está verificado; no usa cero para precios ausentes.'],
   ];
-  for (const [name, op, description] of tools) server.registerTool(name, {
+  for (const [name, op, description] of tools) registerTool(name, {
     title: ({
       cities: 'Listar ciudades', cinemas: 'Listar sedes', movies: 'Listar películas',
       showtimes: 'Consultar funciones', prices: 'Consultar tarifas', concessions: 'Consultar caramelería',

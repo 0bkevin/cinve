@@ -1,4 +1,4 @@
-import { instructionsPage, landingPage, notFoundPage, publicPageCache, servePublicAsset, setSecurityHeaders } from './public-web.js';
+import { instructionsPage, landingPage, privacyPage, notFoundPage, publicPageCache, servePublicAsset, setSecurityHeaders } from './public-web.js';
 import { hostedAuthInstructions } from './hosted-auth-guidance.js';
 import { HostedOAuth, accessTokenFormat } from './oauth.js';
 import { LocalLimiter, LocalSet } from './local-limit.js';
@@ -161,9 +161,9 @@ export async function createHostedApp(options: {
       // Static pages cost no database work, so they are served before any
       // limit: a user behind a shared address can always open the link page.
       const pagePath = req.url?.split('?')[0];
-      if (['GET', 'HEAD'].includes(req.method ?? '') && (pagePath === '/connect' || pagePath === '/' || pagePath === '/instrucciones')) {
+      if (['GET', 'HEAD'].includes(req.method ?? '') && (pagePath === '/connect' || pagePath === '/' || pagePath === '/instrucciones' || pagePath === '/privacidad')) {
         if (pagePath !== '/connect') res.setHeader('Cache-Control', publicPageCache);
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(req.method === 'HEAD' ? undefined : pagePath === '/' ? landingPage(origin) : pagePath === '/instrucciones' ? instructionsPage(origin) : loginPage()); return;
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(req.method === 'HEAD' ? undefined : pagePath === '/' ? landingPage(origin) : pagePath === '/instrucciones' ? instructionsPage(origin) : pagePath === '/privacidad' ? privacyPage(origin) : loginPage()); return;
       }
       const forwarded = options.trustedVercelProxy ? req.headers['x-vercel-forwarded-for'] : undefined;
       const ip = rateLimitNetwork(typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : req.socket.remoteAddress ?? 'unknown');

@@ -3,6 +3,7 @@
 export { landingPage } from './web/pages/landing.js';
 export { installationPage } from './web/pages/install.js';
 export { instructionsPage } from './web/pages/instructions.js';
+export { privacyPage } from './web/pages/privacy.js';
 export { authorizationPage, authorizationErrorPage } from './web/pages/consent.js';
 export { notFoundPage } from './web/pages/not-found.js';
 export { publicPageCache, setSecurityHeaders } from './web/http.js';

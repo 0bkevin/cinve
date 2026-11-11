@@ -423,6 +423,11 @@ button:disabled, .btn:disabled { cursor: not-allowed; }
 
 /* Install page: pick an app, see its one step. */
 .manual { margin-top: 56px; }
+.policy { margin-top: 44px; }
+.policy h2 { margin: 0 0 14px; font: 700 24px/1.2 var(--font-display); letter-spacing: -0.03em; }
+.policy ul { margin: 0; padding-left: 20px; list-style: disc; display: grid; gap: 10px; color: var(--muted-foreground); max-width: 62ch; }
+.policy ul + p, .policy p + ul { margin-top: 14px; }
+.policy code { font-size: .92em; color: var(--foreground); }
 .manual h2 { margin: 0 0 20px; font: 700 26px/1.15 var(--font-display); letter-spacing: -0.03em; }
 .picker-options { display: flex; flex-wrap: wrap; gap: 8px; }
 .picker-options label { display: inline-flex; align-items: center; gap: 9px; padding: 5px 14px 5px 5px; border-radius: 999px; background: var(--surface); box-shadow: inset 0 0 0 1px transparent; font-size: 14px; font-weight: 500; color: var(--dust); cursor: pointer; user-select: none; transition: color .15s, box-shadow .15s, background-color .15s; }
