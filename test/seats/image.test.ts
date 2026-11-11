@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
 import { Client } from '@modelcontextprotocol/client';
 import { renderSeats } from '../../src/seats/ascii.js';
-import { cinepicBookableTypes, parseCinepicSeats, parseCinexShowing } from '../../src/seats/parsers.js';
+import { cinepicBookableTypes, parseCinepicSeats, parseCinesUnidosSeats, parseCinexSeats, parseCinexShowing } from '../../src/seats/parsers.js';
 import { seatLayout } from '../../src/seats/schema.js';
 import { cinepicTicketsLeft } from '../../src/providers/cinepic/sites.js';
 import { crc32, inflateSync } from 'node:zlib';
@@ -385,4 +385,65 @@ test('rooms of every shape render with the right counts, colours and bounds', as
       assert.equal(png.at(Math.round((x + 13) * scale), Math.round((y + 3.5) * scale)), fills[seat.status], `${rows}x${cols} ${seat.label}`);
     }
   }
+});
+
+// Room shapes as each provider sent them on 2026-11-11, rebuilt without account data.
+/** Seat x, y and the drawn order of seats left to right in each row, from the SVG. */
+const drawn = (svg: string) => [...svg.matchAll(/<title>([^:<]+):?([^:<]*): [^<]*<\/title><rect x="([\d.]+)" y="([\d.]+)"/g)].map(m => ({ label: `${m[1]}${m[2] ? `:${m[2]}` : ''}`, x: Number(m[3]), y: Number(m[4]) }));
+
+test('Cinex: the image keeps the seat page\'s grid, aisles and row order (San Ignacio 2 VIP)', () => {
+  // cinex.com.ve pads every row to the room's width (hidden "11;~6;") with blankspace cells, rows F..A top to bottom,
+  // and passes each seat's own row and column to decideAsientoNew. Rows F-D hold 9..5 | 4..1; C-A hold 8..4 | 3..1 and a blank.
+  const seat = (id: string, r: number, c: number) => `<div class='seatvipplus' alt='0' id='${id}' name='${id}' onclick=javascript:decideAsientoNew('${id}','${r}','${c}','1','0000000002','','N','N'); title='Asiento ${id}'></div>`;
+  const blank = `<div class='blankspace'></div>`;
+  const rows = ['F', 'E', 'D', 'C', 'B', 'A'].map((letter, r) => {
+    const n = r < 3 ? 9 : 8, cells: string[] = [];
+    for (let k = 0; k < 5; k++) cells.push(seat(`${letter}${n - k}`, r, k));
+    cells.push(blank, blank);
+    for (let k = 0; k < n - 5; k++) cells.push(seat(`${letter}${n - 5 - k}`, r, 7 + k));
+    while (cells.length < 11) cells.push(blank);
+    return `<div class='row centermap'><div class='rowletter'>${letter}</div>${cells.join('')}</div>`;
+  });
+  const html = `<a id="btnasientosatras" href="boletosdev.php?cinemaid=CSI&sessionid=s1">Atras</a><div style="display: none;">11;~6;</div><div id="mapcontent"><div class="row centermap">${rows.join('')}</div></div>`;
+  const seats = parseCinexSeats(html, { provider: 'cinex', cinema_id: 'CSI', session_id: 's1' });
+  assert.equal(seats.length, 51);
+  // The grid column is the seat's position in its row, which is Cinex's own coordinate.
+  for (const s of seats) assert.equal(s.column_index, Number(capture(html, new RegExp(`decideAsientoNew\\('${s.id}','\\d+','(\\d+)'`))), s.id);
+  const svg = renderSeatMapSvg(seats, seatLayout('cinex'), header), at = drawn(svg), pos = (id: string) => nth(at.filter(s => s.label === id), 0);
+  assert.ok(pos('F9').y < pos('A8').y, 'row F above row A');
+  assert.ok(svg.indexOf('PANTALLA') > svg.lastIndexOf('<title>'), 'screen below row A');
+  assert.equal(pos('F4').x - pos('F5').x, 3 * 30, 'two blank cells between the blocks');
+  assert.equal(pos('A3').x, pos('F4').x, 'C-A right blocks start in the same column as F-D');
+  assert.equal(pos('A1').x, pos('F2').x, 'and end one seat short');
+});
+
+test('Cines Unidos: the image places each seat by its own row and column (Sambil Caracas Sala 4)', () => {
+  // Rows N (index 0) to A (13); "." is no seat. Short H, front rows that start at column 2 or 3, aisles where numbers skip.
+  const shape: [string, string][] = [
+    ['N', 'xxxxxxxx.xxxxxxxx'], ['M', 'xxx..xxxxxxxxxxx.'], ['L', 'xxx..xxxxxxxxxxx.'], ['K', 'xxx..xxxxxxxxxxx.'],
+    ['J', '.....xxxxxxxxxxx.'], ['I', '.....xxxxxxxxxxx.'], ['H', '.......xxxxxx....'], ['G', '..xxxxxxxxxxxxxx.'],
+    ['F', '..xxxxxxxxxxxxxx.'], ['E', '..xxxxxxxxxxxxxx.'], ['D', '..xxxxxxxxxxxxxx.'], ['C', '..xxxxxxxxxxxxxx.'],
+    ['B', '..xxxxxxxxxxxxxx.'], ['A', '...xxxxxxxxxxxx..'],
+  ];
+  const data = { seats: { areas: [{ number: 1, areaCategoryCode: '0000000001', description: 'Sala 4 2024', rows: shape.map(([name, cells], r) => ({
+    rowIndexZeroBased: r, physicalName: name,
+    seats: [...cells].flatMap((cell, c) => cell === 'x' ? [{ id: String(c + 1), status: 0, position: { areaNumber: 1, rowIndex: r, columnIndex: c } }] : []),
+  })) }] } };
+  const seats = parseCinesUnidosSeats(data);
+  assert.equal(seats.length, 182);
+  const svg = renderSeatMapSvg(seats, seatLayout('cinesunidos'), header), at = drawn(svg);
+  const x0 = Math.min(...at.map(s => s.x)), y0 = Math.min(...at.map(s => s.y));
+  // Every seat lands exactly on its provider cell: 30 units per column and per row, rows N at the top.
+  for (const s of seats) {
+    const d = nth(at.filter(p => p.label === s.label), 0);
+    assert.deepEqual([(d.x - x0) / 30, (d.y - y0) / 30], [s.column_index, s.row_index], s.label);
+  }
+  assert.ok(svg.indexOf('PANTALLA') > svg.lastIndexOf('<title>'), 'screen below row A, as cinesunidos.com draws it');
+});
+
+test('Cinepic: lettered columns are read the way the purchase page numbers its grid', () => {
+  const s = (fila: string, columna: string, name: string) => ({ butaca: `${fila}-${columna}`, nombre_butaca: name, fila, columna, libre: '1', seleccionada: '1', tipo_butaca_id: '1', invertida: '0' });
+  const seats = parseCinepicSeats({ butacas: [s('1', 'A', 'A:1'), s('1', 'C', 'A:2'), s('2', 'b', 'B:1')] });
+  assert.deepEqual(seats.map(x => [x.row_index, x.column_index]), [[0, 0], [0, 2], [1, 1]]);
+  assert.throws(() => parseCinepicSeats({ butacas: [s('1', 'AA', 'A:1')] }), 'two letters are not a column');
 });

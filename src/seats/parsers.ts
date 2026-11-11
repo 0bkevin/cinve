@@ -77,10 +77,21 @@ export function cinepicBookableTypes(tariffs: unknown[]): Set<string> | 'all' {
 /** "08" and "8" name one type; non-numeric types compare as text, never as NaN. */
 const seatType = (value: unknown) => { const t = text(value); return /^\d+$/.test(t) ? String(Number(t)) : t; };
 
+/**
+ * A Cinepic grid coordinate, 1-based. Rooms set up with tipoColumna "letras"
+ * send columns as letters; the purchase page (2026-11-11) numbers its grid
+ * ["0", "A", ..., "Z"], so A is column 1. Anything else is not a coordinate.
+ */
+function cinepicCoordinate(value: unknown): number {
+  const v = text(value).trim();
+  if (/^\d+$/.test(v)) return Number(v);
+  return /^[A-Z]$/i.test(v) ? v.toUpperCase().charCodeAt(0) - 64 : NaN;
+}
+
 export function parseCinepicSeats(data: unknown, bookable: Set<string> | 'all' = 'all'): SeatData[] {
   return validateSeats(rows(object(data).butacas, 'butacas').map(s => ({
     id: text(s.butaca), label: text(s.nombre_butaca), row: beforeFirst(text(s.nombre_butaca), ':'), area: 'Sala',
-    row_index: Number(s.fila) - 1, column_index: Number(s.columna) - 1,
+    row_index: cinepicCoordinate(s.fila) - 1, column_index: cinepicCoordinate(s.columna) - 1,
     status: text(s.libre) === '1' ? (bookable === 'all' || bookable.has(seatType(s.tipo_butaca_id)) ? 'available' : 'unavailable')
       : text(s.libre) === '0' ? 'occupied' : 'unknown',
     provider_status: text(s.libre), category: text(s.tipo_butaca_id),
