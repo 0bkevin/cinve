@@ -10,7 +10,7 @@ import { findField, object, rows } from './parsers.js';
 // Unicode property escapes (\p{L}) are invalid in Python's re and RE2, and
 // MCP clients such as the Python SDK validate structuredContent against the
 // published outputSchema, so this rule is a server-side refinement.
-const label = z.string().min(1).max(40).refine(value => /^[\p{L}\p{N} _:.()-]+$/u.test(value), 'Etiqueta de asiento no válida.');
+const label = z.string().min(1).max(40).refine(value => /^[\p{L}\p{N} _:.()-]+$/u.test(value), 'Invalid seat label.');
 const coordinate = z.number().int().min(0).max(199);
 export const Seat = z.object({
   id: z.string().min(1).max(200), label, row: label, area: label,
@@ -23,7 +23,7 @@ export const SeatResult = z.object({
   provider: Provider, cinema_id: Id, session_id: Id, status: Status,
   queried_at: z.string(), timezone: z.literal('America/Caracas'),
   sources: z.array(Source), warnings: z.array(z.string()),
-  seats: z.array(Seat).max(10000).optional().describe('Detalle por asiento; solo con include_seats=true. El mapa ascii ya muestra cada etiqueta con su estado.'),
+  seats: z.array(Seat).max(10000).optional().describe('Per-seat detail; only with include_seats=true. The ascii map already shows each label with its state.'),
   available: z.number().int().nonnegative(),
   occupied: z.number().int().nonnegative(), unavailable: z.number().int().nonnegative(),
   unknown: z.number().int().nonnegative(), total: z.number().int().nonnegative(),

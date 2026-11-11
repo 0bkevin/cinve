@@ -25,7 +25,7 @@ test('official MCP client discovers tools, validates arguments and reads structu
     assert.match(seatTool?.description ?? '', /available=0 with unknown>0 does NOT mean sold out/);
     assert.match(JSON.stringify(seatTool?.outputSchema), /availability_complete/);
     const movies = list.tools.find(t => t.name === 'list_movies');
-    assert.match(JSON.stringify(movies?.inputSchema), /ID de película/);
+    assert.match(JSON.stringify(movies?.inputSchema), /Movie ID/);
     const showtimes = list.tools.find(t => t.name === 'get_showtimes');
     assert.equal((showtimes?.outputSchema as { properties: { items: { items: { properties: { kind: { const: string } } } } } }).properties.items.items.properties.kind.const, 'showtime');
     assert.equal(JSON.stringify(list.tools).includes('"password"'), false);

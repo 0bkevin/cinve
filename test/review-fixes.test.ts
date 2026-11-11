@@ -196,7 +196,7 @@ test('one city read through the search API fits in the cache alongside another c
 test('Cinepic calls without a venue name the two valid IDs, avoiding a discovery call', () => {
   const r = inputSchema('showtimes').safeParse({ provider: 'cinepic' });
   assert.equal(r.success, false);
-  assert.match(r.error!.issues[0].message, /123300 \(Candelaria\) o 123301 \(VVIP Lido\)/);
+  assert.match(r.error!.issues[0].message, /123300 \(Candelaria\) or 123301 \(VVIP Lido\)/);
 });
 
 test('the Cines Unidos search fallback searches only matching titles and keeps titles that succeed', async () => {
@@ -274,7 +274,7 @@ test('null arguments from strict function-calling adapters are treated as absent
     assert.deepEqual(required('get_ticket_prices')?.sort(), ['cinema_id', 'provider', 'session_id']);
     assert.deepEqual(required('get_concessions')?.sort(), ['cinema_id', 'provider']);
     const noSession = await client.callTool({ name: 'get_ticket_prices', arguments: { provider: 'cinex', cinema_id: 'TLN', session_id: null } });
-    assert.match(JSON.stringify(noSession.content), /Se requiere session_id; obtenlo con get_showtimes/);
+    assert.match(JSON.stringify(noSession.content), /session_id is required; get it with get_showtimes/);
   } finally { await client.close(); }
 });
 
