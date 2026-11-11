@@ -1,6 +1,4 @@
-<p align="center">
-  <img src="src/assets/favicon.svg" alt="Logo de Cinve" width="96" height="96">
-</p>
+![Cinve: consulta películas, horarios y precios de cines en Venezuela desde tu asistente](src/assets/og.png)
 
 # Cinve
 
