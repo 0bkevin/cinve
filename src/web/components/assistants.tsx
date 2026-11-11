@@ -3,6 +3,8 @@ import { assetUrl } from '../assets.js';
 import { icons } from '../ui.js';
 import { assistants, type LogoFile } from '../content.js';
 import { Snippet } from './copy.js';
+import { catalog } from '../content.js';
+import type { Locale } from '../locale.js';
 
 /** An assistant's logo on a light disc, so each mark shows as published. The
  *  data-logo hook lets CSS size each mark by how big it looks, not by its
@@ -15,8 +17,8 @@ export function AppMark({ logo }: { logo: LogoFile }) {
     : <img src={assetUrl(`/assets/logos/${logo}`)} alt="" width="18" height="18" loading="lazy" data-logo={slug} />}</span>;
 }
 
-export function WorksWith() {
-  return <ul class="works-with" aria-label="Asistentes compatibles">
+export function WorksWith({ locale = 'es' }: { locale?: Locale }) {
+  return <ul class="works-with" aria-label={catalog(locale).components.compatibleAssistants}>
     {assistants.map(({ name, logo }) => <li><AppMark logo={logo} />{name}</li>)}
   </ul>;
 }
@@ -24,7 +26,8 @@ export function WorksWith() {
 /** Pick an app, see only its step. Radios keep it working without JavaScript
  *  and give arrow-key navigation; CSS shows the panel whose position matches
  *  the checked radio. */
-export function AppPicker({ endpoint, labelledBy }: { endpoint: string; labelledBy: string }) {
+export function AppPicker({ endpoint, labelledBy, locale = 'es' }: { endpoint: string; labelledBy: string; locale?: Locale }) {
+  const words = catalog(locale).components;
   return <div class="picker" role="radiogroup" aria-labelledby={labelledBy}>
     <div class="picker-options">
       {assistants.map(({ name, logo }, i) => <>
@@ -32,16 +35,16 @@ export function AppPicker({ endpoint, labelledBy }: { endpoint: string; labelled
         <label for={`app-${i}`}><AppMark logo={logo} />{name}</label>
       </>)}
       <input type="radio" name="app" id="app-other" class="visually-hidden" />
-      <label for="app-other"><span class="app-mark app-mark-other" aria-hidden="true">{icons.ellipsis()}</span>Otra</label>
+      <label for="app-other"><span class="app-mark app-mark-other" aria-hidden="true">{icons.ellipsis()}</span>{words.other}</label>
     </div>
     <div class="picker-panels">
-      {assistants.map(({ how, file, setup }, i) => <div class="picker-panel">
-        <p>{how}{file && <> <code>{file}</code>:</>}</p>
-        <Snippet id={`cmd-${i}`}>{setup(endpoint)}</Snippet>
+      {assistants.map(({ file, setup }, i) => <div class="picker-panel">
+        <p>{i === 1 ? words.addTo : words.runTerminal}{file && <> <code>{file}</code>:</>}</p>
+        <Snippet locale={locale} id={`cmd-${i}`}>{setup(endpoint)}</Snippet>
       </div>)}
       <div class="picker-panel">
-        <p>Busca en sus ajustes la opción para añadir un servidor MCP remoto o un conector personalizado. Ponle de nombre <strong>cinve</strong>, elige HTTP si te pide el tipo y usa esta dirección:</p>
-        <Snippet id="cmd-url">{endpoint}</Snippet>
+        <p>{words.genericSetup} <strong>cinve</strong>, {words.chooseHttp}</p>
+        <Snippet locale={locale} id="cmd-url">{endpoint}</Snippet>
       </div>
     </div>
   </div>;

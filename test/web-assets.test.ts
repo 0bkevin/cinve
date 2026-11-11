@@ -33,7 +33,7 @@ test('the privacy page states what is kept, and every page links to it from the 
   const origin = 'https://cinve.example', html = privacyPage(origin);
   for (const fact of ['no se guarda', 'AES-256-GCM', 'SHA-256', 'HMAC-SHA256', 'cinve_device', 'disconnect_account', '30 días', '90 días', 'Vercel', 'PostgreSQL'])
     assert.ok(html.includes(fact), fact);
-  for (const page of [landingPage(origin), installationPage(origin), instructionsPage(origin), html, loginPage()]) assert.match(page, /<a href="\/privacidad">Privacidad<\/a>/);
+  for (const page of [landingPage(origin), installationPage(origin), instructionsPage(origin), html, loginPage()]) assert.match(page, /<a href="\/privacidad\?lang=es"[^>]*>Privacidad<\/a>/);
 });
 
 test('public pages are indexable with their own canonical and description; private ones are not', () => {

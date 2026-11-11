@@ -87,3 +87,26 @@ For clients without OAuth (requires `npm run build`):
 npm run hosted:admin -- issue              # shows the token only once
 npm run hosted:admin -- revoke <client-id>
 ```
+
+## Web languages and discovery
+
+Browser pages support Spanish and English. `?lang=es` or `?lang=en` overrides
+`Accept-Language`; unsupported or missing preferences fall back to Spanish.
+Public pages that negotiate English redirect temporarily, with no caching, to
+`?lang=en` so shared links and social crawlers keep the selected language.
+Responses vary by `Accept-Language` and declare `Content-Language`. Internal
+links keep the chosen language.
+
+`/install` also varies by `Accept`. An explicit `lang` serves HTML even without
+an HTML Accept header; `?format=text` always serves the English agent guide.
+MCP instructions and results remain independent of the web language; the
+assistant is instructed to answer in the language of the user's prompt.
+
+Typed catalogs live in `src/web/locales/es.ts` and `en.ts`. `/connect` switches
+languages in place to retain its single-use invitation or exchanged token.
+Indexable pages have localized canonical URLs, reciprocal `hreflang` links,
+social metadata and sitemap entries. Landing-page JSON-LD matches the visible
+content and Venezuelan coverage. Private pages and errors remain `noindex`.
+
+Regenerate the two 1200 × 630 social PNGs with `npm run build:og`. They share
+`scripts/build-og.ts` and the vendored fonts and logos; only catalog copy differs.

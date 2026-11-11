@@ -1,4 +1,7 @@
 import { authorizationPage, authorizationErrorPage } from './public-web.js';
+import { pageLocale } from './web/http.js';
+import { webError } from './web/errors.js';
+import type { Locale } from './web/locale.js';
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Pool, PoolClient } from 'pg';
@@ -163,7 +166,7 @@ export class HostedOAuth {
     if (tokenKey.length !== 32) throw new Error('Invalid signing key.');
   }
   /** The consent page, which can also sign in to a cinema; re-rendered with an error after a failed sign-in. */
-  private consent(res: ServerResponse, status: number, app: { id: string; name: string }, redirect: string, id: string, csrf: string, form: ConsentForm = {}) {
+  private consent(res: ServerResponse, status: number, app: { id: string; name: string }, redirect: string, id: string, csrf: string, form: ConsentForm = {}, locale: Locale = 'es', path = '/oauth/authorize') {
     // A native form POST inherits this policy. no-referrer makes browsers
     // send Origin: null, which our same-origin CSRF check correctly rejects.
     // Keep referrers private across origins, including the assistant callback.
@@ -177,7 +180,7 @@ export class HostedOAuth {
     res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' });
     const publisher = isClientIdUrl(app.id) ? new URL(app.id).hostname : undefined;
     res.end(authorizationPage({ app: app.name, destination: new URL(redirect).origin, id, csrf, publisher,
-      recognized: recognizedDestination(redirect, publisher), cinemaLogin: !!this.accounts, ...form }));
+      recognized: recognizedDestination(redirect, publisher), cinemaLogin: !!this.accounts, ...form }, locale, path));
   }
   /**
    * A client_id that is an HTTPS URL is a Client ID Metadata Document: fetch
@@ -296,6 +299,7 @@ export class HostedOAuth {
   }
   async handle(req: IncomingMessage, res: ServerResponse, ip: string, local?: LocalAdmission): Promise<boolean> {
     const origin = this.getOrigin(), url = new URL(req.url!, origin), path = url.pathname;
+    const locale = path === '/oauth/authorize' ? pageLocale(req, res) : 'es';
     const metadata = ['/.well-known/oauth-protected-resource', '/.well-known/oauth-protected-resource/mcp', '/.well-known/oauth-authorization-server'];
     if (!metadata.includes(path) && !['/oauth/register', '/oauth/authorize', '/oauth/token', '/oauth/revoke'].includes(path)) return false;
     const send = (status: number, value: unknown) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(value)); };
@@ -376,7 +380,7 @@ export class HostedOAuth {
         await this.pool.query(`INSERT INTO cinev_oauth_requests(id,app_id,redirect_uri,resource,state,challenge,csrf_hash,expires_at)
           VALUES($1,$2,$3,$4,$5,$6,$7,now()+interval '10 minutes')`, [id, app.id, redirect, this.resource, p.get('state'), p.get('code_challenge'), digest(csrf)]);
         res.setHeader('Set-Cookie', `cinve_approval_${id}=${csrf}; HttpOnly; SameSite=Lax; Path=/oauth/authorize; Max-Age=600${origin.startsWith('https:') ? '; Secure' : ''}`);
-        this.consent(res, 200, app, redirect, id, csrf);
+        this.consent(res, 200, app, redirect, id, csrf, {}, locale, path + url.search);
         return true;
       }
       if (path === '/oauth/authorize' && req.method === 'POST') {
@@ -414,7 +418,7 @@ export class HostedOAuth {
             const username = (p.get('username') ?? '').trim(), password = p.get('password') ?? '';
             const again = (status: number, error: string) => {
               this.consent(res, status, { id: info.app_id, name: info.app_name }, info.redirect_uri, id, csrf,
-                { error, provider: provider.success ? provider.data : undefined, username: username.slice(0, 320) });
+                { error: webError(error, locale).error, provider: provider.success ? provider.data : undefined, username: username.slice(0, 320) }, locale, path + url.search);
               return true;
             };
             if (!provider.success || !username || username.length > 320 || !password || password.length > 4096) return again(400, 'Revisa el correo y la contraseña.');
@@ -547,7 +551,7 @@ export class HostedOAuth {
       const status = error instanceof OAuthError ? error.status : 500;
       if (path === '/oauth/authorize') {
         res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(authorizationErrorPage());
+        res.end(authorizationErrorPage(locale, path + url.search));
       } else send(status, { error: error instanceof OAuthError ? error.error : 'server_error' });
       return true;
     }

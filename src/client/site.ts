@@ -3,6 +3,18 @@
 // it with a content hash, and modules it imported would not get one.
 
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+const browserText = (document.documentElement.dataset.browserText ? JSON.parse(document.documentElement.dataset.browserText) : {}) as { copied?: string; copy?: string; copyFailure?: string };
+
+// Keep the current section when changing language on a public page.
+const keepSection = () => {
+  for (const link of document.querySelectorAll<HTMLAnchorElement>('[data-locale-switch]')) {
+    const url = new URL(link.getAttribute('href')!, location.href);
+    url.hash = location.hash;
+    link.href = url.pathname + url.search + url.hash;
+  }
+};
+addEventListener('hashchange', keepSection);
+keepSection();
 
 // --- Copy buttons -----------------------------------------------------------
 // Each names the element it copies in data-copy. Buttons stay hidden without
@@ -31,14 +43,14 @@ for (const button of document.querySelectorAll<HTMLButtonElement>('button[data-c
   button.addEventListener('click', async () => {
     try {
       await copyFrom(source);
-      label.textContent = 'Copiado';
+      label.textContent = button.dataset.copiedLabel ?? browserText.copied ?? '';
       button.dataset.copied = '';
       // The 'Copiado' label is the confirmation; the note is only for failures.
       if (feedback) feedback.textContent = '';
       clearTimeout(reset);
-      reset = window.setTimeout(() => { label.textContent = 'Copiar'; delete button.dataset.copied; }, 2500);
+      reset = window.setTimeout(() => { label.textContent = button.dataset.copyLabel ?? browserText.copy ?? ''; delete button.dataset.copied; }, 2500);
     } catch {
-      if (feedback) feedback.textContent = 'Selecciona el texto y cópialo.';
+      if (feedback) feedback.textContent = feedback.dataset.copyError ?? browserText.copyFailure ?? '';
     }
   });
 }

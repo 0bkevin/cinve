@@ -2,6 +2,8 @@
 // llms.txt and security.txt. Served before the Host check, like /install, so
 // they answer on the public origin. URLs are built from the origin, never hard-coded.
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { escapeHtml } from './web/jsx.js';
+import { canonicalUrl } from './web/locale.js';
 
 /** Public, indexable pages. /connect, OAuth and errors stay out (noindex). */
 export const indexedPaths = ['/', '/install', '/instrucciones', '/privacidad'];
@@ -18,8 +20,13 @@ Sitemap: ${origin}/sitemap.xml
 `;
 
 const sitemap = (origin: string) => `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-${indexedPaths.map(path => `  <url><loc>${origin}${path}</loc></url>`).join('\n')}
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+${indexedPaths.flatMap(path => {
+  const es = escapeHtml(canonicalUrl(new URL(path, origin).href, 'es'));
+  const en = escapeHtml(canonicalUrl(new URL(path, origin).href, 'en'));
+  const alternates = `<xhtml:link rel="alternate" hreflang="es" href="${es}"/><xhtml:link rel="alternate" hreflang="en" href="${en}"/><xhtml:link rel="alternate" hreflang="x-default" href="${es}"/>`;
+  return [es, en].map(url => `  <url><loc>${url}</loc>${alternates}</url>`);
+}).join('\n')}
 </urlset>
 `;
 
@@ -34,6 +41,25 @@ const llms = (origin: string) => `# Cinve
 - [Política de privacidad](${origin}/privacidad)
 - [Código fuente](https://github.com/0bkevin/cinve)
 - Endpoint MCP (Streamable HTTP): ${origin}/mcp
+
+## English
+
+Cinve is a free, independent, open-source MCP server for cinema listings,
+showtimes, ticket prices, concessions, and published seat availability in
+Venezuela. Coverage includes Cinex, Cines Unidos, Cinepic, Supercines, and
+Gran Cine, depending on what each provider publishes. Some queries need the
+visitor's cinema account. Information can change; confirm it with the cinema.
+Cinve only reads information: it does not buy tickets or reserve seats.
+
+- [Cinve in English](${origin}/?lang=en)
+- [Installation for visitors](${origin}/install?lang=en)
+- [Assistant installation guide (English)](${origin}/install?format=text)
+- [Assistant instructions and original source text](${origin}/instrucciones?lang=en)
+- [Privacy policy](${origin}/privacidad?lang=en)
+
+The website supports Spanish and English through ?lang=es and ?lang=en.
+MCP tool descriptions, server instructions, and diagnostic messages are in English.
+The assistant answers in the language of the user’s prompt.
 `;
 
 // RFC 9116. Expires is required and must stay under a year away, so it is

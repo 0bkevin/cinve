@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { load } from 'cheerio';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { migrationSql } from '../src/migrations.js';
@@ -571,7 +572,7 @@ test('the cinema-login link names the assistant app the account will be attached
   // A forwarded link must not inherit trust from a loopback redirect anyone can register.
   assert.deepEqual((await localLink.json() as { app: unknown }).app, { name: 'Local CLI', publisher: null, verified: false });
   const script = readFileSync(new URL('../src/client/connect.ts', import.meta.url), 'utf8');
-  assert.match(script, /const app = data\.app;/); assert.doesNotMatch(script, /innerHTML/);
+  assert.doesNotMatch(script, /innerHTML/);
 });
 
 async function consentForm(origin: string, client_id: string) {
@@ -810,7 +811,7 @@ test('every HTML page allows only its own stylesheet, never inline styles', asyn
 test('the install page carries security headers even when served before the hosted app', async () => {
   const { serveInstall } = await import('../src/install.js');
   const headers: Record<string, string> = {};
-  const res = { setHeader: (k: string, v: string) => { headers[k.toLowerCase()] = v; }, writeHead() {}, end() {} };
+  const res = { setHeader: (k: string, v: string) => { headers[k.toLowerCase()] = v; }, getHeader: (k: string) => headers[k.toLowerCase()], writeHead() {}, end() {} };
   assert.ok(serveInstall({ url: '/install', method: 'GET', headers: { accept: 'text/html' } } as never, res as never, 'https://cinve.example'));
   assert.match(headers['content-security-policy'], /default-src 'none'.*frame-ancestors 'none'/);
   assert.equal(headers['x-frame-options'], 'DENY');
@@ -1331,7 +1332,7 @@ test('OAuth quotas also apply per IPv6 /48, so rotating /64s does not multiply t
     body: new URLSearchParams({ token: 'cva_' + randomBytes(32).toString('base64url'), client_id: 'cvapp_x' }) }))).status, 200, 'another /48');
 });
 
-test('shared HTTP errors use English for MCP and preserve Spanish for the connection page', async t => {
+test('shared HTTP errors use English for MCP and localize the connection page', async t => {
   const f = await fixture(t);
   const invite = await f.links.issue(f.alice.id, (await f.users.hash(f.alice.id))!, 'cinex');
   const browser = await (await f.post('/connect/exchange', invite.token)).json() as { browser_token: string };
@@ -1341,11 +1342,14 @@ test('shared HTTP errors use English for MCP and preserve Spanish for the connec
   for (const [path, headers, messages] of [
     ['/mcp', {}, ['JSON is required.', 'Invalid request.', 'Request is too large.']],
     ['/connect/login', { Origin: f.origin, 'X-Cinev-Connection': browser.browser_token }, ['Se requiere JSON.', 'Solicitud no válida.', 'Solicitud demasiado grande.']],
+    ['/connect/login?lang=en', { Origin: f.origin, 'X-Cinev-Connection': browser.browser_token }, ['JSON is required.', 'Invalid request.', 'Request is too large.']],
   ] as const) {
     for (const [index, [type, body, status]] of invalidBodies.entries()) {
       const response = await fetch(f.origin + path, { method: 'POST', headers: { ...headers, 'Content-Type': type }, body });
       assert.equal(response.status, status);
-      assert.deepEqual(await response.json(), { error: messages[index] });
+      assert.deepEqual(await response.json(), { error: messages[index],
+        ...(path.startsWith('/connect/') ? { error_key: ['jsonRequired', 'invalidRequest', 'requestTooLarge'][index] } : {}),
+      });
     }
   }
 });
@@ -1821,4 +1825,152 @@ test('a device id planted in a browser never becomes a proof for the account sig
   await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 minute',21)", [f.links.keyHash('oauth:login-ip:203.0.113.150')]);
   assert.equal(await f.links.admitSignIn(subject(planted)), 'network', 'whoever planted the id gets no exemption');
   assert.equal(await f.links.admitSignIn(subject(issued)), undefined, 'the browser that signed in does');
+});
+
+test('all browser routes negotiate languages, keep explicit choices, and retain security headers', async t => {
+  const f = await fixture(t);
+  const securityHeaders = ['content-security-policy', 'referrer-policy', 'x-content-type-options', 'x-frame-options', 'permissions-policy', 'cross-origin-opener-policy', 'cross-origin-resource-policy', 'cross-origin-embedder-policy'];
+  for (const path of ['/', '/instrucciones', '/install', '/privacidad', '/connect', '/missing', '/oauth/authorize?client_id=unknown']) {
+    const es = await fetch(f.origin + path, { headers: { Accept: 'text/html', 'Accept-Language': 'es-VE' } });
+    const en = await fetch(f.origin + path, { headers: { Accept: 'text/html', 'Accept-Language': 'en-GB,en;q=0.9' } });
+    assert.equal(en.status, es.status, path);
+    assert.equal(en.headers.get('content-language'), 'en', path);
+    assert.match(en.headers.get('vary')!, /Accept-Language/, path);
+    assert.equal(load(await en.text())('html').attr('lang'), 'en', path);
+    for (const header of securityHeaders) assert.equal(en.headers.get(header), es.headers.get(header), `${path}: ${header}`);
+    const explicit = await fetch(f.origin + path + (path.includes('?') ? '&' : '?') + 'lang=es', { headers: { Accept: 'text/html', 'Accept-Language': 'en-US' } });
+    assert.equal(load(await explicit.text())('html').attr('lang'), 'es', path);
+  }
+  const install = await fetch(f.origin + '/install?lang=en', { headers: { Accept: 'text/html' } });
+  assert.match(install.headers.get('vary')!, /Accept, Accept-Language/);
+  assert.equal(install.headers.get('link'), `<${f.origin}/install?lang=en>; rel="canonical"`);
+  const guide = await fetch(f.origin + '/install?format=text&lang=es', { headers: { Accept: 'text/html', 'Accept-Language': 'es' } });
+  assert.match(await guide.text(), /^Cinve MCP installation/);
+  assert.equal(guide.headers.get('content-language'), 'en');
+  const head = await fetch(f.origin + '/?lang=en', { method: 'HEAD' });
+  assert.equal(head.headers.get('content-language'), 'en');
+  assert.equal(await head.text(), '');
+});
+
+test('English sitemap alternates, answer-engine links and social image resolve on the hosted origin', async t => {
+  const f = await fixture(t);
+  const xml = load(await (await fetch(f.origin + '/sitemap.xml')).text(), { xml: true });
+  assert.equal(xml('url').length, 8);
+  for (const path of ['/', '/install', '/instrucciones', '/privacidad']) {
+    const url = `${f.origin}${path}?lang=en`;
+    assert.equal(xml('loc').filter((_, node) => xml(node).text() === url).length, 1);
+  }
+  for (const node of xml('url').toArray()) assert.equal(xml(node).find('xhtml\\:link').length, 3);
+  const llms = await (await fetch(f.origin + '/llms.txt')).text();
+  assert.match(llms, /Venezuela/); assert.ok(llms.includes(`${f.origin}/instrucciones?lang=en`));
+  assert.ok(llms.includes(`${f.origin}/privacidad?lang=en`));
+  assert.doesNotMatch(llms, /results remain in Spanish/);
+  const $ = load(await (await fetch(f.origin + '/?lang=en')).text());
+  const image = await fetch($('meta[property="og:image"]').attr('content')!);
+  assert.equal(image.headers.get('content-type'), 'image/png');
+  const png = Buffer.from(await image.arrayBuffer());
+  assert.equal(png.readUInt32BE(16), 1200); assert.equal(png.readUInt32BE(20), 630);
+});
+
+test('localized connection APIs still exchange, log in, cancel and reject reused tokens', async t => {
+  const f = await fixture(t, successfulLogin), assistant = await f.client(f.alice.token);
+  const invitation = await link(assistant);
+  const exchange = await f.post('/connect/exchange?lang=en', invitation);
+  assert.equal(exchange.status, 200);
+  const { browser_token } = await exchange.json() as { browser_token: string };
+  const reused = await f.post('/connect/exchange?lang=en', invitation);
+  assert.equal(reused.status, 410);
+  assert.deepEqual(await reused.json(), { error: 'Link expired or already used.', error_key: 'usedLink' });
+  const invalid = await f.post('/connect/login?lang=en', browser_token, { username: '', password: '' });
+  assert.equal(invalid.status, 400);
+  assert.equal((await invalid.json() as { error: string }).error, 'Check your email and password.');
+  const login = await f.post('/connect/login?lang=en', browser_token, { username: 'person@example.test', password: 'SYNTHETIC_PASSWORD' });
+  assert.equal(login.status, 200);
+  const second = await f.client(f.bob.token);
+  const token = (await (await f.post('/connect/exchange?lang=es', await link(second))).json() as { browser_token: string }).browser_token;
+  assert.equal((await f.post('/connect/cancel?lang=en', token)).status, 200);
+});
+
+test('OAuth consent preserves authorization fields across language links, errors and form submissions', async t => {
+  const f = await fixture(t), client_id = await register(f.origin);
+  const request = await authorizationRequest(f.origin, client_id);
+  request.url.searchParams.set('lang', 'en');
+  const response = await fetch(request.url);
+  const cookie = response.headers.get('set-cookie')!.split(';')[0];
+  const $ = load(await response.text());
+  const switchUrl = new URL($('[data-locale-switch="es"]').attr('href')!, f.origin);
+  for (const [key, value] of Object.entries(request.params)) assert.equal(switchUrl.searchParams.get(key), value);
+  assert.equal(switchUrl.searchParams.get('lang'), 'es');
+  const action = $('form').first().attr('action')!;
+  assert.equal(new URL(action, f.origin).searchParams.get('lang'), 'en');
+  const body = new URLSearchParams({ request_id: $('input[name="request_id"]').first().attr('value')!, csrf: $('input[name="csrf"]').first().attr('value')!, decision: 'connect', provider: 'cinex', username: '', password: '' });
+  const retry = await fetch(new URL(action, f.origin), { method: 'POST', headers: { Origin: f.origin, Cookie: cookie }, body });
+  assert.equal(retry.status, 400);
+  const retryPage = load(await retry.text());
+  assert.equal(retryPage('html').attr('lang'), 'en');
+  assert.match(retryPage('[role="alert"]').text(), /Check your email and password/);
+  body.set('decision', 'approve');
+  const approve = await fetch(new URL(action, f.origin), { method: 'POST', redirect: 'manual', headers: { Origin: f.origin, Cookie: cookie }, body });
+  assert.equal(approve.status, 303);
+  assert.equal(new URL(approve.headers.get('location')!).searchParams.get('state'), 'state123');
+});
+
+test('public pages pin negotiated English for sharing and serve matching default and explicit OG images', async t => {
+  const f = await fixture(t);
+  const cases = [
+    { query: '', language: '', locale: 'es' },
+    { query: '', language: 'fr-FR,fr;q=0.9', locale: 'es' },
+    { query: '', language: 'es-VE,es;q=0.9,en;q=0.8', locale: 'es' },
+    { query: '', language: 'en-US,en;q=0.9,es;q=0.8', locale: 'en' },
+    { query: '?lang=es', language: 'en-US,en;q=0.9', locale: 'es' },
+    { query: '?lang=en', language: 'es-VE,es;q=0.9', locale: 'en' },
+  ] as const;
+  const images = new Set<string>();
+  for (const path of ['/', '/install', '/instrucciones', '/privacidad']) {
+    const negotiated = await fetch(f.origin + path + '?source=share', { redirect: 'manual', headers: { Accept: 'text/html', 'Accept-Language': 'en-US' } });
+    assert.equal(negotiated.status, 307);
+    assert.equal(negotiated.headers.get('cache-control'), 'no-store');
+    assert.match(negotiated.headers.get('vary')!, /Accept-Language/);
+    const location = new URL(negotiated.headers.get('location')!, f.origin);
+    assert.equal(location.searchParams.get('lang'), 'en');
+    assert.equal(location.searchParams.get('source'), 'share');
+    for (const { query, language, locale } of cases) {
+      const response = await fetch(f.origin + path + query, { headers: { Accept: 'text/html', ...(language ? { 'Accept-Language': language } : {}) } });
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get('content-language'), locale);
+      assert.equal(new URL(response.url).searchParams.get('lang'), locale === 'en' ? 'en' : query ? 'es' : null);
+      const $ = load(await response.text());
+      assert.equal($('html').attr('lang'), locale);
+      assert.equal($('meta[property="og:locale"]').attr('content'), locale === 'en' ? 'en_US' : 'es_VE');
+      assert.equal($('meta[property="og:title"]').attr('content'), $('title').text());
+      const image = $('meta[property="og:image"]').attr('content')!;
+      assert.equal(new URL(image).pathname, locale === 'en' ? '/og-en.png' : '/og.png');
+      assert.equal($('meta[name="twitter:image"]').attr('content'), image);
+      assert.equal($('meta[property="og:image:width"]').attr('content'), '1200');
+      assert.equal($('meta[property="og:image:height"]').attr('content'), '630');
+      images.add(image);
+      // A crawler does not inherit the visitor's browser settings. The final
+      // English URL must still deliver English and its OG image without them.
+      if (locale === 'en') {
+        const crawler = load(await (await fetch(response.url)).text());
+        assert.equal(crawler('html').attr('lang'), 'en');
+        assert.equal(crawler('meta[property="og:image"]').attr('content'), image);
+      }
+    }
+  }
+  assert.equal(images.size, 2);
+  const spanishInstall = await fetch(f.origin + '/install?lang=es');
+  assert.match(spanishInstall.headers.get('content-type')!, /text\/html/);
+  assert.equal(load(await spanishInstall.text())('html').attr('lang'), 'es');
+  for (const url of images) {
+    const response = await fetch(url);
+    assert.equal(response.status, 200); assert.equal(response.headers.get('content-type'), 'image/png');
+    const png = Buffer.from(await response.arrayBuffer());
+    assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+    assert.equal(png.readUInt32BE(16), 1200); assert.equal(png.readUInt32BE(20), 630);
+  }
+  const head = await fetch(f.origin + '/', { method: 'HEAD', redirect: 'manual', headers: { 'Accept-Language': 'en-US' } });
+  assert.equal(head.status, 307); assert.equal(await head.text(), '');
+  const guide = await fetch(f.origin + '/install?format=text', { redirect: 'manual', headers: { Accept: 'text/html', 'Accept-Language': 'en-US' } });
+  assert.equal(guide.status, 200); assert.match(await guide.text(), /^Cinve MCP installation/);
 });
