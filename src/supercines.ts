@@ -172,14 +172,21 @@ async function showtimes(q: Query, c: ReadContext): Promise<DataItem[]> {
     work = work.slice(0, titlesLimit);
   }
   const items: DataItem[] = [], offline: OfflineFunction[] = [];
-  let steps = 0, unscheduled = 0;
+  let steps = 0;
   const { done, failures, skipped: left, stopped } = await fanOut(work, async movie => {
     const html = await schedule(c, movie.id, date);
-    if (html === undefined) { unscheduled++; return; }
+    if (html === undefined) return;
     items.push(...parseSupercinesShowtimes(html, movie, date, c, offline).filter(s => !allowed || allowed.has(s.cinema_id)));
   }, { deadline, minRemainingMs: readMs, workers, onStep: () => c.progress(`Supercines: ${++steps} de ${work.length} títulos consultados.`) });
-  offlineWarning(offline, all, allowed, date, c);
-  if (done && unscheduled === done) c.warnings.push(`Supercines no publica funciones de ${work.length === 1 ? 'ese título' : 'estos títulos'} para ${date}; publica la cartelera día a día y las preventas en sus propias fechas.`);
+  const boxOffice = offlineWarning(offline, all, allowed, date, c);
+  if (done && !items.length && !boxOffice) {
+    // Observed November 2026: the next day's schedule is loaded during the
+    // day, venue by venue; later days only for presales.
+    const scope = [q.movie_id ? 'de ese título' : '', q.cinema_id ? 'en esta sede' : q.city ? 'en esta ciudad' : ''].filter(Boolean).join(' ');
+    c.warnings.push(date > today()
+      ? `Supercines aún no publica funciones${scope ? ` ${scope}` : ''} para ${date}: carga la programación poco antes (la del día siguiente, sede por sede durante el día) y las preventas en sus propias fechas. Vuelve a consultar más tarde.`
+      : `Supercines no publica funciones${scope ? ` ${scope}` : ''} para ${date}.`);
+  }
   const skipped = left.length;
   if (stopped) {
     c.partial = true;
@@ -202,7 +209,7 @@ async function showtimes(q: Query, c: ReadContext): Promise<DataItem[]> {
  * (a venue that only sells at the box office). Past ones today are just
  * closed and are not reported.
  */
-function offlineWarning(offline: OfflineFunction[], all: Venue[], allowed: Set<string> | undefined, date: string, c: ReadContext) {
+function offlineWarning(offline: OfflineFunction[], all: Venue[], allowed: Set<string> | undefined, date: string, c: ReadContext): number {
   const now = date === today() ? nowTime() : undefined;
   const byVenue = new Map<string, string[]>();
   for (const f of offline) {
@@ -218,6 +225,7 @@ function offlineWarning(offline: OfflineFunction[], all: Venue[], allowed: Set<s
     const shown = list.slice(0, 20).join(', ') + (list.length > 20 ? ` y ${list.length - 20} más` : '');
     c.warnings.push(`${venue} lista ${list.length} funciones sin venta en línea (sin identificador; se compran en taquilla): ${shown}.`);
   }
+  return byVenue.size;
 }
 
 /** The booking page publishes the exchange rate and whether the title is 3D. */

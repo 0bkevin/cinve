@@ -294,11 +294,14 @@ test('past dates are answered without reading Supercines', async () => {
   assert.equal(calls.length, 0);
 });
 
-test('a day with no published functions says so, and a venue without online concessions is empty', async () => {
+test('an empty schedule says whether Supercines has not published it yet, and a venue without online concessions is empty', async () => {
   const { service } = provider();
   const presale = await service.query('showtimes', { provider: 'supercines', movie_id: '3976', date: D });
   assert.equal(presale.status, 'empty');
   assert.ok(presale.warnings.some(w => /no publica funciones de ese título/.test(w)));
+  // A venue still without functions on a future date, while another has them.
+  const ahead = await service.query('showtimes', { provider: 'supercines', cinema_id: '7', movie_id: '3976', date: D1 });
+  assert.ok(ahead.warnings.some(w => /aún no publica funciones de ese título en esta sede para .*Vuelve a consultar más tarde/.test(w)));
   const candyless = await service.query('concessions', { provider: 'supercines', cinema_id: '4' });
   assert.equal(candyless.status, 'empty');
   assert.ok(candyless.warnings.some(w => /no ofrece caramelería en línea/.test(w)));
