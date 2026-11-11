@@ -9,8 +9,8 @@ Herramientas, respuestas y límites de Cinve. Para instalarlo, consulta el
 | -------------------- | -------------------------------------------------------------- |
 | `list_providers`     | Cobertura, capacidades y límites de cada cine.                 |
 | `get_auth_status`    | Estado de las cuentas de Cinex, Cines Unidos y Supercines.     |
-| `connect_account`    | Modo alojado: inicia la conexión de una cuenta de cine.        |
-| `disconnect_account` | Borra la sesión de un cine y sus enlaces pendientes.           |
+| `connect_account`    | Solo modo alojado: inicia la conexión de una cuenta de cine.   |
+| `disconnect_account` | Solo modo alojado: borra la sesión de un cine en Cinve.        |
 | `list_cities`        | Ciudades de un cine.                                           |
 | `list_cinemas`       | Sedes de un cine (Cines Unidos requiere `city`).               |
 | `list_movies`        | Películas en cartelera, con búsqueda opcional.                 |
@@ -19,8 +19,10 @@ Herramientas, respuestas y límites de Cinve. Para instalarlo, consulta el
 | `get_seats`          | Mapa de asientos de una función (no reserva).                  |
 | `get_concessions`    | Caramelería de una sede.                                       |
 
-Todas, salvo `list_providers` y `get_auth_status`, reciben `provider`:
-`cinex`, `cinesunidos`, `cinepic`, `supercines` o `grancine`.
+Las consultas reciben `provider`: `cinex`, `cinesunidos`, `cinepic`,
+`supercines` o `grancine`. `connect_account` y `disconnect_account` solo
+aceptan `cinex`, `cinesunidos` o `supercines`. En modo local, las cuentas se
+conectan con `npm run login` y se desconectan con `npm run logout`.
 
 Los listados admiten `query`, `offset` y `limit` (50 por defecto, 100 como
 máximo). Para paginar, repite la llamada con `next_offset` hasta que sea
@@ -42,10 +44,10 @@ consultar.
 
 | Cine         | Cómo consultar con pocas llamadas                                                                  |
 | ------------ | -------------------------------------------------------------------------------------------------- |
-| Cinex        | `get_showtimes` con `city` lee toda la ciudad; con `cinema_id`, una sede.                          |
-| Cines Unidos | `get_showtimes` con `city` lee toda la ciudad; añade `cinema_id` para una sede.                    |
-| Cinepic      | Dos sedes: `123300` (Candelaria) y `123301` (VVIP Lido).                                           |
-| Supercines   | Los precios requieren `movie_id` y la misma `date` usada en `get_showtimes` si no es hoy.         |
+| Cinex        | `get_showtimes` con `city` lee toda la ciudad; con `cinema_id`, una sede; con `movie_id`, todas las sedes de esa película. `list_movies` es el catálogo general, sin fecha ni sede. |
+| Cines Unidos | `list_cinemas`, `list_movies` y `get_showtimes` requieren `city`; añade `cinema_id` para una sede. |
+| Cinepic      | Dos sedes: `123300` (Candelaria) y `123301` (VVIP Lido). Todo salvo ciudades y sedes requiere `cinema_id`. |
+| Supercines   | `get_showtimes` requiere `cinema_id`, `city` o `movie_id`. Los precios requieren `movie_id` y la misma `date` de `get_showtimes` si no es hoy. |
 | Gran Cine    | `get_showtimes` sin sede ni ciudad lee todas sus salas.                                            |
 
 ## Respuestas
@@ -69,8 +71,8 @@ Cada respuesta incluye:
 | Cinex        | Ciudades, sedes, películas, funciones, precios, caramelería, asientos. | Precios, caramelería y asientos.  |
 | Cines Unidos | Ciudades, sedes, películas, funciones, precios, caramelería, asientos. | Precios y asientos.               |
 | Cinepic      | Dos sedes; películas, funciones, precios, caramelería, asientos.   | No.                                   |
-| Supercines   | Seis sedes; películas, funciones, precios, caramelería.            | No (opcional para tarifas propias).   |
-| Gran Cine    | Cine de autor (Trasnocho, Cine Ávila y otras salas); funciones.    | No.                                   |
+| Supercines   | Sedes activas; películas, funciones, precios, caramelería.         | No (opcional para tarifas propias).   |
+| Gran Cine    | Cine de autor (Paseo Las Mercedes, Cine Ávila y otras); funciones. | No.                                   |
 
 Limitaciones conocidas:
 
@@ -78,15 +80,16 @@ Limitaciones conocidas:
   servidores en la nube), Cinve usa su API pública de búsqueda. Puede ser más
   lenta y marcar resultados como `partial`.
 - **Supercines:** no publica mapas de asientos. La programación del día
-  siguiente se carga sede por sede durante el día. Las funciones de taquilla
-  (Playa Mar) aparecen solo en `warnings`. Las cuentas creadas con Google no se
-  pueden conectar.
+  siguiente se publica sede por sede durante el día. Las funciones que solo se
+  venden en taquilla no tienen identificador y aparecen en `warnings`. Las
+  cuentas creadas con Google no tienen contraseña y no se pueden conectar.
 - **Gran Cine:** solo programación, unos 20 días hacia adelante. Sin precios,
   caramelería ni asientos; sus `id` de función los calcula Cinve.
+- **Cinepic:** su API de caramelería puede devolver un catálogo vacío.
 - **Cinex:** el descubrimiento de sedes y las consultas por ciudad tienen plazos
   máximos; las sedes no leídas se indican en el resultado.
-- **Conversión a USD:** usa la tasa que publica cada cine y no incluye
-  impuestos.
+- **Precios:** Cinepic y Supercines calculan el USD con la tasa que publica el
+  cine. Ningún precio es el total final de compra.
 
 ## Mapas de asientos
 
@@ -105,18 +108,19 @@ Ten en cuenta:
 
 - `status=available` significa que se obtuvo el mapa, no que haya asientos
   libres.
-- Si `unknown` es mayor que cero o `availability_complete` es `false`, el mapa
-  es parcial. Cero asientos libres con desconocidos **no** significa agotado.
+- `availability_complete` es `true` solo si el mapa tiene asientos y ninguno es
+  desconocido. Si `unknown` es mayor que cero, el mapa es parcial: cero
+  asientos libres con desconocidos **no** significa agotado.
 - La consulta no selecciona ni reserva asientos.
 
 ## Comportamiento de red
 
 - Cada lectura tiene un plazo de 15 s y un máximo de 4 MiB.
 - Como máximo dos lecturas simultáneas por sitio web (y 32 en cola).
-- Las respuestas públicas se guardan en caché; sesiones y asientos, nunca.
-  `refresh=true` fuerza una lectura nueva.
-- Solo se hacen solicitudes GET a páginas y API permitidas, salvo el inicio de
-  sesión.
+- Las respuestas públicas se guardan en caché; las lecturas con cuenta y los
+  asientos, nunca. `refresh=true` fuerza una lectura nueva.
+- Solo se consultan páginas, API y formularios de una lista permitida, con
+  parámetros validados. Cinve nunca compra, reserva ni modifica cuentas.
 - El contenido externo se trata como datos, nunca como instrucciones.
 - Si el cliente envía `progressToken`, las consultas largas informan su avance.
 
