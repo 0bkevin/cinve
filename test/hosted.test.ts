@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { migrationSql } from '../src/migrations.js';
@@ -83,7 +84,11 @@ test('hosted MCP authenticates every request; account links are one-use and sess
   const invitation = await link(alice);
   const page = await fetch(f.origin + '/connect');
   assert.equal(page.headers.get('cache-control'), 'no-store'); assert.match(page.headers.get('content-security-policy')!, /frame-ancestors 'none'/);
-  assert.ok(!(await page.text()).includes(invitation));
+  const connectHtml = await page.text();
+  assert.ok(!connectHtml.includes(invitation));
+  const scriptUrl = connectHtml.match(/<script type="module" src="(\/assets\/js\/connect\.js\?v=[0-9a-f]{10})">/)![1];
+  const script = await fetch(f.origin + scriptUrl);
+  assert.match(script.headers.get('content-type')!, /text\/javascript/); assert.match(await script.text(), /\/connect\/exchange/);
   assert.equal((await f.post('/connect/exchange', invitation, {}, { Origin: 'https://evil.test' })).status, 403);
   const exchanged = await f.post('/connect/exchange', invitation);
   const { browser_token, app } = await exchanged.json() as { browser_token: string; app: unknown };
@@ -562,7 +567,7 @@ test('the cinema-login link names the assistant app the account will be attached
   const localLink = await f.post('/connect/exchange', await link(await f.client(localTokens.access_token)));
   // A forwarded link must not inherit trust from a loopback redirect anyone can register.
   assert.deepEqual((await localLink.json() as { app: unknown }).app, { name: 'Local CLI', publisher: null, verified: false });
-  const script = await (await fetch(f.origin + '/app.js')).text();
+  const script = readFileSync(new URL('../src/client/connect.ts', import.meta.url), 'utf8');
   assert.match(script, /const app = data\.app;/); assert.doesNotMatch(script, /innerHTML/);
 });
 
@@ -786,17 +791,15 @@ test('cleanup never orphans a connection whose request row is locked while it ru
 
 test('every HTML page allows only its own stylesheet, never inline styles', async t => {
   const f = await fixture(t);
-  const { createHash } = await import('node:crypto');
   const client_id = await register(f.origin);
-  const pages = [f.origin + '/', f.origin + '/connect', (await authorizationRequest(f.origin, client_id)).url.href, f.origin + '/oauth/authorize?client_id=unknown'];
+  const pages = [f.origin + '/', f.origin + '/connect', f.origin + '/instrucciones', (await authorizationRequest(f.origin, client_id)).url.href, f.origin + '/oauth/authorize?client_id=unknown'];
   const install = await fetch(f.origin + '/install', { headers: { Accept: 'text/html' } });
   for (const r of [...await Promise.all(pages.map(u => fetch(u))), install]) {
     const csp = r.headers.get('content-security-policy')!, html = await r.text();
     assert.match(r.headers.get('content-type')!, /text\/html/);
     assert.doesNotMatch(csp, /unsafe-inline/);
-    const styles = [...html.matchAll(/<style>([\s\S]*?)<\/style>/g)].map(m => m[1]);
-    assert.equal(styles.length, 1); assert.doesNotMatch(html, /\sstyle=/);
-    assert.ok(csp.includes(`style-src 'sha256-${createHash('sha256').update(styles[0]).digest('base64')}'`), r.url);
+    assert.match(csp, /style-src 'self'/, r.url);
+    assert.doesNotMatch(html, /<style[\s>]/); assert.doesNotMatch(html, /\sstyle=/);
     assert.match(csp, /frame-ancestors 'none'/);
   }
 });
@@ -818,15 +821,22 @@ test('public pages use the configured origin and serve local fonts under the aut
   const html = await home.text();
   assert.ok(html.includes(`Instala Cinve siguiendo ${f.origin}/install`));
   assert.ok(html.includes('lang="es"'));
-  assert.ok(html.includes(`property="og:image" content="${f.origin}/og.png?v=2"`));
+  const ogImage = html.match(/property="og:image" content="([^"]+)"/)![1];
+  assert.match(ogImage, new RegExp(`^${f.origin}/og\\.png\\?v=[0-9a-f]{10}$`));
   assert.ok(html.includes('name="twitter:card" content="summary_large_image"'));
-  const social = await fetch(f.origin + '/og.png?v=2');
+  const social = await fetch(ogImage);
   assert.equal(social.headers.get('content-type'), 'image/png');
   const png = Buffer.from(await social.arrayBuffer());
   assert.equal(png.readUInt32BE(16), 1200);
   assert.equal(png.readUInt32BE(20), 630);
   assert.ok(home.headers.get('content-security-policy')?.includes("font-src 'self'"));
-  const font = await fetch(f.origin + '/assets/inter-latin.woff2');
+  const policy = home.headers.get('content-security-policy')!;
+  assert.match(policy, /style-src 'self'/); assert.doesNotMatch(policy, /unsafe-inline/);
+  const stylesheet = html.match(/<link rel="stylesheet" href="(\/assets\/basecoat\.css\?v=[0-9a-f]{10})">/)![1];
+  const compressed = await fetch(f.origin + stylesheet, { headers: { 'Accept-Encoding': 'br' } });
+  assert.match(compressed.headers.get('content-type')!, /text\/css/); assert.equal(compressed.headers.get('vary'), 'Accept-Encoding');
+  assert.ok((await compressed.text()).includes('.btn'));
+  const font = await fetch(f.origin + '/assets/instrument-sans.woff2');
   assert.equal(font.headers.get('content-type'), 'font/woff2');
   assert.equal(Buffer.from(await font.arrayBuffer()).subarray(0, 4).toString(), 'wOF2');
   const browser = await fetch(f.origin + '/install', { headers: { Accept: 'text/html' } });
@@ -946,6 +956,30 @@ test('clients can identify with a Client ID Metadata Document instead of registe
   const unlisted = new URL(request.url); unlisted.searchParams.set('redirect_uri', 'https://evil.example/callback');
   const response = await fetch(unlisted, { redirect: 'manual' });
   assert.equal(response.status, 400); assert.equal(response.headers.get('location'), null);
+});
+
+test('crawlers get robots.txt, a sitemap of the public pages and llms.txt; browsers get an HTML 404', async t => {
+  const f = await fixture(t);
+  const robots = await fetch(f.origin + '/robots.txt');
+  assert.equal(robots.status, 200); const rules = await robots.text();
+  assert.match(rules, /Disallow: \/connect\//); assert.doesNotMatch(rules, /Disallow: \/connect\n/);
+  assert.match(rules, new RegExp(`Sitemap: ${f.origin}/sitemap.xml`));
+  const map = await (await fetch(f.origin + '/sitemap.xml')).text();
+  for (const path of ['/', '/install', '/instrucciones']) assert.ok(map.includes(`<loc>${f.origin}${path}</loc>`), path);
+  assert.doesNotMatch(map, /connect|oauth/);
+  assert.match(await (await fetch(f.origin + '/llms.txt')).text(), /^# Cinve/);
+  const page = await fetch(f.origin + '/nope', { headers: { Accept: 'text/html' } });
+  assert.equal(page.status, 404); assert.match(await page.text(), /noindex/);
+  const api = await fetch(f.origin + '/nope');
+  assert.equal(api.status, 404); assert.match(api.headers.get('content-type')!, /json/);
+});
+
+test('public pages may be cached briefly by the CDN; the agent guide and private pages may not', async t => {
+  const f = await fixture(t);
+  const html = { headers: { Accept: 'text/html' } };
+  for (const path of ['/', '/instrucciones', '/install']) assert.match((await fetch(f.origin + path, html)).headers.get('cache-control')!, /s-maxage=300/, path);
+  assert.equal((await fetch(f.origin + '/install')).headers.get('cache-control'), 'no-store');
+  assert.equal((await fetch(f.origin + '/connect', html)).headers.get('cache-control'), 'no-store');
 });
 
 test('rate limits group an IPv6 subscriber by /64 and keep IPv4 per address', async () => {

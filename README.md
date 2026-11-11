@@ -181,5 +181,9 @@ confirmar directamente con el cine cualquier precio, disponibilidad o compra.
 
 ## Licencia
 
-El código de Cinve se distribuye bajo la [licencia MIT](LICENSE). La fuente Inter
-incluida conserva su propia [licencia SIL Open Font](src/assets/Inter-LICENSE.txt).
+El código de Cinve se distribuye bajo la [licencia MIT](LICENSE). Las páginas web
+incluyen las fuentes Bricolage Grotesque e Instrument Sans, cada una con su
+[licencia SIL Open Font](src/assets/BricolageGrotesque-LICENSE.txt)
+([Instrument Sans](src/assets/InstrumentSans-LICENSE.txt)), y la hoja de estilos
+precompilada de [Basecoat](https://basecoatui.com), que conserva su propia
+[licencia MIT](src/assets/Basecoat-LICENSE.md).

@@ -1,4 +1,4 @@
-import { landingPage, servePublicAsset, setSecurityHeaders } from './public-web.js';
+import { instructionsPage, landingPage, notFoundPage, publicPageCache, servePublicAsset, setSecurityHeaders } from './public-web.js';
 import { hostedAuthInstructions } from './hosted-auth-guidance.js';
 import { HostedOAuth, accessTokenFormat } from './oauth.js';
 import { LocalLimiter, LocalSet } from './local-limit.js';
@@ -6,6 +6,7 @@ import { ClientMetadataCache } from './client-metadata.js';
 import { addressBytes } from './client-metadata.js';
 import type { ClientMetadataFetcher } from './client-metadata.js';
 import { serveInstall } from './install.js';
+import { serveDiscovery } from './discovery.js';
 import { createServer as nodeServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Pool } from 'pg';
@@ -24,7 +25,7 @@ import type { CallOptions } from './http.js';
 import { ConnectionLinks, cinemaUnavailableMessage, ipv6Block, signInFloor, signInRefusalMessage } from './hosted-links.js';
 import type { SignInSubject } from './hosted-links.js';
 import { EncryptedSessionStore, HostedUsers, digest } from './hosted-store.js';
-import { loginPage, loginScript } from './auth-web.js';
+import { loginPage } from './auth-web.js';
 
 class AnonymousSessions extends SessionStore {
   constructor(private readonly origin: string) { super(); }
@@ -154,17 +155,15 @@ export async function createHostedApp(options: {
     setSecurityHeaders(res, publicUrl.protocol === 'https:');
     const send = (status: number, data: unknown) => { if (!res.headersSent) { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(data)); } };
     try {
-      if (servePublicAsset(req, res) || serveInstall(req, res, origin)) return;
+      if (servePublicAsset(req, res) || serveInstall(req, res, origin) || serveDiscovery(req, res, origin)) return;
       if (req.method === 'GET' && req.url === '/health') { send(200, { status: 'ok' }); return; }
       if (req.headers.host !== publicUrl.host) throw new HttpError(403, 'Origen no permitido.');
       // Static pages cost no database work, so they are served before any
       // limit: a user behind a shared address can always open the link page.
       const pagePath = req.url?.split('?')[0];
-      if (['GET', 'HEAD'].includes(req.method ?? '') && (pagePath === '/connect' || pagePath === '/')) {
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(req.method === 'HEAD' ? undefined : pagePath === '/' ? landingPage(origin) : loginPage()); return;
-      }
-      if (req.method === 'GET' && req.url === '/app.js') {
-        res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8' }); res.end(loginScript); return;
+      if (['GET', 'HEAD'].includes(req.method ?? '') && (pagePath === '/connect' || pagePath === '/' || pagePath === '/instrucciones')) {
+        if (pagePath !== '/connect') res.setHeader('Cache-Control', publicPageCache);
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(req.method === 'HEAD' ? undefined : pagePath === '/' ? landingPage(origin) : pagePath === '/instrucciones' ? instructionsPage(origin) : loginPage()); return;
       }
       const forwarded = options.trustedVercelProxy ? req.headers['x-vercel-forwarded-for'] : undefined;
       const ip = rateLimitNetwork(typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : req.socket.remoteAddress ?? 'unknown');
@@ -329,6 +328,10 @@ export async function createHostedApp(options: {
         send(200, { connected: true, profile_update_requested: profile });
       } finally { data.username = ''; data.password = ''; if (claimed) await links.release(token, refund); }
     } catch (error) {
+      // People following a broken link get a page; API clients keep JSON.
+      if (error instanceof HttpError && error.status === 404 && ['GET', 'HEAD'].includes(req.method ?? '') && req.headers.accept?.includes('text/html') && !res.headersSent) {
+        res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(req.method === 'HEAD' ? undefined : notFoundPage()); return;
+      }
       send(error instanceof HttpError ? error.status : 500, { error: error instanceof HttpError ? error.message : 'No se pudo completar la solicitud.' });
     }
   };

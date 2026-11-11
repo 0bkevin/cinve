@@ -1,4 +1,4 @@
-import { authorizationPage, authorizationErrorPage, styleSource } from './public-web.js';
+import { authorizationPage, authorizationErrorPage } from './public-web.js';
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Pool, PoolClient } from 'pg';
@@ -170,7 +170,7 @@ export class HostedOAuth {
     res.setHeader('Referrer-Policy', 'same-origin');
     // Chromium also checks form-action against the POST's redirect target.
     // Only allow the already-validated callback origin, never arbitrary sites.
-    res.setHeader('Content-Security-Policy', `default-src 'none'; style-src ${styleSource}; font-src 'self'; img-src 'self'; form-action 'self' ${new URL(redirect).origin}; frame-ancestors 'none'; base-uri 'none'`);
+    res.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; form-action 'self' ${new URL(redirect).origin}; frame-ancestors 'none'; base-uri 'none'`);
     res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' });
     const publisher = isClientIdUrl(app.id) ? new URL(app.id).hostname : undefined;
     res.end(authorizationPage({ app: app.name, destination: new URL(redirect).origin, id, csrf, publisher,
