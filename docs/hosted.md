@@ -117,6 +117,13 @@ URL), `client_name` y `redirect_uris`. Los metadatos del servidor lo anuncian co
   lo declara el propio cliente.
 
 Un documento inválido o inaccesible nunca redirige al cliente.
+
+La aprobación muestra una advertencia visible cuando Cinve no puede respaldar el
+destino: solo se reconocen las redirecciones de loopback (el código se queda en
+el equipo del usuario) y las que están en el sitio que publica el documento o en
+sus subdominios. Cualquier cliente registrado dinámicamente con una redirección
+web recibe la advertencia, porque su nombre y su destino los elige quien lo
+registra.
 - `POST /oauth/token`: intercambia códigos y renueva tokens.
 - `POST /oauth/revoke`: revoca toda la conexión y elimina sus sesiones de cine.
 

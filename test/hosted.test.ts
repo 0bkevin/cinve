@@ -47,6 +47,7 @@ async function fixture(t: { after(fn: () => Promise<void>): void }, authenticate
 const metadataUrl = 'https://assistant.example/oauth/client.json';
 const metadataDocuments: Record<string, unknown> = {
   [metadataUrl]: { client_id: metadataUrl, client_name: 'Metadata assistant', redirect_uris: ['https://assistant.example/callback'], token_endpoint_auth_method: 'none' },
+  'https://assistant.example/oauth/elsewhere.json': { client_id: 'https://assistant.example/oauth/elsewhere.json', client_name: 'Claude', redirect_uris: ['https://elsewhere.example/callback'], token_endpoint_auth_method: 'none' },
   'https://assistant.example/oauth/wrong-id.json': { client_id: 'https://other.example/client.json', redirect_uris: ['https://assistant.example/callback'] },
   'https://assistant.example/oauth/secret.json': { client_id: 'https://assistant.example/oauth/secret.json', client_secret: 'x', redirect_uris: ['https://assistant.example/callback'] },
   'https://assistant.example/oauth/confidential.json': { client_id: 'https://assistant.example/oauth/confidential.json', token_endpoint_auth_methods_supported: ['private_key_jwt'], redirect_uris: ['https://assistant.example/callback'] },
@@ -501,6 +502,33 @@ test('the install guide is served with safe HTTP methods and no downloadable hel
   assert.equal((await fetch(f.origin + '/codex-client.mjs')).status, 404);
 });
 
+test('consent warns when Cinve cannot vouch for the destination', async t => {
+  const f = await fixture(t, undefined, undefined, { clientMetadata });
+  const page = async (client_id: string, redirect?: string) => {
+    const r = await authorizationRequest(f.origin, client_id);
+    if (redirect) r.url.searchParams.set('redirect_uri', redirect);
+    const response = await fetch(r.url); assert.equal(response.status, 200); return response.text();
+  };
+  // A registered client with a web redirect can claim any name and destination.
+  assert.match(await page(await register(f.origin)), /class="warning" role="alert"><strong>Cinve no puede verificar esta aplicación/);
+  // A metadata document whose redirect lives on another site.
+  const html = await page('https://assistant.example/oauth/elsewhere.json', 'https://elsewhere.example/callback');
+  assert.match(html, /no puede verificar/); assert.match(html, /https:\/\/elsewhere\.example/);
+  // Loopback keeps the code on the user's own machine.
+  const local = await fetch(f.origin + '/oauth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ client_name: 'Local CLI', redirect_uris: ['http://127.0.0.1:8080/callback'] }) });
+  assert.doesNotMatch(await page((await local.json() as { client_id: string }).client_id, 'http://127.0.0.1:8080/callback'), /no puede verificar/);
+});
+
+test('only loopback or the publishing site and its subdomains are recognized destinations', async () => {
+  const { recognizedDestination } = await import('../src/oauth.js');
+  for (const r of ['http://127.0.0.1:9/cb', 'http://localhost/cb', 'http://[::1]:9/cb']) assert.ok(recognizedDestination(r), r);
+  assert.ok(recognizedDestination('https://claude.ai/cb', 'claude.ai'));
+  assert.ok(recognizedDestination('https://app.claude.ai/cb', 'claude.ai'));
+  for (const r of ['https://evilclaude.ai/cb', 'https://claude.ai.evil.example/cb', 'https://other.example/cb']) assert.ok(!recognizedDestination(r, 'claude.ai'), r);
+  assert.ok(!recognizedDestination('https://claude.ai/cb'), 'registered clients have no publisher to match');
+});
+
 test('every HTML page allows only its own stylesheet, never inline styles', async t => {
   const f = await fixture(t);
   const { createHash } = await import('node:crypto');
@@ -641,6 +669,7 @@ test('clients can identify with a Client ID Metadata Document instead of registe
   const request = await authorizationRequest(f.origin, metadataUrl);
   const page = await (await fetch(request.url)).text();
   assert.match(page, /Metadata assistant/); assert.match(page, /documento publicado en <strong>assistant\.example<\/strong>/);
+  assert.doesNotMatch(page, /no puede verificar/, 'a redirect on the publishing site is recognized');
   const callback = await approve(f.origin, request.url);
   const exchange = { grant_type: 'authorization_code', client_id: metadataUrl, code: callback.searchParams.get('code')!,
     code_verifier: request.verifier, resource: f.origin + '/mcp', redirect_uri: request.params.redirect_uri };

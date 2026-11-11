@@ -44,6 +44,20 @@ async function revoke(client: PoolClient, user: string) {
   await client.query('DELETE FROM cinev_sessions WHERE user_id=$1', [user]);
 }
 
+/**
+ * A destination Cinve can vouch for: a loopback redirect keeps the code on the
+ * user's own machine, and a metadata-document client's redirect on the site
+ * that published the document is controlled by that site. Anything else (any
+ * registered client with a web redirect) gets a visible warning on consent.
+ */
+export function recognizedDestination(redirect: string, publisher?: string) {
+  const host = new URL(redirect).hostname.toLowerCase();
+  if (['localhost', '127.0.0.1', '[::1]'].includes(host)) return true;
+  if (!publisher) return false;
+  const site = publisher.toLowerCase();
+  return host === site || host.endsWith('.' + site);
+}
+
 /** Self-service, isolated connections. Approval creates a NEW empty principal;
  * it never grants access to an existing cinema session or browser identity. */
 export class HostedOAuth {
@@ -201,7 +215,8 @@ export class HostedOAuth {
         // Only allow the already-validated callback origin, never arbitrary sites.
         res.setHeader('Content-Security-Policy', `default-src 'none'; style-src ${styleSource}; font-src 'self'; img-src 'self'; form-action 'self' ${new URL(redirect).origin}; frame-ancestors 'none'; base-uri 'none'`);
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(authorizationPage(app.name, new URL(redirect).origin, id, csrf, isClientIdUrl(clientId) ? new URL(clientId).hostname : undefined));
+        const publisher = isClientIdUrl(clientId) ? new URL(clientId).hostname : undefined;
+        res.end(authorizationPage(app.name, new URL(redirect).origin, id, csrf, publisher, recognizedDestination(redirect, publisher)));
         return true;
       }
       if (path === '/oauth/authorize' && req.method === 'POST') {
