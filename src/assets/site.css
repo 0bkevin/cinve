@@ -335,6 +335,10 @@ details.more[data-closing] > summary .chevron { transform: none; }
 
 @media (max-width: 640px) {
   .board tbody { grid-template-columns: minmax(0, 1fr); }
+  /* .manual raises specificity above the base .snippet rules, which come later in the file. */
+  .manual .snippet { flex-direction: column; align-items: stretch; gap: 0; padding: 6px 6px 6px 14px; }
+  .manual .snippet pre { font-size: 13px; padding: 8px 0 4px; }
+  .manual .snippet .btn { align-self: flex-end; }
   .wrap { width: calc(100% - 32px); }
   .site-nav a:not(.nav-cta) { display: none; }
   .footer-links { display: grid; grid-template-columns: auto auto; justify-content: start; gap: 40px; }
@@ -377,7 +381,8 @@ button:disabled, .btn:disabled { cursor: not-allowed; }
 /* Instructions page: each text exactly as the assistant receives it. */
 .prompt { margin-top: 36px; }
 .prompt h2 { margin: 0 0 12px; font: 600 13px/1 var(--font-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--dust); }
-.prompt pre { margin: 0; padding: 20px 22px; background: var(--surface); border-radius: 14px; font: 400 14px/1.65 var(--font-sans); color: var(--foreground); white-space: pre-wrap; overflow-wrap: anywhere; }
+.prompt pre { margin: 0; padding: 20px 22px; background: var(--surface); border-radius: 14px; font: 400 14px/1.65 var(--font-sans); color: var(--foreground); white-space: pre-wrap; overflow-wrap: break-word; }
+.snippet pre span { white-space: nowrap; }
 .more .prompt:first-of-type { margin-top: 20px; }
 
 /* Consent page */
@@ -388,3 +393,15 @@ button:disabled, .btn:disabled { cursor: not-allowed; }
 .select-wrap { position: relative; }
 .select-wrap .select { width: 100%; background-image: none; padding-right: 36px; }
 .select-wrap .chevron { position: absolute; right: 12px; top: 50%; width: 16px; height: 16px; translate: 0 -50%; pointer-events: none; color: var(--muted-foreground); }
+
+/* Install page: per-app manual steps, no boxes around them. */
+.manual { margin-top: 56px; }
+.manual h2 { margin: 0 0 8px; font: 700 26px/1.15 var(--font-display); letter-spacing: -0.03em; }
+.manual-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 28px; margin-top: 24px; }
+.manual-list h3 { margin: 0 0 4px; font: 600 17px/1.3 var(--font-sans); color: var(--foreground); }
+.manual-list p { margin: 0 0 10px; font-size: 15px; }
+.manual-list code { font-size: 14px; color: var(--foreground); }
+.snippet { display: flex; align-items: center; gap: 8px; padding: 4px 4px 4px 16px; background: var(--surface); border-radius: 12px; }
+.snippet pre { flex: 1; min-width: 0; margin: 0; padding: 10px 0; font: 500 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--foreground); white-space: pre-wrap; overflow-wrap: break-word; }
+.snippet pre span { white-space: nowrap; }
+.snippet .btn { flex-shrink: 0; }

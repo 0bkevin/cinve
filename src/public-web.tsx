@@ -26,7 +26,7 @@ function InstallMessage({ origin }: { origin: string }) {
   return <>
     <div class="install">
       <p id="install-message">Instala Cinve siguiendo {origin}/install</p>
-      <Button id="copy-install" hidden>{icons.copy()}<span>Copiar</span></Button>
+      <Button id="copy-install" data-copy="install-message" data-feedback="copy-feedback" hidden>{icons.copy()}<span>Copiar</span></Button>
     </div>
     <p id="copy-feedback" class="note" role="status" aria-live="polite"></p>
   </>;
@@ -203,16 +203,44 @@ export function landingPage(origin: string) {
   </>, { index: true, canonical: origin + '/', script: '/assets/js/site.js' });
 }
 
+/** A command or setting to copy, with its own copy button. */
+function Snippet({ id, children }: { id: string; children: string }) {
+  return <div class="snippet">
+    {/* Each word is unbreakable, so long commands wrap only between words. */}
+    <pre id={id}>{children.split('\n').map((line, i) => <>{i > 0 && '\n'}{line.split(' ').map((word, j) => <>{j > 0 && ' '}<span>{word}</span></>)}</>)}</pre>
+    <Button variant="ghost" size="sm" data-copy={id} aria-label="Copiar" hidden>{icons.copy()}<span>Copiar</span></Button>
+  </div>;
+}
+
 export function installationPage(origin: string) {
+  const endpoint = `${origin}/mcp`;
+  // Commands match each CLI's own help; Codex is configured in config.toml
+  // because some versions of `codex mcp add` start an optional login at once.
+  const manual: [string, JSX.Element, string][] = [
+    ['Claude Code', <>Ejecuta en tu terminal:</>, `claude mcp add --transport http cinve ${endpoint}`],
+    ['Codex', <>Añade esto a <code>~/.codex/config.toml</code>:</>, `[mcp_servers.cinve]\nurl = "${endpoint}"`],
+    ['OpenCode', <>Ejecuta en tu terminal:</>, `opencode mcp add cinve --url ${endpoint}`],
+  ];
   return page('Cómo usar Cinve', <>
     <h1>Cinve en tu asistente.</h1>
-    <p>Envía este mensaje a tu asistente para que te ayude a añadir Cinve:</p>
+    <p class="lead">Envía este mensaje a tu asistente y él se encarga del resto:</p>
     <InstallMessage origin={origin} />
-    <Card title="Si lo añades a mano" description={<>En las conexiones de tu asistente, añade un servidor MCP llamado <strong>Cinve</strong> con esta dirección:</>}>
-      <code class="code">{origin}/mcp</code>
-      <p class="note">Elige HTTP si te pide el tipo de conexión. Tu asistente debe admitir servidores MCP remotos.</p>
-    </Card>
-    <p>Después, pregunta qué películas hay en tu ciudad. Para consultar la cartelera no necesitas una cuenta. Si una consulta requiere conectarte al cine, tu asistente te dará un enlace privado.</p>
+    <section class="manual" aria-labelledby="mano">
+      <h2 id="mano">Si prefieres añadirlo a mano</h2>
+      <ol class="manual-list">
+        {manual.map(([app, how, command], i) => <li>
+          <h3>{app}</h3>
+          <p>{how}</p>
+          <Snippet id={`cmd-${i}`}>{command}</Snippet>
+        </li>)}
+        <li>
+          <h3>Otra aplicación</h3>
+          <p>Busca en sus ajustes la opción para añadir un servidor MCP remoto o un conector personalizado. Ponle de nombre <strong>cinve</strong>, elige HTTP si te pide el tipo y usa esta dirección:</p>
+          <Snippet id="cmd-url">{endpoint}</Snippet>
+        </li>
+      </ol>
+      <p class="note">Reinicia tu asistente si no ve Cinve enseguida. Luego pregúntale qué películas hay en tu ciudad: la cartelera no necesita cuenta, y si una consulta la necesita, te dará un enlace privado.</p>
+    </section>
     <p class="note"><a href="/instrucciones">Ver qué instrucciones recibe tu asistente</a></p>
   </>, { compact: true, script: '/assets/js/site.js' });
 }

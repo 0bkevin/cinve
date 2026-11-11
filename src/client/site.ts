@@ -1,34 +1,35 @@
-// Copy button for the install message on the landing and install pages.
-// The button stays hidden without JavaScript; the message remains selectable.
-const button = document.getElementById('copy-install') as HTMLButtonElement | null;
-const message = document.getElementById('install-message');
-const feedback = document.getElementById('copy-feedback');
+// Copy buttons: each names the element it copies in data-copy. Buttons stay
+// hidden without JavaScript; the text remains selectable.
 
-if (button && message && feedback) {
+// Some browsers and embedded previews block the async clipboard API, so fall
+// back to selecting the element and copying the selection.
+async function copyFrom(source: HTMLElement) {
+  try { await navigator.clipboard.writeText(source.textContent ?? ''); return; } catch {}
+  const selection = getSelection()!;
+  const range = document.createRange();
+  range.selectNodeContents(source);
+  selection.removeAllRanges(); selection.addRange(range);
+  const copied = document.execCommand('copy');
+  selection.removeAllRanges();
+  if (!copied) throw new Error('copy failed');
+}
+
+for (const button of document.querySelectorAll<HTMLButtonElement>('button[data-copy]')) {
+  const source = document.getElementById(button.dataset.copy!);
+  if (!source) continue;
   const label = button.querySelector('span')!;
+  const feedback = button.dataset.feedback ? document.getElementById(button.dataset.feedback) : null;
   let reset: number | undefined;
   button.hidden = false;
-  // Some browsers and embedded previews block the async clipboard API, so
-  // fall back to selecting the message and copying the selection.
-  const copy = async (text: string) => {
-    try { await navigator.clipboard.writeText(text); return; } catch {}
-    const selection = getSelection()!;
-    const range = document.createRange();
-    range.selectNodeContents(message);
-    selection.removeAllRanges(); selection.addRange(range);
-    const copied = document.execCommand('copy');
-    selection.removeAllRanges();
-    if (!copied) throw new Error('copy failed');
-  };
   button.addEventListener('click', async () => {
     try {
-      await copy(message.textContent ?? '');
+      await copyFrom(source);
       label.textContent = 'Copiado';
-      feedback.textContent = 'Mensaje copiado. Pégalo en tu asistente.';
+      if (feedback) feedback.textContent = 'Mensaje copiado. Pégalo en tu asistente.';
       clearTimeout(reset);
       reset = window.setTimeout(() => { label.textContent = 'Copiar'; }, 2500);
     } catch {
-      feedback.textContent = 'Selecciona el mensaje y cópialo para enviarlo a tu asistente.';
+      if (feedback) feedback.textContent = 'Selecciona el texto y cópialo.';
     }
   });
 }
