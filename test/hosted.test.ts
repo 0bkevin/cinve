@@ -975,6 +975,11 @@ test('crawlers get robots.txt, a sitemap of the public pages and llms.txt; brows
   for (const path of ['/', '/install', '/instrucciones']) assert.ok(map.includes(`<loc>${f.origin}${path}</loc>`), path);
   assert.doesNotMatch(map, /connect|oauth/);
   assert.match(await (await fetch(f.origin + '/llms.txt')).text(), /^# Cinve/);
+  const security = await (await fetch(f.origin + '/.well-known/security.txt')).text();
+  assert.match(security, /^Contact: https:\/\/github\.com\/0bkevin\/cinve\/security\/advisories\/new$/m);
+  assert.match(security, new RegExp(`^Canonical: ${f.origin}/\\.well-known/security\\.txt$`, 'm'));
+  const expires = Date.parse(security.match(/^Expires: (\S+)$/m)![1]);
+  assert.ok(expires > Date.now() && expires < Date.now() + 365 * 86400000);
   const page = await fetch(f.origin + '/nope', { headers: { Accept: 'text/html' } });
   assert.equal(page.status, 404); assert.match(await page.text(), /noindex/);
   const api = await fetch(f.origin + '/nope');
