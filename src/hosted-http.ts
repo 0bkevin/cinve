@@ -23,4 +23,10 @@ export class HostedHttpClient extends HttpClient {
   override get(url: string, ttl = 120000, refresh = false) {
     return this.publicClient.get(url, ttl, refresh);
   }
+
+  // Public form reads (Supercines) share the cache, the anonymous visitor
+  // session and the per-origin request limit with every other hosted call.
+  override post(url: string, fields: Record<string, string>, ttl = 120000, refresh = false) {
+    return this.publicClient.post(url, fields, ttl, refresh);
+  }
 }
