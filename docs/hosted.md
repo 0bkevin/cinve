@@ -59,17 +59,16 @@ conversación ya abierta puede requerir recargar sus conexiones después del
 login. `get_auth_status.connection.client_authorized` permite distinguir este
 caso de una cuenta de cine todavía no conectada.
 
-Si después la conversación sigue anónima, Cinve puede proponer un auxiliar
-local, `/codex-client.mjs`, servido desde el mismo origen. El asistente lo
-descarga, lo inspecciona y lo ejecuta con `node` para conectar la cuenta del
-cine y continuar la consulta original con las credenciales OAuth que Codex ya
-guardó, sin leerlas ni mostrarlas.
+Si después la conversación sigue anónima, el asistente usa la acción nativa del
+cliente para recargar las conexiones MCP (en Codex, `config/mcpServer/reload`)
+o pide al usuario recargarlas o abrir una conversación nueva.
 
-Cinve exige consentimiento informado: el asistente nunca ejecuta comandos ni
-descarga o ejecuta código en el equipo del usuario sin explicarle antes qué
-hará y para qué, y obtener su aprobación explícita. Debe ofrecer mostrar el
-contenido del auxiliar. Si el usuario no aprueba, el asistente no lo hace y usa
-el control de conexión del propio cliente.
+Cinve exige consentimiento informado: el asistente nunca ejecuta comandos en el
+equipo del usuario sin explicarle antes qué hará y para qué, y obtener su
+aprobación explícita. Si el usuario no aprueba, el asistente no lo hace y usa el
+control de conexión del propio cliente. El flujo alojado nunca pide descargar ni
+ejecutar código: así, un servidor comprometido o suplantado no puede convertir
+sus instrucciones en ejecución de código en el equipo del usuario.
 
 No ejecutes este flujo en una terminal remota ajena al usuario y no sustituyas
 el flujo alojado con `npm run login`: ese comando pertenece exclusivamente al
