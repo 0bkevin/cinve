@@ -1,7 +1,7 @@
 import { h, Fragment, renderDocument } from './web/jsx.js';
 import { Page, type PageOptions } from './web/layout.js';
 import { Alert, Button, Card, LinkButton, icons } from './web/ui.js';
-import { coverage as coverageCities, coverageDate } from './web/coverage.js';
+import { coverage as coverageCities } from './web/coverage.js';
 
 export { escapeHtml } from './web/jsx.js';
 export { servePublicAsset } from './web/assets.js';
@@ -89,7 +89,6 @@ const safeguards: [JSX.Element, string, string][] = [
 // Where each chain operates, from the snapshot in src/web/coverage.ts.
 const chains = [['cinex', 'Cinex'], ['cinesunidos', 'Cines Unidos'], ['cinepic', 'Cinepic']] as const;
 const coverageCount = (n: number) => n === 1 ? '1 ciudad' : `${n} ciudades`;
-const formatDate = (iso: string) => new Intl.DateTimeFormat('es-VE', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${iso}T00:00:00Z`));
 
 // Answers must stay true to the service; see docs/hosted.md and src/install.ts.
 const faq: [string, string][] = [
@@ -109,7 +108,6 @@ export function landingPage(origin: string) {
       <figure class="house">
         <SeatMap />
         <figcaption class="legend">
-          <span class="tag">Ejemplo</span>
           <span><i data-state="free"></i>Libre</span>
           <span><i data-state="taken"></i>Ocupado</span>
           <span><i data-state="unknown"></i>Sin confirmar</span>
@@ -145,7 +143,6 @@ export function landingPage(origin: string) {
     <section class="section" id="ciudades" aria-labelledby="ciudades-titulo">
       <header class="section-head">
         <h2 id="ciudades-titulo">Dónde funciona</h2>
-        <p>Las ciudades que cada cine publica en su web, al {formatDate(coverageDate)}. Tu asistente consulta la lista actual cuando le preguntas.</p>
       </header>
       <div class="cities">
         {chains.map(([key, name]) => <div>
@@ -196,7 +193,7 @@ export function landingPage(origin: string) {
     </section>
     <section class="closing" aria-labelledby="abierto-titulo">
       <h2 id="abierto-titulo">Gratis, independiente y de código abierto.</h2>
-      <p>Cinve no está afiliado a Cinex, Cines Unidos ni Cinepic, y solo consulta lo que cada cine publica. Cualquiera puede revisar cómo funciona o ayudar a mejorarlo.</p>
+      <p>Cinve es un proyecto independiente. Solo usa la información que los cines ya publican y, si conectas tu cuenta, lo que esa cuenta te permite ver. Cualquiera puede revisar cómo funciona o ayudar a mejorarlo.</p>
       <div class="closing-links">
         <LinkButton href="https://github.com/0bkevin/cinve" variant="outline">{icons.github()}Ver el código</LinkButton>
         <LinkButton href="https://github.com/0bkevin/cinve/issues/new/choose" variant="ghost">Reportar un problema</LinkButton>
