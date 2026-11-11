@@ -29,11 +29,13 @@ const palette: Record<SeatStatus, { fill: string; stroke?: string; dash?: boolea
   unknown: { fill: ink.night, stroke: ink.dust, text: ink.cream, name: 'Desconocido' },
 };
 /** Row pitch and seat box: seats keep the site's 1 : 0.86 proportion. */
-const CELL = 30, SEAT = 26, SEAT_H = 22, LABEL = 30, PAD = 28;
+const CELL = 30, SEAT = 26, SEAT_H = 22, LABEL = 30, MAX_LABEL = 96, PAD = 28;
 const fonts = { text: "'Instrument Sans', system-ui, sans-serif", display: "'Bricolage Grotesque', 'Instrument Sans', system-ui, sans-serif" };
 
 /** Characters XML 1.0 forbids (controls, lone surrogates, U+FFFE/FFFF); resvg and SVG viewers reject the whole document for one of them. */
 const invalidXml = /[\u0000-\u0008\u000B\u000C\u000E-\u001F￾￿]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+/** Emoji and their joiners and selectors: no bundled font draws them. */
+const noGlyph = /[\p{Extended_Pictographic}\u200D\uFE0E\uFE0F]|\p{Regional_Indicator}|[\u{1F3FB}-\u{1F3FF}]/gu;
 const escape = (value: string) => value.replace(invalidXml, '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
 /** Thrown before drawing a map whose image would exceed MAX_MAP_HEIGHT; the data answer is unaffected. */
 export class MapTooLarge extends Error {}
@@ -84,26 +86,36 @@ export function renderSeatMapSvg(seats: MapSeat[], layout: MapLayout, header: Ma
   const rowsHeight = groups.reduce((sum, g) => sum + g.rows * CELL + 14 + (areas.length > 1 ? 22 : 0), 0);
   if (rowsHeight > MAX_MAP_HEIGHT) throw new MapTooLarge('El mapa es demasiado grande para dibujarlo como imagen.');
   const gridWidth = cols * CELL;
-  const width = Math.max(PAD * 2 + LABEL * 2 + gridWidth, 560);
+  // Row names sit in a column on each side, as wide as the longest one (within reason); longer names are cut.
+  const rowNames = [...new Set(seats.map(s => s.row))];
+  const label = Math.min(MAX_LABEL, Math.max(LABEL, ...rowNames.map(name => Math.ceil(textWidth(name, 12, 'strong') + 14))));
+  const width = Math.max(PAD * 2 + label * 2 + gridWidth, 560);
   const left = (width - gridWidth) / 2, right = width - PAD;
   const counts: Record<SeatStatus, number> = { available: 0, occupied: 0, unavailable: 0, unknown: 0 };
   for (const s of seats) counts[s.status]++;
   const out: string[] = [];
   let y = PAD;
   const fit = (value: string, size: number, room: number, face: Face = 'text') => {
-    value = value.replace(invalidXml, '');
+    // The bundled Latin fonts have no emoji, which would draw as empty boxes.
+    value = value.replace(invalidXml, '').replace(noGlyph, '').replace(/\s{2,}/g, ' ').trim();
     if (textWidth(value, size, face) <= room) return value;
     const chars = Array.from(value);
     while (chars.length > 1 && textWidth(`${chars.join('').trimEnd()}…`, size, face) > room) chars.pop();
     return `${chars.join('').trimEnd()}…`;
   };
+  // Every seat number shares one size, set by the widest number in the room (11 down to 7), so a row reads evenly;
+  // an unusually long number is cut, and the seat's title keeps the full label. Each distinct number is fitted once.
+  const numbers = new Map<string, string>();
+  for (const s of seats) numbers.set(seatNumber(s), '');
+  const numberSize = round(Math.max(7, Math.min(11, (SEAT - 8) / Math.max(...[...numbers.keys()].map(n => textWidth(n, 1, 'strong')), 0.001))));
+  for (const n of numbers.keys()) numbers.set(n, fit(n, numberSize, SEAT - 4, 'strong'));
   // The answer first: the free count in amber at the top right, and only confirmed seats count as free.
   const free = String(counts.available), of = `libres${counts.unknown ? ' confirmados' : ''} de ${seats.length}`;
   const stat = Math.max(textWidth(free, 30, 'display'), textWidth(of, 12));
   out.push(`<text x="${right}" y="${y + 24}" font-family="${fonts.display}" font-size="30" font-weight="700" fill="${ink.amber}" text-anchor="end">${free}</text>`);
   out.push(`<text x="${right}" y="${y + 44}" font-size="12" fill="${ink.dust}" text-anchor="end">${of}</text>`);
   const room = width - PAD * 2 - stat - 24;
-  out.push(`<text x="${PAD}" y="${y + 20}" font-family="${fonts.display}" font-size="22" font-weight="700" letter-spacing="-0.4" fill="${ink.cream}">${escape(fit(header.movie ?? 'Mapa de asientos', 22, room, 'display'))}</text>`);
+  out.push(`<text x="${PAD}" y="${y + 20}" font-family="${fonts.display}" font-size="22" font-weight="700" letter-spacing="-0.4" fill="${ink.cream}">${escape(fit(header.movie ?? '', 22, room, 'display') || 'Mapa de asientos')}</text>`);
   const provider = providerNames[header.provider] ?? header.provider;
   const venue = header.cinema.toLowerCase().startsWith(provider.toLowerCase()) ? header.cinema : `${provider} · ${header.cinema}`;
   const when = [header.date?.split('-').reverse().join('/'), header.time].filter(Boolean).join(' ');
@@ -127,15 +139,16 @@ export function renderSeatMapSvg(seats: MapSeat[], layout: MapLayout, header: Ma
       const cy = y + r * CELL;
       const name = rowSeats[0]?.row;
       if (name) {
-        out.push(`<text x="${left - LABEL / 2}" y="${cy + SEAT_H / 2 + 4}" font-size="12" fill="${ink.faint}">${escape(name)}</text>`);
-        out.push(`<text x="${left + gridWidth + LABEL / 2}" y="${cy + SEAT_H / 2 + 4}" font-size="12" fill="${ink.faint}">${escape(name)}</text>`);
+        const shown = escape(fit(name, 12, label - 14, 'strong'));
+        out.push(`<text x="${left - label / 2}" y="${cy + SEAT_H / 2 + 4}" font-size="12" fill="${ink.faint}">${shown}</text>`);
+        out.push(`<text x="${left + gridWidth + label / 2}" y="${cy + SEAT_H / 2 + 4}" font-size="12" fill="${ink.faint}">${shown}</text>`);
       }
       for (const s of rowSeats) {
         const col = s.column_index - minCol, shown = layout.column_order === 'descending' ? cols - 1 - col : col;
         const x = left + shown * CELL + (CELL - SEAT) / 2, c = palette[s.status], number = seatNumber(s);
-        const size = number.length > 3 ? 8 : number.length === 3 ? 9.5 : 11;
+        const size = numberSize, fitted = numbers.get(number) ?? number;
         out.push(`<g><title>${escape(`${s.label}: ${c.name.toLowerCase()}`)}</title><rect x="${x}" y="${cy}" width="${SEAT}" height="${SEAT_H}" rx="4" ${seatPaint(s.status, 1)}/>`
-          + `<text x="${x + SEAT / 2}" y="${round(cy + SEAT_H / 2 + size / 2.8 - 1)}" font-size="${size}" fill="${c.text}">${escape(number)}</text></g>`);
+          + `<text x="${x + SEAT / 2}" y="${round(cy + SEAT_H / 2 + size / 2.8 - 1)}" font-size="${size}" fill="${c.text}">${escape(fitted)}</text></g>`);
       }
     }
     out.push('</g>');

@@ -326,3 +326,63 @@ test('the PNG encoder handles more than 256 colours, unaligned input and the ren
   assert.ok(images.every(image => Buffer.from(image).equals(Buffer.from(nth(images, 0)))));
   assert.ok(decodePng(nth(images, 0)).width > 500);
 });
+
+test('seat numbers share one size and fit their seats; long row names are cut inside their column', () => {
+  const s = (row: string, column_index: number, label = `${row}:${column_index + 1}`) => ({ label, row, area: '1', row_index: row === 'A' ? 0 : 1, column_index, status: 'available' as const });
+  // 1000 and 1011 differ in glyph width; a row reads evenly only if both share a size.
+  const sizes = (svg: string) => new Set([...svg.matchAll(/<\/title><rect [^>]*\/><text [^>]*font-size="([\d.]+)"/g)].map(m => m[1]));
+  const wide = renderSeatMapSvg([s('A', 0, 'A:1000'), s('A', 1, 'A:1011'), s('A', 2, 'A:7')], seatLayout('cinex'), header);
+  assert.equal(sizes(wide).size, 1, [...sizes(wide)].join());
+  for (const m of wide.matchAll(/<\/title><rect [^>]*width="(\d+)"[^>]*\/><text [^>]*font-size="([\d.]+)"[^>]*>([^<]*)</g)) {
+    assert.ok(textWidth(nth(m, 3), Number(m[2]), 'strong') <= Number(m[1]) - 4, `${m[3]} fits`);
+  }
+  // A 40-character label (the schema's limit) is cut with an ellipsis; its title keeps the whole label.
+  const long = renderSeatMapSvg([s('A', 0, `A:${'9'.repeat(38)}`)], seatLayout('cinex'), header);
+  assert.match(long, /<title>A:9{38}: libre<\/title>/); assert.match(long, />9+…<\/text><\/g>/);
+  // A long row name stays in its side column, away from the seats and the card edge.
+  const name = 'PLATEA ALTA LATERAL IZQUIERDA';
+  const rows = renderSeatMapSvg([s(name, 0), s(name, 1)], seatLayout('cinex'), header);
+  const width = Number(capture(rows, /width="(\d+)"/)), seatX = xOf(rows, `${name}:1`);
+  for (const m of rows.matchAll(/<text x="([\d.]+)"[^>]*font-size="12" fill="#8c7d7a">([^<]*)</g)) {
+    const center = Number(m[1]), half = textWidth(nth(m, 2), 12, 'strong') / 2;
+    assert.ok(nth(m, 2).endsWith('…'), m[2]);
+    assert.ok(center - half >= 0 && center + half <= width, `${m[2]} inside the card`);
+    assert.ok(center + half <= seatX || center - half >= seatX + 26 * 2 + 4, `${m[2]} clear of the seats`);
+  }
+});
+
+test('emoji in provider text are dropped instead of drawn as empty boxes', () => {
+  const one = [{ label: 'A:1', row: 'A', area: '1', row_index: 0, column_index: 0, status: 'available' as const }];
+  assert.match(renderSeatMapSvg(one, seatLayout('cinex'), { ...header, movie: '🎬 ZOOTOPIA 2 🍿' }), />ZOOTOPIA 2</);
+  assert.match(renderSeatMapSvg(one, seatLayout('cinex'), { ...header, movie: '🎬🍿👨‍👩‍👧🇻🇪' }), />Mapa de asientos</);
+});
+
+test('rooms of every shape render with the right counts, colours and bounds', async () => {
+  // A deterministic sweep: sizes from one seat to an IMAX-like room, every layout, mixed states.
+  let seed = 9; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const statuses = ['available', 'occupied', 'unavailable', 'unknown'] as const;
+  const fills = { available: '#a92037', occupied: '#2e1b23', unavailable: '#1b1016', unknown: '#120a0e' };
+  const layouts = [seatLayout('cinex'), seatLayout('cinepic', { butacas: [{ invertida: '1' }] }), seatLayout('cinepic', map), { screen: 'unverified' as const, column_order: 'ascending' as const }];
+  for (const [rows, cols, areas] of [[1, 1, 1], [3, 7, 1], [14, 26, 1], [8, 18, 3], [25, 60, 1], [2, 200, 1]] as const) {
+    const seats = Array.from({ length: areas * rows * cols }, (_, i) => {
+      const area = Math.floor(i / (rows * cols)), r = Math.floor(i / cols) % rows, c = i % cols, row = String.fromCharCode(65 + r);
+      return { label: `${row}:${c + 1}`, row, area: String(area + 1), row_index: r, column_index: c, status: nth(statuses, Math.floor(rnd() * 4)) };
+    });
+    const svg = renderSeatMapSvg(seats, nth(layouts, rows % 4), header);
+    const width = Number(capture(svg, /width="(\d+)"/));
+    assert.equal(svg.match(/<title>/g)?.length, seats.length);
+    for (const k of statuses) {
+      const n = seats.filter(seat => seat.status === k).length;
+      if (n || k === 'available' || k === 'occupied') assert.match(svg, new RegExp(`>[^<(]+ \\(${n}\\)<`));
+    }
+    assert.match(svg, new RegExp(`>${seats.filter(seat => seat.status === 'available').length}</text>`));
+    const png = decodePng(await renderSeatMapPng(svg)), scale = png.width / width;
+    assert.ok(png.width <= 1200 && png.width * png.height <= MAX_PNG_PIXELS, `${png.width}x${png.height}`);
+    // Where seats are big enough to sample (and labels are unique: one area), the band above each number shows its state's colour.
+    if (scale >= 0.6 && areas === 1) for (const seat of seats) {
+      const at = new RegExp(`<title>${seat.label}: [^<]*</title><rect x="([\\d.]+)" y="([\\d.]+)"`);
+      const x = Number(capture(svg, at, 1)), y = Number(capture(svg, at, 2));
+      assert.equal(png.at(Math.round((x + 13) * scale), Math.round((y + 3.5) * scale)), fills[seat.status], `${rows}x${cols} ${seat.label}`);
+    }
+  }
+});
