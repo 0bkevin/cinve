@@ -1,4 +1,4 @@
-import { installationPage, setSecurityHeaders } from './public-web.js';
+import { installationPage, publicPageCache, setSecurityHeaders } from './public-web.js';
 import { seatInstructions } from './seat-guidance.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
@@ -150,6 +150,9 @@ export function serveInstall(req: IncomingMessage, res: ServerResponse, publicUr
   const guide = browser ? installationPage(publicUrl) : installGuide(publicUrl);
   if (browser) res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Vary', 'Accept');
+  // Assistants follow the text guide while installing, so it is never cached;
+  // the HTML page is the same for everyone and may sit briefly in the CDN.
+  if (browser) res.setHeader('Cache-Control', publicPageCache);
   // The plain-text guide and the HTML page are one document for search.
   res.setHeader('Link', `<${new URL('/install', publicUrl).href}>; rel="canonical"`);
   res.writeHead(200);

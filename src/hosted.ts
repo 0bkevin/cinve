@@ -1,4 +1,4 @@
-import { instructionsPage, landingPage, notFoundPage, servePublicAsset, setSecurityHeaders } from './public-web.js';
+import { instructionsPage, landingPage, notFoundPage, publicPageCache, servePublicAsset, setSecurityHeaders } from './public-web.js';
 import { hostedAuthInstructions } from './hosted-auth-guidance.js';
 import { HostedOAuth } from './oauth.js';
 import { ClientMetadataCache } from './client-metadata.js';
@@ -145,6 +145,7 @@ export async function createHostedApp(options: {
       }
       const pagePath = req.url?.split('?')[0];
       if (['GET', 'HEAD'].includes(req.method ?? '') && (pagePath === '/connect' || pagePath === '/' || pagePath === '/instrucciones')) {
+        if (pagePath !== '/connect') res.setHeader('Cache-Control', publicPageCache);
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(req.method === 'HEAD' ? undefined : pagePath === '/' ? landingPage(origin) : pagePath === '/instrucciones' ? instructionsPage(origin) : loginPage()); return;
       }
       if (req.url === '/mcp') {

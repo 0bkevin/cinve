@@ -80,7 +80,7 @@
 .footer-links { display: flex; gap: 64px; }
 .footer-links div { display: grid; gap: 2px; align-content: start; }
 .footer-links a { padding-block: 5px; }
-.footer-links h2 { margin: 0 0 4px; font: 600 12px/1 var(--font-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--cream); opacity: .6; }
+.footer-links .footer-title { margin: 0 0 4px; font: 600 12px/1 var(--font-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--cream); opacity: .6; }
 .footer-base { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; gap: 16px; padding-top: 24px; font-size: 13px; }
 .footer-base p { margin: 0; font-size: 13px; }
 .footer-base p a { color: var(--cream); }

@@ -958,3 +958,11 @@ test('crawlers get robots.txt, a sitemap of the public pages and llms.txt; brows
   const api = await fetch(f.origin + '/nope');
   assert.equal(api.status, 404); assert.match(api.headers.get('content-type')!, /json/);
 });
+
+test('public pages may be cached briefly by the CDN; the agent guide and private pages may not', async t => {
+  const f = await fixture(t);
+  const html = { headers: { Accept: 'text/html' } };
+  for (const path of ['/', '/instrucciones', '/install']) assert.match((await fetch(f.origin + path, html)).headers.get('cache-control')!, /s-maxage=300/, path);
+  assert.equal((await fetch(f.origin + '/install')).headers.get('cache-control'), 'no-store');
+  assert.equal((await fetch(f.origin + '/connect', html)).headers.get('cache-control'), 'no-store');
+});

@@ -77,14 +77,14 @@ export function Page({ title, compact, script, index, canonical, description = s
             </div>
             <nav class="footer-links" aria-label="Pie de página">
               <div>
-                <h2>Cinve</h2>
+                <p class="footer-title">Cinve</p>
                 <a href="/#preguntar">Qué preguntar</a>
                 <a href="/#empezar">Empezar</a>
                 <a href="/#datos">Tus datos</a>
                 <a href="/#preguntas">Preguntas</a>
               </div>
               <div>
-                <h2>Proyecto</h2>
+                <p class="footer-title">Proyecto</p>
                 <a href="/instrucciones">Instrucciones</a>
                 <a href="https://github.com/0bkevin/cinve">Código en GitHub</a>
                 <a href="https://github.com/0bkevin/cinve/issues/new/choose">Reportar un problema</a>
