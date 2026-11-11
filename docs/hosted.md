@@ -163,11 +163,22 @@ de acceso duran una hora; los tokens de renovación rotan en cada uso dentro de
 una autorización absoluta de 30 días. Reutilizar un token de renovación o un
 código consumido revoca la conexión para contener una posible repetición.
 
-Los tokens opacos se guardan únicamente como resúmenes SHA-256. Las sesiones de
+Los tokens opacos se guardan únicamente como resúmenes SHA-256. Los tokens de
+acceso llevan además una firma HMAC-SHA256 con una subclave derivada (HKDF) de
+`CINEV_ENCRYPTION_KEY`: un token falsificado se rechaza en memoria, sin
+consultar la base, y uno válido se sigue comprobando en ella para respetar su
+vencimiento y su revocación. Los tokens sin firma emitidos antes de este cambio
+se aceptan hasta el 1 de diciembre de 2026. Las sesiones de
 cine se cifran con AES-256-GCM y se vinculan criptográficamente a su propietario
 y proveedor. El registro, la aprobación y la emisión de tokens tienen límites
 persistentes por IP y globales. El límite global solo se consume cuando la IP
 todavía tiene cupo, para que una sola dirección no agote el servicio para todos.
+
+Antes de cualquier consulta a la base, cada instancia aplica en memoria un
+primer filtro por red: 600 solicitudes por minuto y 30 credenciales rechazadas
+por minuto (tokens Bearer o de enlaces de conexión). Un token con firma válida
+no se detiene por los fallos ajenos de una dirección compartida. Los límites
+persistentes en PostgreSQL siguen siendo los que valen entre instancias.
 
 En `/mcp`, cada conexión admite hasta 120 solicitudes por minuto y cuatro
 simultáneas; el proceso admite 32 simultáneas. La plaza se reserva antes de leer
@@ -212,14 +223,19 @@ reanudación que el protocolo 2026-07-28 eliminó.
    node --env-file=.env.production.local --import tsx scripts/migrate-neon.ts
    ```
 
-5. Despliega y verifica la salud del proceso:
+5. Limita el coste de un ataque de saturación: fija un tamaño máximo de cómputo
+   (autoscaling) en Neon y añade en el firewall de Vercel reglas de límite de
+   solicitudes por IP para `/mcp`, `/oauth/*` y `/connect/*`. Así el tráfico
+   abusivo se descarta en el borde, antes de ejecutar la función.
+
+6. Despliega y verifica la salud del proceso:
 
    ```sh
    vercel --prod
    curl https://<dominio>/health
    ```
 
-6. Prueba `/mcp` por separado para cubrir base de datos y protocolo. Comprueba
+7. Prueba `/mcp` por separado para cubrir base de datos y protocolo. Comprueba
    consultas reales desde la infraestructura publicada: que un proveedor
    responda desde tu equipo no garantiza que responda desde Vercel.
 

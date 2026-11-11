@@ -1,6 +1,7 @@
 import { landingPage, servePublicAsset, setSecurityHeaders } from './public-web.js';
 import { hostedAuthInstructions } from './hosted-auth-guidance.js';
-import { HostedOAuth } from './oauth.js';
+import { HostedOAuth, accessTokenFormat } from './oauth.js';
+import { LocalLimiter } from './local-limit.js';
 import { ClientMetadataCache } from './client-metadata.js';
 import { addressBytes } from './client-metadata.js';
 import type { ClientMetadataFetcher } from './client-metadata.js';
@@ -124,6 +125,11 @@ export async function createHostedApp(options: {
   const cinexCatalog = new CinexCinemaCatalog();
   // Process-level concurrency is an extra bound; rate budgets live in Postgres.
   const active = new Map<string, number>(); let totalActive = 0;
+  // In-memory first filters for this instance, checked before any database
+  // work. Each network gets generous request headroom, and few failed
+  // credential lookups (bearer or connection-link tokens) per minute.
+  const localRequests = new LocalLimiter(600), localAuthFailures = new LocalLimiter(30);
+  const tooManyFailures = () => new HttpError(429, 'Demasiados intentos con credenciales no válidas. Inténtalo en un minuto.');
   const storeFor = (id: string) => new EncryptedSessionStore(options.pool, id, options.key);
   const handler = async (req: IncomingMessage, res: ServerResponse) => {
     setSecurityHeaders(res, publicUrl.protocol === 'https:');
@@ -134,6 +140,7 @@ export async function createHostedApp(options: {
       if (req.headers.host !== publicUrl.host) throw new HttpError(403, 'Origen no permitido.');
       const forwarded = options.trustedVercelProxy ? req.headers['x-vercel-forwarded-for'] : undefined;
       const ip = rateLimitNetwork(typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : req.socket.remoteAddress ?? 'unknown');
+      if (!localRequests.hit(ip)) throw new HttpError(429, 'Demasiadas consultas. Inténtalo más tarde.');
       if (await oauth.handle(req, res, ip)) return;
       if (req.url === '/mcp') {
         // MCP authorization is exclusively bearer-based; cookies are never used,
@@ -164,8 +171,15 @@ export async function createHostedApp(options: {
       }
       if (req.url === '/mcp') {
         const authorization = req.headers.authorization ?? '';
-        const principal = authorization.startsWith('Bearer ') ? await oauth.authenticate(authorization.slice(7)) ?? await users.authenticate(authorization.slice(7)) : undefined;
-        if (authorization && !principal) { res.setHeader('WWW-Authenticate', oauth.challenge(true)); throw new HttpError(401, 'Acceso Cinev requerido.'); }
+        const bearer = authorization.startsWith('Bearer ') ? authorization.slice(7) : undefined;
+        // A validly signed token cannot be forged, so it is never held back by
+        // others' failures on a shared address; anything else needs a lookup.
+        if (authorization && accessTokenFormat(bearer ?? '', tokenKey) !== 'signed' && localAuthFailures.exhausted(ip)) throw tooManyFailures();
+        const principal = bearer ? await oauth.authenticate(bearer) ?? await users.authenticate(bearer) : undefined;
+        if (authorization && !principal) {
+          localAuthFailures.hit(ip);
+          res.setHeader('WWW-Authenticate', oauth.challenge(true)); throw new HttpError(401, 'Acceso Cinev requerido.');
+        }
         const clientKey = principal?.id ?? `anonymous:${ip}`;
         if (!await links.budget(`mcp:${clientKey}`, 120) || (active.get(clientKey) ?? 0) >= 4 || totalActive >= 32) throw new HttpError(429, 'Demasiadas consultas. Inténtalo más tarde.');
         // Reserve capacity synchronously with the check, before awaiting the
@@ -213,14 +227,15 @@ export async function createHostedApp(options: {
       if (req.headers.origin !== origin || (req.headers['sec-fetch-site'] && req.headers['sec-fetch-site'] !== 'same-origin')) throw new HttpError(403, 'Origen no permitido.');
       const token = req.headers['x-cinev-connection'];
       if (typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token)) throw new HttpError(403, 'Enlace no válido.');
+      if (localAuthFailures.exhausted(ip)) throw tooManyFailures();
       if (req.url === '/connect/exchange') {
         await body(req, 512);
         const exchanged = await links.exchange(token);
-        if (!exchanged || await users.hash(exchanged.connection.user) !== exchanged.connection.tokenHash) throw new HttpError(410, 'Enlace vencido o utilizado.');
+        if (!exchanged || await users.hash(exchanged.connection.user) !== exchanged.connection.tokenHash) { localAuthFailures.hit(ip); throw new HttpError(410, 'Enlace vencido o utilizado.'); }
         send(200, { browser_token: exchanged.browserToken, provider: exchanged.connection.provider, app: await oauth.appFor(exchanged.connection.user) ?? null }); return;
       }
       const connection = await links.get(token);
-      if (!connection || await users.hash(connection.user) !== connection.tokenHash) throw new HttpError(410, 'Conexión vencida o revocada.');
+      if (!connection || await users.hash(connection.user) !== connection.tokenHash) { localAuthFailures.hit(ip); throw new HttpError(410, 'Conexión vencida o revocada.'); }
       if (req.url === '/connect/cancel') { await links.consume(token); send(200, { cancelled: true }); return; }
       if (req.url !== '/connect/login') throw new HttpError(404, 'Ruta no disponible.');
       if (connection.busy || connection.attempts >= 5 || !await links.budget(`login:${connection.user}`, 10)) throw new HttpError(429, 'Demasiados intentos. Pide un enlace nuevo más tarde.');

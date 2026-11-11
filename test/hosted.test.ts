@@ -1074,3 +1074,23 @@ test('the access token format is judged in memory, and unsigned tokens stop at t
   assert.equal(accessTokenFormat(legacy, key, legacyAccessTokensUntil), undefined);
   for (const bad of ['', 'cva_', signed + 'x', 'cvr_' + id, `cva_${id}.`]) assert.equal(accessTokenFormat(bad, key), undefined);
 });
+
+test('repeated failed credential lookups are refused in memory, without holding back signed tokens', async t => {
+  const f = await fixture(t);
+  const { tokens } = await enrolled(f.origin);
+  const mcp = (token: string) => fetch(f.origin + '/mcp', { method: 'POST', body: '{}',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' } });
+  // Unsigned (legacy-format) tokens need a database lookup to be judged.
+  const fake = () => 'cva_' + randomBytes(32).toString('base64url');
+  for (let i = 0; i < 30; i++) assert.equal((await mcp(fake())).status, 401);
+  const query = f.pool.query.bind(f.pool); let queries = 0;
+  f.pool.query = ((...args: Parameters<typeof query>) => { queries++; return query(...args); }) as typeof f.pool.query;
+  const held = await mcp(fake());
+  const link = await f.post('/connect/exchange', randomBytes(32).toString('hex'));
+  f.pool.query = query;
+  assert.equal(held.status, 429); assert.equal(link.status, 429);
+  assert.equal(queries, 0, 'refused before any database work');
+  // Others' failures on a shared address never block a validly signed token.
+  const status = await (await f.client(tokens.access_token)).callTool({ name: 'get_auth_status', arguments: {} });
+  assert.equal((status.structuredContent as { connection: { client_authorized: boolean } }).connection.client_authorized, true);
+});
