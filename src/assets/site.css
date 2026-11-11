@@ -176,7 +176,7 @@ p a:hover, .note a:hover { text-decoration-color: currentColor; }
 .board th, .board td { text-align: left; vertical-align: middle; }
 .board thead th { padding: 0 16px 18px; font: 700 clamp(17px, 1.9vw, 26px)/1.1 var(--font-display); letter-spacing: -0.03em; color: var(--foreground); }
 .board thead td { width: 28%; }
-.board-scroll { overflow-x: auto; }
+
 .board tbody tr { border-top: 1px solid var(--border); }
 .board tbody :is(th, td) { transition: background-color 0.2s; }
 .board tbody tr:last-child { border-bottom: 1px solid var(--border); }
@@ -191,6 +191,7 @@ p a:hover, .note a:hover { text-decoration-color: currentColor; }
 .board .ask { display: block; margin-top: 6px; font-size: 15px; color: var(--dust); }
 .board td { padding: 26px 16px; font-size: 15px; color: var(--foreground); }
 .board .mark { display: flex; align-items: center; gap: 10px; }
+.cell-cinema { display: none; }
 .glyph { width: 22px; display: inline-grid; place-items: center; }
 .board td[data-access=open] .glyph { background: var(--amber); box-shadow: 0 0 14px rgba(255, 189, 63, 0.45); }
 .board td[data-access=account] .glyph { background: var(--seat); }
@@ -308,6 +309,22 @@ details.more[data-closing] > summary .chevron { transform: none; }
 }
 
 @media (max-width: 900px) {
+  /* Below 900px the five columns don't fit: each topic becomes a short list, one line per cinema, so the
+     table never scrolls sideways. */
+  .board, .board tbody, .board tr, .board th, .board td { display: block; }
+  .board thead { display: none; }
+  .board tbody tr { padding: 22px 0 14px; }
+  .board tbody tr:hover { background: none; }
+  .board tbody th { padding: 0 0 10px; }
+  .board .topic { font-size: 22px; }
+  .board .ask { font-size: 14px; }
+  .board td { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; font-size: 14px; }
+  .board td .cell-cinema { display: block; font-weight: 600; color: var(--foreground); }
+  .board td[data-access=none] .cell-cinema { color: var(--dust); }
+  .board .mark { gap: 8px; }
+  .board tbody { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 40px; }
+  .board tbody tr:last-child { border-bottom: 0; }
+  .board tbody { border-bottom: 1px solid var(--border); }
   .notes, .steps { grid-template-columns: minmax(0, 1fr); gap: 20px; }
   .asks, .safeguards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .split { grid-template-columns: minmax(0, 1fr); }
@@ -317,6 +334,7 @@ details.more[data-closing] > summary .chevron { transform: none; }
 }
 
 @media (max-width: 640px) {
+  .board tbody { grid-template-columns: minmax(0, 1fr); }
   .wrap { width: calc(100% - 32px); }
   .site-nav a:not(.nav-cta) { display: none; }
   .footer-links { display: grid; grid-template-columns: auto auto; justify-content: start; gap: 40px; }
@@ -338,16 +356,6 @@ details.more[data-closing] > summary .chevron { transform: none; }
   .faq details > p { padding: 0 16px 18px; }
   .closing { padding: 80px 0 88px; }
   .closing-links .btn { width: 100%; }
-  .board-scroll { margin-inline: -16px; padding-inline: 16px; }
-  .board { min-width: 600px; }
-  .board thead td { width: 140px; }
-  .board thead th { padding: 0 4px 14px; font-size: 15px; }
-  .board tbody th { padding: 18px 10px 18px 0; }
-  .board .topic { font-size: 18px; }
-  .board .ask { font-size: 13px; }
-  .board td { padding: 20px 4px 18px; font-size: 13px; line-height: 1.3; vertical-align: top; }
-  .board tbody th { vertical-align: top; }
-  .board .mark { flex-direction: column; align-items: flex-start; gap: 8px; }
   .install { flex-direction: column; align-items: stretch; padding: 18px; }
   .install .btn { width: 100%; }
   .compact { margin: 40px auto 64px; }
