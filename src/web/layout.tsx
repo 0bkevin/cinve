@@ -59,7 +59,13 @@ export function Page({ title, compact, script, index, canonical, children }: Pag
         <div class="wrap">
           <header class="site-header">
             <a class="brand" href="/" aria-label="Cinve, inicio">cinve<span>.</span></a>
-            <nav class="site-nav" aria-label="Principal"><a href="/#empezar">Cómo empezar</a></nav>
+            <nav class="site-nav" aria-label="Principal">
+              <a href="/#preguntar">Qué preguntar</a>
+              <a href="/#ciudades">Ciudades</a>
+              <a href="/#datos">Tus datos</a>
+              <a href="/#preguntas">Preguntas</a>
+              <a class="nav-cta" href="/#empezar">Empezar</a>
+            </nav>
           </header>
           <main id="contenido" class={compact ? 'compact' : undefined}>{children}</main>
           <footer class="site-footer">

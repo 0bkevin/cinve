@@ -40,6 +40,7 @@
    such as card titles, still take precedence over them. */
 @layer base {
   html { scroll-behavior: smooth; scroll-padding-top: 24px; }
+  body { overflow-x: clip; }
   body {
     font: 17px/1.6 var(--font-sans); -webkit-font-smoothing: antialiased; font-synthesis: none;
     /* The screen's light spills over the first rows and fades to the back. */
@@ -151,7 +152,7 @@ p a:hover, .note a:hover { text-decoration-color: currentColor; }
 .hero-copy .lead { margin: 0 0 28px; max-width: 30ch; }
 
 /* ── Sections ─────────────────────────────────────────────────────────── */
-.section { padding: 96px 0; }
+.section { padding: 84px 0; }
 .section-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: end; gap: 12px 48px; margin-bottom: 48px; }
 .section-head h2 { margin: 0; }
 .section-head p { max-width: 44ch; margin: 0; }
@@ -215,8 +216,39 @@ p a:hover, .note a:hover { text-decoration-color: currentColor; }
 .steps > li { counter-increment: step; color: var(--foreground); }
 .steps > li::before { content: counter(step); display: block; margin-bottom: 12px; font: 800 44px/1 var(--font-display); letter-spacing: -0.04em; color: var(--amber); }
 
-.project-note { padding: 8px 0 40px; }
-.project-note p { font-size: 14px; max-width: 80ch; }
+/* Where it works: one column per chain, cities as a quiet two-column list. */
+.cities { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px 48px; }
+.cities h3 { margin: 0; font-size: clamp(24px, 2.4vw, 32px); }
+.cities .count { margin: 6px 0 20px; font-size: 14px; color: var(--amber); }
+.cities ul { list-style: none; margin: 0; padding: 0; columns: 2; column-gap: 24px; }
+.cities li { padding: 3px 0; color: var(--foreground); break-inside: avoid; }
+
+/* "Cómo empezar" sits on a full-width band, the page's one call to act. */
+.band { position: relative; isolation: isolate; }
+.band::before { content: ''; position: absolute; z-index: -1; inset: 0 calc(50% - 50vw); background: var(--surface); }
+.band .install { background: var(--night); }
+
+/* FAQ: heading on the left, questions on the right; one answer open at a time is not enforced. */
+.split { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 7fr); gap: 32px 64px; align-items: start; }
+.split > .section-head { margin: 0; position: sticky; top: 32px; }
+.faq { display: grid; gap: 6px; }
+.faq details { border-radius: 14px; transition: background-color 0.2s; }
+.faq details[open], .faq details:hover { background: var(--surface); }
+.faq summary { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 18px 20px; list-style: none; cursor: pointer; font: 600 18px/1.35 var(--font-sans); color: var(--foreground); }
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary .plus { flex-shrink: 0; width: 20px; height: 20px; color: var(--amber); transition: transform 0.25s ease; }
+.faq details[open] summary .plus { transform: rotate(45deg); }
+.faq details > p { margin: 0; padding: 0 20px 20px; font-size: 16px; }
+
+/* Closing: what Cinve is, and where to see or improve it. */
+.closing { padding: 112px 0 120px; text-align: center; display: grid; justify-items: center; }
+.closing h2 { max-width: 16ch; margin: 0; font-size: clamp(36px, 5vw, 64px); }
+.closing p { margin: 22px auto 0; max-width: 54ch; font-size: 17px; }
+.closing-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 32px; }
+
+/* Header: section links, with the start action highlighted. */
+.site-nav .nav-cta { color: var(--amber); font-weight: 600; }
+.site-nav a:hover { color: var(--foreground); }
 
 /* ── Compact pages: install, authorization and account connection ────── */
 .compact { max-width: 600px; margin: 64px auto 96px; }
@@ -255,6 +287,10 @@ p a:hover, .note a:hover { text-decoration-color: currentColor; }
   .hero-copy { grid-template-columns: minmax(0, 1fr); gap: 24px; }
   .notes, .steps { grid-template-columns: minmax(0, 1fr); gap: 20px; }
   .asks, .safeguards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cities { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .split { grid-template-columns: minmax(0, 1fr); }
+  .split > .section-head { position: static; }
+  .site-nav a:not(.nav-cta) { display: none; }
   .steps > li { display: grid; grid-template-columns: 40px minmax(0, 1fr); align-items: baseline; }
   .steps > li::before { margin: 0; font-size: 32px; }
 }
@@ -274,6 +310,11 @@ p a:hover, .note a:hover { text-decoration-color: currentColor; }
   .asks { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 20px; }
   .asks li::before { margin-bottom: 12px; }
   .safeguards { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+  .cities { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+  .faq summary { padding: 16px; font-size: 17px; }
+  .faq details > p { padding: 0 16px 18px; }
+  .closing { padding: 80px 0 88px; }
+  .closing-links .btn { width: 100%; }
   .board thead td { width: 34%; }
   .board thead th { padding: 0 4px 14px; font-size: 15px; }
   .board tbody th { padding: 18px 10px 18px 0; }
@@ -292,6 +333,6 @@ p a:hover, .note a:hover { text-decoration-color: currentColor; }
   html { scroll-behavior: auto; }
   .row, .seat[data-state=taken], .seat[data-state=pair] { animation: none; }
   .board tbody :is(th, td) { transition: none; }
-  .more > summary .chevron, .more[open] > .board { transition: none; animation: none; }
+  .more > summary .chevron, .more[open] > .board, .faq details, .faq summary .plus { transition: none; animation: none; }
   .spinner { animation-duration: 2.4s; }
 }

@@ -1,6 +1,7 @@
 import { h, Fragment, renderDocument } from './web/jsx.js';
 import { Page, type PageOptions } from './web/layout.js';
 import { Alert, Button, Card, LinkButton, icons } from './web/ui.js';
+import { coverage as coverageCities, coverageDate } from './web/coverage.js';
 
 export { escapeHtml } from './web/jsx.js';
 export { servePublicAsset } from './web/assets.js';
@@ -85,6 +86,23 @@ const safeguards: [JSX.Element, string, string][] = [
   [icons.eyeOff(), 'Sin rastreadores', 'Esta web no carga anuncios, analíticas ni recursos de otros sitios. Cada conexión está separada: otra aplicación no ve tus cuentas.'],
 ];
 
+// Where each chain operates, from the snapshot in src/web/coverage.ts.
+const chains = [['cinex', 'Cinex'], ['cinesunidos', 'Cines Unidos'], ['cinepic', 'Cinepic']] as const;
+const coverageCount = (n: number) => n === 1 ? '1 ciudad' : `${n} ciudades`;
+const formatDate = (iso: string) => new Intl.DateTimeFormat('es-VE', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${iso}T00:00:00Z`));
+
+// Answers must stay true to the service; see docs/hosted.md and src/install.ts.
+const faq: [string, string][] = [
+  ['¿Cuánto cuesta?', 'Nada. Cinve es gratis y no muestra anuncios.'],
+  ['¿Con qué asistentes funciona?', 'Con los que aceptan conexiones MCP remotas, como Claude Code, Codex u OpenCode. Si tu asistente no tiene esa opción, todavía no puede usar Cinve.'],
+  ['¿Necesito crear una cuenta?', 'En Cinve, no. Para ver precios y asientos de Cinex y Cines Unidos, tu asistente te pedirá conectar tu cuenta de ese cine con un enlace privado.'],
+  ['¿Qué tan actualizada está la información?', 'Cinve la consulta en la web del cine cuando preguntas y reutiliza algunas respuestas por unos minutos. Los asientos pueden cambiar antes de que compres.'],
+  ['¿Puedo comprar entradas desde el chat?', 'No. Cinve solo consulta; la compra se hace en la web o la app del cine.'],
+  ['¿Por qué no aparece mi cine o mi ciudad?', 'Cinve muestra las sedes que cada cine publica en su web, y Cinepic por ahora solo en Caracas. Si falta alguna, avísanos en GitHub.'],
+  ['¿Cómo desconecto mi cuenta del cine?', 'Escríbele a tu asistente «desconecta mi cuenta de Cinex» (o de Cines Unidos) y borramos la sesión guardada.'],
+  ['¿Cinve es oficial?', 'No. Es un proyecto independiente, sin relación con los cines.'],
+];
+
 export function landingPage(origin: string) {
   return page('Consulta de cines en Venezuela', <>
     <section class="hero" aria-labelledby="titulo">
@@ -124,7 +142,20 @@ export function landingPage(origin: string) {
         </div>
       </details>
     </section>
-    <section class="section" id="empezar" aria-labelledby="empezar-titulo">
+    <section class="section" id="ciudades" aria-labelledby="ciudades-titulo">
+      <header class="section-head">
+        <h2 id="ciudades-titulo">Dónde funciona</h2>
+        <p>Las ciudades que cada cine publica en su web, al {formatDate(coverageDate)}. Tu asistente consulta la lista actual cuando le preguntas.</p>
+      </header>
+      <div class="cities">
+        {chains.map(([key, name]) => <div>
+          <h3>{name}</h3>
+          <p class="count">{coverageCount(coverageCities[key].length)}</p>
+          <ul>{coverageCities[key].map(city => <li>{city}</li>)}</ul>
+        </div>)}
+      </div>
+    </section>
+    <section class="section band" id="empezar" aria-labelledby="empezar-titulo">
       <header class="section-head">
         <h2 id="empezar-titulo">Cómo empezar</h2>
         <p>Funciona con asistentes que aceptan conexiones MCP. <a href="/install">¿Prefieres hacerlo a mano?</a></p>
@@ -149,10 +180,29 @@ export function landingPage(origin: string) {
         <ul class="safeguards">
           {safeguards.map(([icon, title, text]) => <li>{icon}<h3>{title}</h3><p>{text}</p></li>)}
         </ul>
-        <p class="note">El código es abierto: puedes revisarlo en <a href="https://github.com/0bkevin/cinve">GitHub</a>. Si encuentras un fallo de seguridad, <a href="https://github.com/0bkevin/cinve/security/advisories/new">repórtalo en privado</a>.</p>
+        <p class="note">Si encuentras un fallo de seguridad, <a href="https://github.com/0bkevin/cinve/security/advisories/new">repórtalo en privado</a>.</p>
       </details>
     </section>
-    <aside class="project-note" aria-label="Sobre Cinve"><p>Cinve es gratis e independiente; no está afiliado a Cinex, Cines Unidos ni Cinepic. Solo consulta lo que cada cine publica.</p></aside>
+    <section class="section split" id="preguntas" aria-labelledby="preguntas-titulo">
+      <header class="section-head">
+        <h2 id="preguntas-titulo">Preguntas frecuentes</h2>
+      </header>
+      <div class="faq">
+        {faq.map(([question, answer]) => <details>
+          <summary><span>{question}</span>{icons.plus()}</summary>
+          <p>{answer}</p>
+        </details>)}
+      </div>
+    </section>
+    <section class="closing" aria-labelledby="abierto-titulo">
+      <h2 id="abierto-titulo">Gratis, independiente y de código abierto.</h2>
+      <p>Cinve no está afiliado a Cinex, Cines Unidos ni Cinepic, y solo consulta lo que cada cine publica. Cualquiera puede revisar cómo funciona o ayudar a mejorarlo.</p>
+      <div class="closing-links">
+        <LinkButton href="https://github.com/0bkevin/cinve" variant="outline">{icons.github()}Ver el código</LinkButton>
+        <LinkButton href="https://github.com/0bkevin/cinve/issues/new/choose" variant="ghost">Reportar un problema</LinkButton>
+        <LinkButton href="https://github.com/0bkevin/cinve/issues/new/choose" variant="ghost">Proponer un cine</LinkButton>
+      </div>
+    </section>
   </>, { index: true, canonical: origin + '/', script: '/assets/js/site.js' });
 }
 
