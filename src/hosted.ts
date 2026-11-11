@@ -337,5 +337,5 @@ export async function createHostedApp(options: {
     }
   });
   server.requestTimeout = 75000; server.headersTimeout = 10000; server.maxConnections = 128;
-  return { handler, server, users, links, storeFor };
+  return { handler, server, users, links, storeFor, oauth };
 }

@@ -1519,7 +1519,9 @@ test('legacy cutoffs follow when signing began, recorded once by the first insta
     access: (await fetch(late.origin + '/mcp', { method: 'POST', body: '{}', headers: { Authorization: `Bearer ${access}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' } })).status,
     refresh: (await form(late.origin, '/oauth/token', { grant_type: 'refresh_token', client_id, resource: late.origin + '/mcp', refresh_token: refresh })).status,
   });
-  await late.pool.query("INSERT INTO cinev_meta VALUES('token_signing_since', now()-interval '40 days')");
+  // Enrolling recorded the epoch (and this instance cached it): move it back and let a fresh read see that.
+  await late.pool.query("UPDATE cinev_meta SET value=now()-interval '40 days' WHERE key='token_signing_since'");
+  (late.oauth as unknown as { cutoffs?: unknown }).cutoffs = undefined;
   assert.deepEqual(await use(), { access: 401, refresh: 400 });
   assert.equal((await late.post('/connect/exchange', linkToken)).status, 403, 'an unsigned link is no longer accepted');
 });
@@ -1663,4 +1665,34 @@ test('the consent page remembers its owner\'s browser after a successful sign-in
   assert.equal((await stranger.submit({ ...cinema, password: 'SYNTHETIC_PASSWORD' })).status, 429);
   const again = await consentForm(f.origin, await register(f.origin));
   assert.equal((await again.submit({ ...cinema, password: 'SYNTHETIC_PASSWORD' }, { Origin: f.origin, Cookie: `${again.cookie}; ${device!.split(';')[0]}` })).status, 303);
+});
+
+test('the signing epoch is recorded once, at the first signed token, even with concurrent first reads', async t => {
+  const f = await fixture(t);
+  const { readLegacyCutoffs } = await import('../src/oauth.js');
+  assert.equal((await f.pool.query('SELECT 1 FROM cinev_meta')).rowCount, 0);
+  await enrolled(f.origin);
+  assert.equal((await f.pool.query("SELECT 1 FROM cinev_meta WHERE key='token_signing_since'")).rowCount, 1, 'recorded when signing began');
+  // A first read racing another instance's first insert: that insert commits
+  // after the read's snapshot, so the read must look again, not see "none".
+  const fresh = await fixture(t);
+  const other = await fresh.pool.connect();
+  await other.query('BEGIN');
+  await other.query("INSERT INTO cinev_meta VALUES('token_signing_since', now()-interval '2 days')");
+  const reading = readLegacyCutoffs(fresh.pool);
+  await new Promise(resolve => setTimeout(resolve, 200)); // The read now waits on the conflicting insert.
+  await other.query('COMMIT'); other.release();
+  const raced = await reading;
+  assert.notEqual(raced.access, Infinity, 'the racing read found the value');
+  assert.ok(raced.access < Date.now(), 'the other instance\'s value, two days old');
+  // Before migration 006 "not recorded" is kept briefly, then read again.
+  const early = await fixture(t);
+  await early.pool.query('DROP TABLE cinev_meta');
+  assert.equal((await early.oauth.legacy()).access, Infinity);
+  await early.pool.query('CREATE TABLE cinev_meta (key text PRIMARY KEY, value timestamptz NOT NULL)');
+  assert.equal((await early.oauth.legacy()).access, Infinity, 'kept for a minute');
+  const until = (early.oauth as unknown as { cutoffsUntil: number }).cutoffsUntil;
+  assert.ok(until > Date.now() && until <= Date.now() + 60000, 'only for a minute');
+  (early.oauth as unknown as { cutoffsUntil: number }).cutoffsUntil = 0;
+  assert.notEqual((await early.oauth.legacy()).access, Infinity, 'then read again');
 });

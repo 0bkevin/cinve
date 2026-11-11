@@ -202,7 +202,10 @@ se aceptan durante un tiempo limitado desde que la primera instancia empezó a
 firmar, momento que queda registrado en `cinev_meta` (migración 006): un día
 para tokens de acceso y enlaces y 31 días para tokens de renovación. Así la
 transición sigue al despliegue real; mientras no se ejecute la migración 006,
-se siguen aceptando. Las sesiones de
+se siguen aceptando. Vercel cambia de despliegue de forma atómica. Si vuelves a
+una versión anterior a la firma, los clientes renuevan sus tokens solos, pero
+un enlace de conexión emitido en los últimos diez minutos deja de valer y el
+usuario debe pedir otro. Las sesiones de
 cine se cifran con AES-256-GCM y se vinculan criptográficamente a su propietario
 y proveedor. Los códigos de autorización y los tokens de acceso y de renovación llevan firma.
 Las comprobaciones que no necesitan la base (formato del cuerpo, firma,

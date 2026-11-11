@@ -45,9 +45,13 @@ export function legacyCutoffs(since: Date | undefined): LegacyCutoffs {
 /** Records (once) and reads when signing began. */
 export async function readLegacyCutoffs(pool: Pool): Promise<LegacyCutoffs> {
   try {
-    const { rows } = await pool.query(`WITH ins AS (INSERT INTO cinev_meta(key,value) VALUES('token_signing_since',now()) ON CONFLICT (key) DO NOTHING RETURNING value)
+    let { rows } = await pool.query(`WITH ins AS (INSERT INTO cinev_meta(key,value) VALUES('token_signing_since',now()) ON CONFLICT (key) DO NOTHING RETURNING value)
       SELECT value FROM ins UNION ALL SELECT value FROM cinev_meta WHERE key='token_signing_since'`);
-    return legacyCutoffs(rows[0]?.value);
+    // A concurrent first insert wins the conflict after this statement's
+    // snapshot was taken, so neither branch saw a row: read it again.
+    if (!rows.length) ({ rows } = await pool.query("SELECT value FROM cinev_meta WHERE key='token_signing_since'"));
+    if (!rows.length) throw new Error('No se pudo registrar el inicio de la firma de tokens.');
+    return legacyCutoffs(rows[0].value);
   } catch (error) {
     if ((error as { code?: string }).code === '42P01') return legacyCutoffs(undefined); // Migration 006 pending.
     throw error;
@@ -129,9 +133,18 @@ export function recognizedDestination(redirect: string, publisher?: string) {
 export class HostedOAuth {
   private authorizations = 0;
   private cutoffs?: Promise<LegacyCutoffs>;
-  /** The legacy cutoffs, read once per instance (and retried after a failure). */
+  private cutoffsUntil = Infinity;
+  /**
+   * The legacy cutoffs, read once per instance and retried after a failure.
+   * "Not recorded yet" (migration 006 pending) is kept for a minute only, so
+   * running the migration takes effect without a restart.
+   */
   legacy(): Promise<LegacyCutoffs> {
-    return this.cutoffs ??= readLegacyCutoffs(this.pool).catch(error => { this.cutoffs = undefined; throw error; });
+    if (this.cutoffs && Date.now() >= this.cutoffsUntil) this.cutoffs = undefined;
+    return this.cutoffs ??= readLegacyCutoffs(this.pool).then(cutoffs => {
+      this.cutoffsUntil = cutoffs.access === Infinity ? Date.now() + 60000 : Infinity;
+      return cutoffs;
+    }, error => { this.cutoffs = undefined; throw error; });
   }
   /**
    * Whether a token has an acceptable format. Only a legacy-format token
@@ -248,6 +261,8 @@ export class HostedOAuth {
       });
       if (!result) throw new OAuthError('invalid_grant');
       await this.touch(app);
+      // Signing begins with the first signed token: record it (once per instance).
+      await this.legacy().catch(() => {});
       return result;
     }
     if (grant === 'refresh_token') {
