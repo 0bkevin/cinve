@@ -255,7 +255,7 @@ test('stdio bridge forwards tools to authenticated hosted MCP with fresh retriev
   const hostedTools = await client.listTools();
   assert.equal(hostedTools.tools.length, 11);
   assert.ok(hostedTools.tools.every(tool => tool.title));
-  assert.match(client.getInstructions() ?? '', /Servidor alojado/);
+  assert.match(client.getInstructions() ?? '', /Hosted server/);
   assert.deepEqual(client.getServerVersion(), { name: 'cinve', version: '0.1.0' });
   const result = await client.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos' } });
   assert.equal(Result.parse(result.structuredContent).status, 'available');
@@ -509,8 +509,8 @@ test('the install guide is served with safe HTTP methods and no downloadable hel
   const guide = await fetch(f.origin + '/install');
   assert.equal(guide.status, 200); assert.equal(guide.headers.get('cache-control'), 'no-store');
   const text = await guide.text();
-  assert.match(text, /available=0 con unknown>0 NO significa agotado/);
-  assert.match(text, /bloque de texto monoespaciado/);
+  assert.match(text, /available=0 with unknown>0 does NOT mean sold out/);
+  assert.match(text, /monospaced text block/);
   assert.equal((await fetch(f.origin + '/install', { method: 'POST' })).status, 405);
   assert.equal((await fetch(f.origin + '/codex-client.mjs')).status, 404);
 });
