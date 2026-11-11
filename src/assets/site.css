@@ -487,8 +487,8 @@ button:disabled, .btn:disabled { cursor: not-allowed; }
 .ask-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 460px); gap: 40px 64px; align-items: center; }
 .ask-grid .asks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
-.demo { margin: 0; display: grid; gap: 12px; }
-.demo-me { justify-self: end; max-width: 320px; min-height: 1.3em; margin: 0; padding: 13px 18px; border-radius: 20px 20px 6px 20px; background: var(--amber); color: #1a0d05; font: 600 17px/1.35 var(--font-sans); }
+.demo { margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0; }
+.demo-me { justify-self: end; max-width: min(320px, 92%); min-height: 1.3em; margin: 0; padding: 13px 18px; border-radius: 20px 20px 6px 20px; background: var(--amber); color: #1a0d05; font: 600 17px/1.35 var(--font-sans); }
 .demo-bot { padding: 18px 20px 16px; border-radius: 20px 20px 20px 6px; background: var(--surface); box-shadow: 0 20px 60px rgba(0, 0, 0, .35); }
 .demo-who { display: flex; align-items: center; font-size: 13px; color: var(--dust); }
 .demo-dot { width: 7px; height: 7px; margin-right: 8px; border-radius: 50%; background: var(--amber); }
@@ -509,7 +509,7 @@ button:disabled, .btn:disabled { cursor: not-allowed; }
 .demo i[data-s=pair] { background: var(--amber); box-shadow: 0 0 14px rgba(255, 189, 63, .6); }
 .demo-key { display: flex; gap: 16px; margin-top: 12px; font-size: 12px; color: var(--dust); }
 .demo-key span { display: inline-flex; align-items: center; gap: 6px; }
-.demo-key i { width: 12px; box-shadow: none !important; }
+.demo .demo-key i { width: 12px; max-width: none; box-shadow: none !important; }
 
 /* Played by site.js: data-stage moves idle → typing → thinking → answer.
    Its starting state comes from CSS on the first frame when scripts run, so
@@ -541,7 +541,9 @@ button:disabled, .btn:disabled { cursor: not-allowed; }
   .demo { max-width: 460px; width: 100%; justify-self: center; }
 }
 @media (max-width: 640px) {
-  .demo i { width: calc((100vw - 32px - 40px - 20px - 55px) / 12); max-width: 22px; }
+  /* 12 seats fill the card: page gutters 32, card padding 40, row letter 20,
+     12 gaps of 5 (one after the letter) and 4px of slack. */
+  .demo i { width: calc((100vw - 156px) / 12); max-width: 22px; }
   .demo-me { font-size: 16px; }
 }
 @media (prefers-reduced-motion: reduce) {
