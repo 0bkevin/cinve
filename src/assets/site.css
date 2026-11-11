@@ -253,8 +253,11 @@ p a:hover, .note a:hover { text-decoration-color: currentColor; }
 .faq details { overflow: hidden; transition: background-color 0.3s ease; }
 .faq details[data-closing] { background: transparent; }
 .faq details[data-closing] summary .plus { transform: none; }
-/* Basecoat transitions every details' content; it fights the script above. */
-.faq details::details-content { transition: none; }
+/* Basecoat transitions every details' content, which fights site.js. */
+.faq details::details-content, details.more::details-content { transition: none; }
+.faq summary, .more > summary { user-select: none; -webkit-user-select: none; }
+details.more { overflow: hidden; }
+details.more[data-closing] > summary .chevron { transform: none; }
 
 /* Closing: what Cinve is, and where to see or improve it. */
 .closing { padding: 112px 0 120px; text-align: center; display: grid; justify-items: center; }
