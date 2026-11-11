@@ -809,9 +809,10 @@ test('public pages use the configured origin and serve local fonts under the aut
   const html = await home.text();
   assert.ok(html.includes(`Instala Cinve siguiendo ${f.origin}/install`));
   assert.ok(html.includes('lang="es"'));
-  assert.ok(html.includes(`property="og:image" content="${f.origin}/og.png?v=2"`));
+  const ogImage = html.match(/property="og:image" content="([^"]+)"/)![1];
+  assert.match(ogImage, new RegExp(`^${f.origin}/og\\.png\\?v=[0-9a-f]{10}$`));
   assert.ok(html.includes('name="twitter:card" content="summary_large_image"'));
-  const social = await fetch(f.origin + '/og.png?v=2');
+  const social = await fetch(ogImage);
   assert.equal(social.headers.get('content-type'), 'image/png');
   const png = Buffer.from(await social.arrayBuffer());
   assert.equal(png.readUInt32BE(16), 1200);
