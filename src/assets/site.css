@@ -181,11 +181,12 @@ p a:hover, .note a:hover { text-decoration-color: currentColor; }
 .board td[data-access=none] .glyph { background: transparent; box-shadow: inset 0 0 0 1.5px rgba(184, 167, 161, 0.6); }
 
 /* What you can ask: four examples, with the per-cinema table one click away. */
-.asks { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
-.asks li { padding: 22px 22px 24px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; }
-.asks .topic { display: block; font: 700 clamp(19px, 1.8vw, 24px)/1.1 var(--font-display); letter-spacing: -0.03em; color: var(--foreground); }
+/* Open summary columns: no boxes, each item marked with a small amber seat. */
+.asks { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 32px 40px; }
+.asks li::before { content: ''; display: block; width: 18px; aspect-ratio: 1 / 0.86; margin-bottom: 16px; border-radius: 42% 42% 20% 20% / 52% 52% 24% 24%; background: var(--amber); box-shadow: 0 0 14px rgba(255, 189, 63, 0.4); }
+.asks .topic { display: block; font: 700 clamp(21px, 2vw, 27px)/1.1 var(--font-display); letter-spacing: -0.03em; color: var(--foreground); }
 .asks .ask { display: block; margin-top: 8px; font-size: 15px; color: var(--dust); }
-.more { margin-top: 12px; }
+.more { margin-top: 36px; }
 .more > summary { display: flex; align-items: center; gap: 10px; width: fit-content; padding: 18px 0 4px; list-style: none; cursor: pointer; font-weight: 600; color: var(--foreground); }
 .more > summary::-webkit-details-marker { display: none; }
 .more > summary:hover { color: var(--amber); }
@@ -270,8 +271,8 @@ p a:hover, .note a:hover { text-decoration-color: currentColor; }
   .lead { font-size: 18px; }
   .section { padding: 64px 0; }
   .section-head { margin-bottom: 32px; }
-  .asks { grid-template-columns: minmax(0, 1fr); gap: 10px; }
-  .asks li { padding: 16px 18px; }
+  .asks { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 20px; }
+  .asks li::before { margin-bottom: 12px; }
   .safeguards { grid-template-columns: minmax(0, 1fr); gap: 28px; }
   .board thead td { width: 34%; }
   .board thead th { padding: 0 4px 14px; font-size: 15px; }
