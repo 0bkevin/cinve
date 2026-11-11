@@ -26,6 +26,8 @@ import { ConnectionLinks, cinemaUnavailableMessage, ipv6Block, signInFloor, sign
 import type { SignInSubject } from './hosted-links.js';
 import { EncryptedSessionStore, HostedUsers, digest } from './hosted-store.js';
 import { loginPage } from './auth-web.js';
+import { pageLocale } from './web/http.js';
+import { webError } from './web/errors.js';
 
 class AnonymousSessions extends SessionStore {
   constructor(private readonly origin: string) { super(); }
@@ -153,8 +155,12 @@ export async function createHostedApp(options: {
   const storeFor = (id: string) => new EncryptedSessionStore(options.pool, id, options.key);
   const handler = async (req: IncomingMessage, res: ServerResponse) => {
     setSecurityHeaders(res, publicUrl.protocol === 'https:');
+    let requestUrl = new URL('/', origin);
+    let route = '/';
     const send = (status: number, data: unknown) => { if (!res.headersSent) { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(data)); } };
     try {
+      requestUrl = new URL(req.url ?? '/', origin);
+      route = requestUrl.pathname;
       if (servePublicAsset(req, res) || serveInstall(req, res, origin) || serveDiscovery(req, res, origin)) return;
       if (req.method === 'GET' && req.url === '/health') { send(200, { status: 'ok' }); return; }
       if (req.headers.host !== publicUrl.host) throw new HttpError(403, 'Origen no permitido.');
@@ -162,8 +168,9 @@ export async function createHostedApp(options: {
       // limit: a user behind a shared address can always open the link page.
       const pagePath = req.url?.split('?')[0];
       if (['GET', 'HEAD'].includes(req.method ?? '') && (pagePath === '/connect' || pagePath === '/' || pagePath === '/instrucciones')) {
+        const locale = pageLocale(req, res);
         if (pagePath !== '/connect') res.setHeader('Cache-Control', publicPageCache);
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(req.method === 'HEAD' ? undefined : pagePath === '/' ? landingPage(origin) : pagePath === '/instrucciones' ? instructionsPage(origin) : loginPage()); return;
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(req.method === 'HEAD' ? undefined : pagePath === '/' ? landingPage(origin, locale) : pagePath === '/instrucciones' ? instructionsPage(origin, locale) : loginPage(locale)); return;
       }
       const forwarded = options.trustedVercelProxy ? req.headers['x-vercel-forwarded-for'] : undefined;
       const ip = rateLimitNetwork(typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : req.socket.remoteAddress ?? 'unknown');
@@ -174,7 +181,7 @@ export async function createHostedApp(options: {
       const signedBearer = req.url === '/mcp' && !!bearer && accessTokenFormat(bearer, tokenKey) === 'signed' && !deadTokens.has(digest(bearer));
       const linkHeader = req.headers['x-cinev-connection'];
       const signedLink = typeof linkHeader === 'string' && !!req.url?.startsWith('/connect/') && !deadTokens.has(digest(linkHeader)) &&
-        links.linkFormat(linkHeader, req.url === '/connect/exchange' ? 'invitation' : 'browser') === 'signed';
+        links.linkFormat(linkHeader, route === '/connect/exchange' ? 'invitation' : 'browser') === 'signed';
       const credential = signedBearer ? 'token:' + bearer!.slice(0, 47) : signedLink ? 'link:' + (linkHeader as string).slice(0, 64) : undefined;
       const block = ipv6Block(ip);
       // OAuth routes apply these limits themselves, after their free checks.
@@ -272,7 +279,7 @@ export async function createHostedApp(options: {
       if (!req.url?.startsWith('/connect/') || req.method !== 'POST') throw new HttpError(404, 'Ruta no disponible.');
       if (req.headers.origin !== origin || (req.headers['sec-fetch-site'] && req.headers['sec-fetch-site'] !== 'same-origin')) throw new HttpError(403, 'Origen no permitido.');
       const token = req.headers['x-cinev-connection'];
-      const format = typeof token === 'string' ? links.linkFormat(token, req.url === '/connect/exchange' ? 'invitation' : 'browser') : undefined;
+      const format = typeof token === 'string' ? links.linkFormat(token, route === '/connect/exchange' ? 'invitation' : 'browser') : undefined;
       if (typeof token !== 'string' || !format || (format === 'legacy' && Date.now() >= (await oauth.legacy()).link)) throw new HttpError(403, 'Enlace no válido.');
       // A signed link cannot be forged, so others' failures never hold it back,
       // and one that already failed (used, expired, revoked) fails from memory.
@@ -281,7 +288,7 @@ export async function createHostedApp(options: {
         if (format === 'signed') throw new HttpError(410, 'Enlace vencido o utilizado.');
         throw tooManyFailures();
       }
-      if (req.url === '/connect/exchange') {
+      if (route === '/connect/exchange') {
         await body(req, 512);
         const exchanged = await links.exchange(token);
         if (!exchanged || await users.hash(exchanged.connection.user) !== exchanged.connection.tokenHash) { linkFailed(); throw new HttpError(410, 'Enlace vencido o utilizado.'); }
@@ -289,8 +296,8 @@ export async function createHostedApp(options: {
       }
       const connection = await links.get(token);
       if (!connection || await users.hash(connection.user) !== connection.tokenHash) { linkFailed(); throw new HttpError(410, 'Conexión vencida o revocada.'); }
-      if (req.url === '/connect/cancel') { await links.consume(token); send(200, { cancelled: true }); return; }
-      if (req.url !== '/connect/login') throw new HttpError(404, 'Ruta no disponible.');
+      if (route === '/connect/cancel') { await links.consume(token); send(200, { cancelled: true }); return; }
+      if (route !== '/connect/login') throw new HttpError(404, 'Ruta no disponible.');
       if (connection.busy || connection.attempts >= 5 || !await links.budget(`login:${connection.user}`, 10)) throw new HttpError(429, 'Demasiados intentos. Pide un enlace nuevo más tarde.');
       let claimed = false, refund = false;
       let data: Record<string, unknown> = {};
@@ -330,9 +337,11 @@ export async function createHostedApp(options: {
     } catch (error) {
       // People following a broken link get a page; API clients keep JSON.
       if (error instanceof HttpError && error.status === 404 && ['GET', 'HEAD'].includes(req.method ?? '') && req.headers.accept?.includes('text/html') && !res.headersSent) {
-        res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(req.method === 'HEAD' ? undefined : notFoundPage()); return;
+        const locale = pageLocale(req, res);
+        res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(req.method === 'HEAD' ? undefined : notFoundPage(locale, requestUrl.pathname + requestUrl.search)); return;
       }
-      send(error instanceof HttpError ? error.status : 500, { error: error instanceof HttpError ? error.message : 'No se pudo completar la solicitud.' });
+      const message = error instanceof HttpError ? error.message : 'No se pudo completar la solicitud.';
+      send(error instanceof HttpError ? error.status : 500, route.startsWith('/connect/') ? webError(message, pageLocale(req, res)) : { error: message });
     }
   };
   const server = nodeServer(handler);

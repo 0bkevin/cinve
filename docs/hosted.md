@@ -9,6 +9,30 @@ enlaces temporales y límites de uso. No guarda el estado de autenticación en
 memoria, Blob ni archivos locales persistentes. El modo `stdio` conserva su
 almacenamiento local independiente.
 
+## Idiomas de la web y descubrimiento
+
+Las páginas públicas, la conexión de cuentas y el consentimiento OAuth admiten
+español e inglés. `?lang=es` o `?lang=en` tiene prioridad sobre `Accept-Language`;
+sin una preferencia compatible se usa español. Las rutas existentes siguen
+funcionando. Los enlaces internos conservan el idioma explícito y las páginas
+negociadas envían `Vary: Accept-Language` y `Content-Language`. `/install` también
+varía por `Accept`: su guía de texto para agentes sigue en inglés y sin caché.
+
+Los catálogos están en `src/web/locales/es.ts` y `en.ts`; las claves y las listas
+deben coincidir y `npm run check` verifica su estructura. Los mensajes del
+navegador se serializan desde esos catálogos sin scripts ejecutables en línea.
+El cambio de idioma de `/connect` se realiza en la misma página para conservar
+el enlace de un solo uso o el token ya canjeado en memoria.
+
+Cada página indexable tiene canonical, alternates `es`, `en` y `x-default`,
+metadatos sociales y una imagen OG por idioma. El sitemap incluye las dos
+versiones y sus alternates; `llms.txt` enlaza el contenido en ambos idiomas.
+El JSON-LD de la portada refleja el idioma, las preguntas visibles y la
+cobertura en Venezuela. Las páginas privadas y los errores mantienen `noindex`.
+Las instrucciones originales del MCP se muestran sin traducir y con el idioma
+del texto indicado; los resultados y las descripciones de herramientas del
+servidor no cambian.
+
 ## Acceso público
 
 Un cliente MCP puede conectarse a `https://<dominio>/mcp` sin cabecera

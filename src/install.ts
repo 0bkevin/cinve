@@ -1,5 +1,6 @@
 import { installationPage } from './public-web.js';
-import { publicPageCache, setSecurityHeaders } from './web/http.js';
+import { pageLocale, publicPageCache, setSecurityHeaders } from './web/http.js';
+import { canonicalUrl } from './web/locale.js';
 import { seatInstructions } from './seat-guidance.js';
 import { cinemaInstructions } from './agent-instructions.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -148,14 +149,16 @@ export function serveInstall(req: IncomingMessage, res: ServerResponse, publicUr
     return true;
   }
   const browser = req.headers.accept?.includes('text/html') && new URL(req.url!, publicUrl).searchParams.get('format') !== 'text';
-  const guide = browser ? installationPage(publicUrl) : installGuide(publicUrl);
-  if (browser) res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Vary', 'Accept');
+  const locale = browser ? pageLocale(req, res) : 'en';
+  if (!browser) res.setHeader('Content-Language', 'en');
+  const guide = browser ? installationPage(publicUrl, locale) : installGuide(publicUrl);
+  if (browser) res.setHeader('Content-Type', 'text/html; charset=utf-8');
   // Assistants follow the text guide while installing, so it is never cached;
   // the HTML page is the same for everyone and may sit briefly in the CDN.
   if (browser) res.setHeader('Cache-Control', publicPageCache);
   // The plain-text guide and the HTML page are one document for search.
-  res.setHeader('Link', `<${new URL('/install', publicUrl).href}>; rel="canonical"`);
+  res.setHeader('Link', `<${canonicalUrl(new URL('/install', publicUrl).href, browser ? locale : 'es')}>; rel="canonical"`);
   res.writeHead(200);
   res.end(req.method === 'HEAD' ? undefined : guide);
   return true;
