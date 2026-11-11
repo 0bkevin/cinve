@@ -9,16 +9,16 @@ import { randomBytes } from 'node:crypto';
 import { request as httpRequest } from 'node:http';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
-import { createHostedApp } from '../src/hosted.js';
+import { createHostedApp, hostedKeys } from '../src/hosted.js';
 import { EncryptedSessionStore, HostedUsers } from '../src/hosted-store.js';
 import { Result } from '../src/core.js';
-import { ConnectionLinks } from '../src/hosted-links.js';
+import { accountName, ConnectionLinks } from '../src/hosted-links.js';
 import { createRemoteServer } from '../src/remote.js';
 import type { login } from '../src/auth.js';
 import type { ClientMetadataFetcher } from '../src/client-metadata.js';
 
 async function fixture(t: { after(fn: () => Promise<void>): void }, authenticate?: typeof login,
-  request: typeof fetch = async () => new Response('["Caracas"]'), extra: { bodyTimeoutMs?: number; clientMetadata?: ClientMetadataFetcher } = {}) {
+  request: typeof fetch = async () => new Response('["Caracas"]'), extra: { bodyTimeoutMs?: number; clientMetadata?: ClientMetadataFetcher; trustedVercelProxy?: boolean; signInFloorMs?: number } = {}) {
   const schema = 'test_' + randomBytes(12).toString('hex');
   const admin = new Pool({ connectionString: process.env.TEST_DATABASE_URL });
   await admin.query(`CREATE SCHEMA ${schema}`);
@@ -26,7 +26,8 @@ async function fixture(t: { after(fn: () => Promise<void>): void }, authenticate
 
   await pool.query(await migrationSql());
   const key = randomBytes(32);
-  const app = await createHostedApp({ publicUrl: 'http://127.0.0.1:0', allowLocal: true, pool, key, authenticate, request, ...extra });
+  // No response floor by default: tests fail sign-ins on purpose and should stay fast.
+  const app = await createHostedApp({ publicUrl: 'http://127.0.0.1:0', allowLocal: true, pool, key, authenticate, request, signInFloorMs: 0, ...extra });
   await new Promise<void>(resolve => app.server.listen(0, '127.0.0.1', resolve));
   const address = app.server.address(); assert.ok(address && typeof address !== 'string');
   const origin = `http://127.0.0.1:${address.port}`;
@@ -262,7 +263,7 @@ test('stdio bridge forwards tools to authenticated hosted MCP with fresh retriev
 });
 
 test('independent server instances consume a link only once and share saved sessions', async t => {
-  const f = await fixture(t), other = new ConnectionLinks(f.pool);
+  const f = await fixture(t), other = new ConnectionLinks(f.pool, hostedKeys(f.key));
   const hash = (await f.users.hash(f.alice.id))!;
   const invite = await f.links.issue(f.alice.id, hash, 'cinesunidos');
   const results = await Promise.all([f.links.exchange(invite.token), other.exchange(invite.token)]);
@@ -279,7 +280,7 @@ test('independent server instances consume a link only once and share saved sess
 });
 
 test('revocation and newer invitations prevent another instance from saving a late login', async t => {
-  const f = await fixture(t), other = new ConnectionLinks(f.pool);
+  const f = await fixture(t), other = new ConnectionLinks(f.pool, hostedKeys(f.key));
   const hash = (await f.users.hash(f.alice.id))!;
   const session = { version: 1 as const, provider: 'cinesunidos' as const, expires_at: Date.now() + 60000, access_token: 'SECRET_SESSION' };
   const invite = await f.links.issue(f.alice.id, hash, 'cinesunidos');
@@ -296,7 +297,7 @@ test('revocation and newer invitations prevent another instance from saving a la
 });
 
 test('database attempt limits and rate budgets survive new instances', async t => {
-  const f = await fixture(t), other = new ConnectionLinks(f.pool), hash = (await f.users.hash(f.alice.id))!;
+  const f = await fixture(t), other = new ConnectionLinks(f.pool, hostedKeys(f.key)), hash = (await f.users.hash(f.alice.id))!;
   const invite = await f.links.issue(f.alice.id, hash, 'cinex');
   const token = (await other.exchange(invite.token))!.browserToken;
   for (let i = 0; i < 5; i++) { assert.ok(await other.claim(token)); await f.links.release(token); }
@@ -495,7 +496,10 @@ test('browser MCP clients discover OAuth without cookies; approval names are esc
   const html = await (await fetch(a.url)).text();
   assert.ok(html.includes('&lt;script&gt;')); assert.ok(!html.includes('<script>'));
   await f.pool.query('UPDATE cinev_budgets SET count=10000');
-  assert.equal((await fetch(f.origin + '/oauth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 429);
+  // An invalid body is refused for free; a valid registration meets the spent quota.
+  assert.equal((await fetch(f.origin + '/oauth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 400);
+  assert.equal((await fetch(f.origin + '/oauth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ client_name: 'T', redirect_uris: ['https://assistant.example/callback'] }) })).status, 429);
   await f.pool.query(await migrationSql());
   assert.ok(await f.users.authenticate(f.alice.token), 'migrations can be rerun without invalidating existing access');
 });
@@ -580,7 +584,7 @@ async function consentForm(origin: string, client_id: string) {
       resource: origin + '/mcp', redirect_uri: request.params.redirect_uri });
     return { code, response };
   };
-  return { html, submit, exchange };
+  return { html, submit, exchange, cookie };
 }
 const cinema = { decision: 'connect', provider: 'cinesunidos', username: 'person@example.test' };
 
@@ -691,14 +695,22 @@ test('a double submit signs in once and still sends the browser back to the assi
   assert.equal((await f.pool.query('SELECT count(*)::int AS n FROM cinev_clients')).rows[0].n, 3, 'no orphaned connection');
 });
 
-test('waiting duplicate submits do not use up the per-address sign-in budget', async t => {
+test('waiting duplicate submits do not use up the per-address sign-in budget, and a flood of them is bounded', async t => {
   let calls = 0;
   const slowLogin: typeof login = async (...args) => { calls++; await new Promise(r => setTimeout(r, 300)); return successfulLogin(...args); };
   const f = await fixture(t, slowLogin);
   const consent = await consentForm(f.origin, await register(f.origin));
-  const many = await Promise.all(Array.from({ length: 25 }, () => consent.submit({ ...cinema, password: 'SYNTHETIC_PASSWORD' })));
-  assert.ok(many.every(r => r.status === 303), `25 duplicate submits: ${many.map(r => r.status).join(',')}`);
+  // Repeated clicks: every response sends the browser on, whichever one it keeps.
+  const clicks = await Promise.all(Array.from({ length: 8 }, () => consent.submit({ ...cinema, password: 'SYNTHETIC_PASSWORD' })));
+  assert.ok(clicks.every(r => r.status === 303), `8 duplicate submits: ${clicks.map(r => r.status).join(',')}`);
   assert.equal(calls, 1);
+  // A flood: at most 8 submits of one approval wait (each polls the database).
+  const flood = await consentForm(f.origin, await register(f.origin));
+  const many = await Promise.all(Array.from({ length: 25 }, () => flood.submit({ ...cinema, password: 'SYNTHETIC_PASSWORD' })));
+  const statuses = many.map(r => r.status);
+  assert.equal(statuses.filter(s => s === 303).length, 9, `the sign-in and 8 waiters: ${statuses.join(',')}`);
+  assert.equal(statuses.filter(s => s === 429).length, 16);
+  assert.equal(calls, 2);
 });
 
 test('approving while a cinema sign-in is running wins cleanly, and the attempt cap spans the whole request', async t => {
@@ -799,7 +811,7 @@ test('the install page carries security headers even when served before the host
   assert.ok(serveInstall({ url: '/install', method: 'GET', headers: { accept: 'text/html' } } as never, res as never, 'https://cinve.example'));
   assert.match(headers['content-security-policy'], /default-src 'none'.*frame-ancestors 'none'/);
   assert.equal(headers['x-frame-options'], 'DENY');
-  assert.equal(headers['strict-transport-security'], 'max-age=31536000');
+  assert.equal(headers['strict-transport-security'], 'max-age=31536000; includeSubDomains');
 });
 
 test('public pages use the configured origin and serve local fonts under the authorization policy', async t => {
@@ -843,9 +855,11 @@ test('public pages use the configured origin and serve local fonts under the aut
 test('one address exhausting its OAuth quota cannot consume the shared OAuth quota', async t => {
   const f = await fixture(t);
   const { digest } = await import('../src/hosted-store.js');
-  await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 minute',61)", [digest('oauth:127.0.0.1')]);
-  for (let i = 0; i < 20; i++) assert.equal((await form(f.origin, '/oauth/token', { grant_type: 'refresh_token' })).status, 429);
-  const global = await f.pool.query('SELECT count FROM cinev_budgets WHERE key_hash=$1', [digest('oauth:global')]);
+  await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 minute',61)", [f.links.keyHash('oauth:127.0.0.1')]);
+  const registration = () => fetch(f.origin + '/oauth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ client_name: 'T', redirect_uris: ['https://assistant.example/callback'] }) });
+  for (let i = 0; i < 20; i++) assert.equal((await registration()).status, 429);
+  const global = await f.pool.query('SELECT count FROM cinev_budgets WHERE key_hash=ANY($1)', [['oauth:global', 'oauth:register:global'].map(k => f.links.keyHash(k))]);
   assert.equal(global.rows.length, 0, 'rejected requests must not charge the global budget');
 });
 
@@ -875,7 +889,7 @@ test('refresh=true calls have their own small budget so the shared cache cannot 
   const f = await fixture(t);
   const { digest } = await import('../src/hosted-store.js');
   const anonymous = await f.client();
-  await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 minute',10)", [digest('refresh:anonymous:127.0.0.1')]);
+  await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 minute',10)", [f.links.keyHash('refresh:anonymous:127.0.0.1')]);
   await assert.rejects(anonymous.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos', refresh: true } }));
   const cached = await anonymous.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos' } });
   assert.equal((cached.structuredContent as { status: string }).status, 'available');
@@ -966,4 +980,813 @@ test('public pages may be cached briefly by the CDN; the agent guide and private
   for (const path of ['/', '/instrucciones', '/install']) assert.match((await fetch(f.origin + path, html)).headers.get('cache-control')!, /s-maxage=300/, path);
   assert.equal((await fetch(f.origin + '/install')).headers.get('cache-control'), 'no-store');
   assert.equal((await fetch(f.origin + '/connect', html)).headers.get('cache-control'), 'no-store');
+});
+
+test('rate limits group an IPv6 subscriber by /64 and keep IPv4 per address', async () => {
+  const { rateLimitNetwork } = await import('../src/hosted.js');
+  assert.equal(rateLimitNetwork('203.0.113.7'), '203.0.113.7');
+  assert.equal(rateLimitNetwork('::ffff:203.0.113.7'), '203.0.113.7');
+  const network = rateLimitNetwork('2001:db8:1:2::1');
+  assert.equal(network, '2001:0db8:0001:0002::/64');
+  assert.equal(rateLimitNetwork('2001:0db8:0001:0002:ffff:eeee:dddd:cccc'), network);
+  assert.notEqual(rateLimitNetwork('2001:db8:1:3::1'), network);
+  assert.equal(rateLimitNetwork('unknown'), 'unknown');
+  assert.equal(rateLimitNetwork('attacker-chosen text'), 'unknown');
+});
+
+test('connection-link sign-ins are charged to the network, and failures and successes are recorded', async t => {
+  let calls = 0, accept = false;
+  const f = await fixture(t, async (...args) => { calls++; if (!accept) throw new Error('rejected'); return successfulLogin(...args); });
+  const { digest } = await import('../src/hosted-store.js');
+  const client = await f.client(f.alice.token);
+  const browser = async () => ((await (await f.post('/connect/exchange', await link(client))).json()) as { browser_token: string }).browser_token;
+  const count = async (key: string) => (await f.pool.query('SELECT count FROM cinev_budgets WHERE key_hash=$1', [f.links.keyHash(key)])).rows[0]?.count ?? 0;
+  // Each self-service connection has its own link budget; the network quota still applies.
+  await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 minute',20)", [f.links.keyHash('oauth:login-ip:127.0.0.1')]);
+  const limited = await f.post('/connect/login', await browser(), { username: 'x', password: 'x' });
+  assert.equal(limited.status, 429); assert.equal(calls, 0); assert.match(await limited.text(), /desde tu red/);
+  await f.pool.query('DELETE FROM cinev_budgets');
+  // Malformed requests never reach admission.
+  assert.equal((await f.post('/connect/login', await browser(), { username: 'x' })).status, 400);
+  assert.equal(await count('oauth:login-ip:127.0.0.1'), 0);
+  assert.equal((await f.post('/connect/login', await browser(), { username: 'Person@Example.test', password: 'WRONG' })).status, 401);
+  assert.equal(await count('signin-fail:day:127.0.0.1'), 1);
+  assert.equal(await count('signin-fail:global'), 1);
+  assert.equal(await count('signin:account:cinesunidos:person@example.test'), 1);
+  accept = true;
+  assert.equal((await f.post('/connect/login', await browser(), { username: 'person@example.test', password: 'SYNTHETIC_PASSWORD' })).status, 200);
+  assert.equal(await count('signin:account:cinesunidos:person@example.test'), 2, 'a success clears nothing, so it cannot be observed');
+  assert.equal(await count(`signin:known:cinesunidos:person@example.test:principal:${f.alice.id}`), 1, 'it marks the connection as the account\'s owner');
+  assert.equal(await count('signin-fail:day:127.0.0.1'), 1, 'a success never clears network failures');
+});
+
+test('one cinema account gets five attempts per 15 minutes, from any network and in any letter case', async t => {
+  const f = await fixture(t);
+  const account = (username: string, n: number) => ({ network: `198.51.100.${n}`, provider: 'cinex' as const, username });
+  const admitted = await Promise.all(Array.from({ length: 8 }, (_, i) => f.links.admitSignIn(account(i % 2 ? 'Victim@Example.test' : 'victim@example.test ', i))));
+  assert.equal(admitted.filter(r => r === undefined).length, 5, 'parallel guesses cannot overshoot');
+  assert.ok(admitted.filter(Boolean).every(r => r === 'account'));
+  assert.equal(await f.links.admitSignIn(account('other@example.test', 9)), undefined);
+  assert.equal(await f.links.admitSignIn({ ...account('victim@example.test', 9), provider: 'cinesunidos' }), undefined, 'accounts are per cinema');
+  await f.links.signInSucceeded({ ...account('VICTIM@example.test', 0), proofs: ['principal:owner'] });
+  assert.equal(await f.links.admitSignIn({ ...account('victim@example.test', 10), proofs: ['principal:owner'] }), undefined, 'the owner is not locked out, from any network');
+  assert.equal(await f.links.admitSignIn(account('victim@example.test', 0)), 'account', 'a success does not reopen the account to others, even on its network');
+  assert.equal(await f.links.admitSignIn({ ...account('victim@example.test', 0), proofs: ['principal:someone-else'] }), 'account');
+});
+
+test('under a broad failing attack only networks without recent failures may sign in', async t => {
+  const f = await fixture(t);
+  const { digest } = await import('../src/hosted-store.js');
+  const subject = (network: string, username: string) => ({ network, provider: 'cinex' as const, username });
+  await f.links.signInFailed(subject('203.0.113.1', 'a@example.test'));
+  await f.pool.query("UPDATE cinev_budgets SET count=300 WHERE key_hash=$1", [f.links.keyHash('signin-fail:global')]);
+  assert.equal(await f.links.admitSignIn(subject('203.0.113.1', 'b@example.test')), 'strained');
+  assert.equal(await f.links.admitSignIn(subject('203.0.113.2', 'c@example.test')), undefined, 'a clean network still signs in');
+  // Below the threshold a single failure blocks nobody.
+  await f.pool.query("UPDATE cinev_budgets SET count=299 WHERE key_hash=$1", [f.links.keyHash('signin-fail:global')]);
+  assert.equal(await f.links.admitSignIn(subject('203.0.113.1', 'd@example.test')), undefined);
+});
+
+test('networks have daily failure limits, and IPv6 /64s also share their /48', async t => {
+  const f = await fixture(t);
+  const { digest } = await import('../src/hosted-store.js');
+  const { rateLimitNetwork } = await import('../src/hosted.js');
+  const subject = (address: string, username: string) => ({ network: rateLimitNetwork(address), provider: 'cinex' as const, username });
+  const fill = (key: string, count: number, interval = '1 day') =>
+    f.pool.query(`INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '${interval}',$2)`, [f.links.keyHash(key), count]);
+  await fill('signin-fail:day:203.0.113.5', 100);
+  // Past the daily cap only a slow lane remains: one attempt per minute.
+  assert.equal(await f.links.admitSignIn(subject('203.0.113.5', 'a@example.test')), undefined);
+  assert.equal(await f.links.admitSignIn(subject('203.0.113.5', 'a2@example.test')), 'network');
+  await fill('signin-fail:day:2001:0db8:0001::/48', 300);
+  assert.equal(await f.links.admitSignIn(subject('2001:db8:1:7::1', 'b@example.test')), undefined);
+  assert.equal(await f.links.admitSignIn(subject('2001:db8:1:8::1', 'b2@example.test')), undefined, 'two per /48');
+  assert.equal(await f.links.admitSignIn(subject('2001:db8:1:9::1', 'b3@example.test')), 'network', 'a fresh /64 in a failing /48');
+  assert.equal(await f.links.admitSignIn(subject('2001:db8:2:7::1', 'c@example.test')), undefined);
+  await fill('signin:block:2001:0db8:0003::/48', 60, '1 minute');
+  assert.equal(await f.links.admitSignIn(subject('2001:db8:3:9::1', 'd@example.test')), 'network', 'per-minute /48 attempts');
+  // Failures from a /64 are counted for its /48 too.
+  await f.links.signInFailed(subject('2001:db8:4:1::1', 'e@example.test'));
+  const rows = await f.pool.query('SELECT count FROM cinev_budgets WHERE key_hash=ANY($1)', [['signin-fail:day:2001:0db8:0004:0001::/64', 'signin-fail:day:2001:0db8:0004::/48'].map(k => f.links.keyHash(k))]);
+  assert.deepEqual(rows.rows.map(r => r.count), [1, 1]);
+});
+
+test('refresh=true also has separate service-wide budgets across addresses', async t => {
+  const f = await fixture(t);
+  for (const [client, key] of [[await f.client(), 'refresh:global:anon'], [await f.client(f.alice.token), 'refresh:global']] as const) {
+    await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 minute',120)", [f.links.keyHash(key)]);
+    await assert.rejects(client.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos', refresh: true } }));
+    const cached = await client.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos' } });
+    assert.equal((cached.structuredContent as { status: string }).status, 'available');
+  }
+});
+
+test('an exhausted anonymous global refresh budget does not block authenticated refreshes', async t => {
+  const f = await fixture(t, undefined, undefined, { trustedVercelProxy: true });
+  const refresh = (network: string) => fetch(f.origin + '/mcp', from(network, { method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', 'MCP-Protocol-Version': '2025-06-18' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'list_cities', arguments: { provider: 'cinesunidos', refresh: true } } }) }));
+  // Twelve anonymous callers spend ten refreshes each, staying within their per-caller caps.
+  for (let i = 0; i < 120; i++) {
+    const response = await refresh(`203.0.113.${1 + Math.floor(i / 10)}`);
+    assert.equal(response.status, 200);
+    await response.text();
+  }
+  const blocked = await refresh('203.0.113.13');
+  assert.equal(blocked.status, 429, 'a fresh anonymous caller is held back by the global cap');
+  assert.match(await blocked.text(), /Demasiadas consultas con refresh=true/);
+  const alice = await f.client(f.alice.token);
+  const result = await alice.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos', refresh: true } });
+  assert.equal((result.structuredContent as { status: string }).status, 'available');
+});
+
+test('HTTPS responses send HSTS for the host and its subdomains; plain HTTP sends none', async () => {
+  const { setSecurityHeaders } = await import('../src/public-web.js');
+  const headers = (https: boolean) => {
+    const set = new Map<string, string>();
+    setSecurityHeaders({ setHeader: (k: string, v: string) => set.set(k, v) } as never, https);
+    return set;
+  };
+  assert.equal(headers(true).get('Strict-Transport-Security'), 'max-age=31536000; includeSubDomains');
+  assert.equal(headers(false).has('Strict-Transport-Security'), false);
+});
+
+test('access tokens are signed: forgeries are refused without a database query, valid ones still checked', async t => {
+  const f = await fixture(t);
+  const { digest } = await import('../src/hosted-store.js');
+  const { tokens } = await enrolled(f.origin);
+  assert.match(tokens.access_token, /^cva_[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{43}$/);
+  const authorized = async (token: string) => ((await (await f.client(token)).callTool({ name: 'get_auth_status', arguments: {} }))
+    .structuredContent as { connection: { client_authorized: boolean } }).connection.client_authorized;
+  assert.equal(await authorized(tokens.access_token), true);
+  const forged = tokens.access_token.slice(0, -1) + (tokens.access_token.endsWith('A') ? 'B' : 'A');
+  // Let the MCP client's background notifications land before measuring.
+  await new Promise(resolve => setTimeout(resolve, 100));
+  const query = f.pool.query.bind(f.pool); let queries = 0;
+  f.pool.query = ((...args: Parameters<typeof query>) => { queries++; return query(...args); }) as typeof f.pool.query;
+  const headers = { Authorization: `Bearer ${forged}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' };
+  const refused = await fetch(f.origin + '/mcp', { method: 'POST', headers, body: '{}' });
+  f.pool.query = query;
+  assert.equal(refused.status, 401); assert.equal(queries, 0, 'a forged token never reaches Postgres');
+  // A token issued before signing keeps working until the cutoff, via the database.
+  const { rows } = await f.pool.query('SELECT user_id FROM cinev_oauth_tokens WHERE token_hash=$1', [digest(tokens.access_token)]);
+  const legacy = 'cva_' + randomBytes(32).toString('base64url');
+  await f.pool.query("INSERT INTO cinev_oauth_tokens(token_hash,user_id,kind,expires_at) VALUES($1,$2,'access',now()+interval '1 hour')", [digest(legacy), rows[0].user_id]);
+  assert.equal(await authorized(legacy), true);
+  // Revocation is still enforced for a correctly signed token.
+  await f.pool.query('UPDATE cinev_clients SET revoked_at=now() WHERE id=$1', [rows[0].user_id]);
+  await assert.rejects(f.client(tokens.access_token));
+});
+
+test('the access token format is judged in memory, and unsigned tokens stop at the cutoff', async () => {
+  const { accessTokenFormat } = await import('../src/oauth.js');
+  const { createHmac } = await import('node:crypto');
+  const key = randomBytes(32), id = randomBytes(32).toString('base64url');
+  const signed = `cva_${id}.${createHmac('sha256', key).update('cva_' + id).digest('base64url')}`;
+  assert.equal(accessTokenFormat(signed, key), 'signed');
+  assert.equal(accessTokenFormat(signed, randomBytes(32)), undefined, 'another key');
+  assert.equal(accessTokenFormat(`cva_${randomBytes(32).toString('base64url')}.${signed.split('.')[1]}`, key), undefined, 'a signature moved to another id');
+  const legacy = 'cva_' + id;
+  assert.equal(accessTokenFormat(legacy, key, 1000, 999), 'legacy');
+  assert.equal(accessTokenFormat(legacy, key, 1000, 1000), undefined);
+  for (const bad of ['', 'cva_', signed + 'x', 'cvr_' + id, `cva_${id}.`]) assert.equal(accessTokenFormat(bad, key), undefined);
+});
+
+test('repeated failed credential lookups are refused in memory, without holding back signed tokens', async t => {
+  const f = await fixture(t);
+  const { tokens } = await enrolled(f.origin);
+  const mcp = (token: string) => fetch(f.origin + '/mcp', { method: 'POST', body: '{}',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' } });
+  // Unsigned (legacy-format) tokens need a database lookup to be judged.
+  const fake = () => 'cva_' + randomBytes(32).toString('base64url');
+  for (let i = 0; i < 30; i++) assert.equal((await mcp(fake())).status, 401);
+  const query = f.pool.query.bind(f.pool); let queries = 0;
+  f.pool.query = ((...args: Parameters<typeof query>) => { queries++; return query(...args); }) as typeof f.pool.query;
+  const held = await mcp(fake());
+  const link = await f.post('/connect/exchange', randomBytes(32).toString('hex'));
+  f.pool.query = query;
+  assert.equal(held.status, 429); assert.equal(link.status, 429);
+  assert.equal(queries, 0, 'refused before any database work');
+  // Others' failures on a shared address never block a validly signed token.
+  const status = await (await f.client(tokens.access_token)).callTool({ name: 'get_auth_status', arguments: {} });
+  assert.equal((status.structuredContent as { connection: { client_authorized: boolean } }).connection.client_authorized, true);
+});
+
+test('refresh tokens are signed: forgeries are refused and revocations ignored without touching token tables', async t => {
+  const f = await fixture(t);
+  const { digest } = await import('../src/hosted-store.js');
+  const { client_id, tokens } = await enrolled(f.origin);
+  assert.match(tokens.refresh_token, /^cvr_[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{43}$/);
+  const refresh = (refresh_token: string) => form(f.origin, '/oauth/token', { grant_type: 'refresh_token', client_id, refresh_token, resource: f.origin + '/mcp' });
+  const forged = tokens.refresh_token.slice(0, -1) + (tokens.refresh_token.endsWith('A') ? 'B' : 'A');
+  const query = f.pool.query.bind(f.pool), connect = f.pool.connect.bind(f.pool), texts: string[] = []; let connections = 0;
+  f.pool.query = ((...args: Parameters<typeof query>) => { texts.push(String(args[0])); return query(...args); }) as typeof f.pool.query;
+  // pool.query connects with a callback; a transaction connects through the promise form.
+  f.pool.connect = ((...args: unknown[]) => { if (!args.length) connections++; return (connect as (...a: unknown[]) => unknown)(...args); }) as typeof f.pool.connect;
+  const refused = await refresh(forged);
+  const revoked = await form(f.origin, '/oauth/revoke', { token: forged, client_id });
+  f.pool.query = query; f.pool.connect = connect;
+  assert.equal(refused.status, 400); assert.equal((await refused.json() as { error: string }).error, 'invalid_grant');
+  assert.equal(revoked.status, 200);
+  assert.equal(connections, 0, 'no transaction is opened');
+  assert.deepEqual(texts, [], 'not even a rate-limit write');
+  // The genuine token was not affected by the forgery, and still rotates.
+  const rotated = await refresh(tokens.refresh_token);
+  assert.equal(rotated.status, 200);
+  const next = await rotated.json() as { access_token: string; refresh_token: string };
+  // An unsigned refresh token issued before signing still rotates until the cutoff, into a signed one.
+  const { rows } = await f.pool.query('SELECT user_id FROM cinev_oauth_tokens WHERE token_hash=$1', [digest(next.access_token)]);
+  const legacy = 'cvr_' + randomBytes(32).toString('base64url');
+  await f.pool.query(`INSERT INTO cinev_oauth_tokens(token_hash,user_id,kind,expires_at)
+    VALUES($1,$2,'refresh',(SELECT expires_at FROM cinev_oauth_grants WHERE user_id=$2))`, [digest(legacy), rows[0].user_id]);
+  const fromLegacy = await refresh(legacy);
+  assert.equal(fromLegacy.status, 200);
+  assert.match((await fromLegacy.json() as { refresh_token: string }).refresh_token, /^cvr_[A-Za-z0-9_-]{43}\./);
+});
+
+test('refresh token formats are judged in memory and never accept an access signature', async () => {
+  const { refreshTokenFormat, accessTokenFormat } = await import('../src/oauth.js');
+  const { createHmac } = await import('node:crypto');
+  const key = randomBytes(32), id = randomBytes(32).toString('base64url');
+  const mac = (prefix: string) => createHmac('sha256', key).update(prefix + id).digest('base64url');
+  assert.equal(refreshTokenFormat(`cvr_${id}.${mac('cvr_')}`, key), 'signed');
+  assert.equal(refreshTokenFormat(`cvr_${id}.${mac('cva_')}`, key), undefined, 'an access signature on a refresh id');
+  assert.equal(accessTokenFormat(`cva_${id}.${mac('cvr_')}`, key), undefined, 'a refresh signature on an access id');
+  assert.equal(refreshTokenFormat(`cva_${id}.${mac('cva_')}`, key), undefined, 'an access token is not a refresh token');
+  assert.equal(refreshTokenFormat('cvr_' + id, key, 1000, 999), 'legacy');
+  assert.equal(refreshTokenFormat('cvr_' + id, key, 1000, 1000), undefined);
+});
+
+test('rate-limit keys are stored as HMACs under a derived key, never as plain digests', async t => {
+  const f = await fixture(t);
+  const { digest } = await import('../src/hosted-store.js');
+  const subject = { network: '198.51.100.20', provider: 'cinex' as const, username: 'person@example.test' };
+  assert.equal(await f.links.admitSignIn(subject), undefined);
+  await f.links.signInFailed(subject);
+  const stored = (await f.pool.query('SELECT key_hash FROM cinev_budgets')).rows.map(r => r.key_hash as string);
+  assert.ok(stored.length >= 4);
+  for (const plain of ['oauth:login-ip:198.51.100.20', 'signin:account:cinex:person@example.test', 'signin-fail:day:198.51.100.20', 'signin-fail:global'])
+    assert.ok(!stored.includes(digest(plain)) && stored.includes(f.links.keyHash(plain)), plain);
+  // Another key sees none of these counts; without keys rate limits and new links refuse to run, while cleanup works.
+  const other = new ConnectionLinks(f.pool, { budgetKey: randomBytes(32), linkKey: randomBytes(32) });
+  assert.notEqual(other.keyHash('signin-fail:global'), f.links.keyHash('signin-fail:global'));
+  const unkeyed = new ConnectionLinks(f.pool);
+  await assert.rejects(unkeyed.budget('x', 1), /clave/);
+  await assert.rejects(unkeyed.issue(f.alice.id, (await f.users.hash(f.alice.id))!, 'cinex'), /clave/);
+  await unkeyed.cleanup();
+});
+
+test('only refused credentials count as failures; an unreachable cinema refunds the attempt and says so', async t => {
+  const { CredentialsRejected, CinemaUnavailable, LoginError } = await import('../src/auth.js');
+  let next: Error = new Error();
+  const f = await fixture(t, async () => { throw next; });
+  const client = await f.client(f.alice.token);
+  const attempt = async (error: Error) => {
+    next = error;
+    const browser = ((await (await f.post('/connect/exchange', await link(client))).json()) as { browser_token: string }).browser_token;
+    const response = await f.post('/connect/login', browser, { username: 'person@example.test', password: 'x' });
+    return { status: response.status, error: (await response.json() as { error: string }).error };
+  };
+  const count = async (key: string) => (await f.pool.query('SELECT count FROM cinev_budgets WHERE key_hash=$1', [f.links.keyHash(key)])).rows[0]?.count ?? 0;
+  const account = 'signin:account:cinesunidos:person@example.test';
+  const down = await attempt(new CinemaUnavailable('down'));
+  assert.equal(down.status, 503); assert.match(down.error, /no está respondiendo/);
+  assert.equal(await count('signin-fail:global'), 0); assert.equal(await count(account), 0, 'the attempt is refunded');
+  // After the credentials were sent, an outage is answered exactly like a refusal but not counted.
+  const unclear = await attempt(new LoginError('timeout'));
+  const refused = await attempt(new CredentialsRejected('no'));
+  assert.deepEqual(unclear, refused, 'the response never reveals whether the password was right');
+  assert.equal(refused.status, 401);
+  assert.equal(await count('signin-fail:global'), 1, 'only the refusal trips strained mode');
+  assert.equal(await count('signin-fail:recent:127.0.0.1'), 1);
+  assert.equal(await count('signin-fail:day:127.0.0.1'), 2, 'unclear errors still count toward the daily network cap');
+  assert.equal(await count(account), 2, 'both used an attempt');
+  // A thrown value of unknown kind fails closed: it counts.
+  await attempt(new Error('bug'));
+  assert.equal(await count('signin-fail:global'), 2);
+});
+
+// Requests as if from another client network, through the trusted Vercel proxy header.
+const from = (network: string, init: RequestInit = {}) => ({ ...init, headers: { ...(init.headers as Record<string, string> ?? {}), 'x-vercel-forwarded-for': network } });
+
+test('a spent service-wide OAuth quota never blocks refreshing, exchanging codes or revoking', async t => {
+  const f = await fixture(t, undefined, undefined, { trustedVercelProxy: true });
+  const { client_id, tokens } = await enrolled(f.origin);
+  const pending = await authorizationRequest(f.origin, client_id), callback = await approve(f.origin, pending.url);
+  // Ten networks spending their own quotas on new authorizations exhaust the shared one...
+  await f.pool.query(`INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 minute',601)
+    ON CONFLICT(key_hash) DO UPDATE SET count=601, expires_at=now()+interval '1 minute'`, [f.links.keyHash('oauth:global')]);
+  assert.equal((await fetch(pending.url, from('192.0.2.7'))).status, 429, 'starting an authorization is shared');
+  // ...but connected clients keep working, from any network.
+  const refreshed = await fetch(f.origin + '/oauth/token', from('198.51.100.70', { method: 'POST',
+    body: new URLSearchParams({ grant_type: 'refresh_token', client_id, refresh_token: tokens.refresh_token, resource: f.origin + '/mcp' }) }));
+  assert.equal(refreshed.status, 200);
+  const exchanged = await fetch(f.origin + '/oauth/token', from('198.51.100.71', { method: 'POST', body: new URLSearchParams({
+    grant_type: 'authorization_code', client_id, code: callback.searchParams.get('code')!, code_verifier: pending.verifier,
+    resource: f.origin + '/mcp', redirect_uri: pending.params.redirect_uri }) }));
+  assert.equal(exchanged.status, 200, 'an approval already given completes');
+  const next = await refreshed.json() as { access_token: string };
+  assert.equal((await fetch(f.origin + '/oauth/revoke', from('198.51.100.72', { method: 'POST', body: new URLSearchParams({ token: next.access_token, client_id }) }))).status, 200);
+  assert.equal((await f.pool.query('SELECT revoked_at FROM cinev_clients c JOIN cinev_oauth_tokens t ON t.user_id=c.id WHERE t.token_hash=$1',
+    [(await import('../src/hosted-store.js')).digest(next.access_token)])).rows[0].revoked_at !== null, true);
+});
+
+test('malformed and forged token-endpoint requests are refused before any database work', async t => {
+  const f = await fixture(t);
+  const query = f.pool.query.bind(f.pool), texts: string[] = [];
+  f.pool.query = ((...args: Parameters<typeof query>) => { texts.push(String(args[0])); return query(...args); }) as typeof f.pool.query;
+  const token = (data: Record<string, string>) => form(f.origin, '/oauth/token', { client_id: 'cvapp_x', resource: f.origin + '/mcp', ...data });
+  const statuses = [
+    (await token({ grant_type: 'refresh_token' })).status,
+    (await token({ grant_type: 'refresh_token', refresh_token: 'cvr_' + 'A'.repeat(43) + '.' + 'B'.repeat(43) })).status,
+    (await token({ grant_type: 'authorization_code', code: 'short', code_verifier: 'v'.repeat(43), redirect_uri: 'https://assistant.example/callback' })).status,
+    (await token({ grant_type: 'password' })).status,
+    (await form(f.origin, '/oauth/revoke', { token: 'cva_forged', client_id: 'cvapp_x' })).status,
+  ];
+  f.pool.query = query;
+  assert.deepEqual(statuses, [400, 400, 400, 400, 200]);
+  assert.deepEqual(texts, []);
+});
+
+test('OAuth quotas also apply per IPv6 /48, so rotating /64s does not multiply them', async t => {
+  const f = await fixture(t, undefined, undefined, { trustedVercelProxy: true });
+  const statuses = [];
+  for (let i = 0; i < 250; i++) statuses.push((await fetch(f.origin + '/oauth/revoke', from(`2001:db8:5:${i.toString(16)}::1`, { method: 'POST',
+    body: new URLSearchParams({ token: 'cva_' + randomBytes(32).toString('base64url'), client_id: 'cvapp_x' }) }))).status);
+  assert.equal(statuses.filter(s => s === 200).length, 240); assert.equal(statuses.filter(s => s === 429).length, 10);
+  assert.equal((await fetch(f.origin + '/oauth/revoke', from('2001:db8:6::1', { method: 'POST',
+    body: new URLSearchParams({ token: 'cva_' + randomBytes(32).toString('base64url'), client_id: 'cvapp_x' }) }))).status, 200, 'another /48');
+});
+
+test('JSON-RPC batches are refused, so one request is one call for every limit', async t => {
+  let upstream = 0;
+  const f = await fixture(t, undefined, async () => { upstream++; return new Response('["Caracas"]'); });
+  const call = (id: number) => ({ jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'list_cities', arguments: { provider: 'cinesunidos', refresh: true } } });
+  const post = (body: unknown) => fetch(f.origin + '/mcp', { method: 'POST', body: JSON.stringify(body),
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', 'MCP-Protocol-Version': '2025-06-18' } });
+  for (const batch of [Array.from({ length: 50 }, (_, i) => call(i + 1)), [call(1)], []]) {
+    const response = await post(batch);
+    assert.equal(response.status, 400);
+    assert.equal((await response.json() as { error: { code: number } }).error.code, -32600);
+  }
+  assert.equal(upstream, 0, 'no provider read');
+  assert.equal((await f.pool.query('SELECT 1 FROM cinev_budgets WHERE key_hash=$1', [f.links.keyHash('refresh:anonymous:127.0.0.1')])).rowCount, 0);
+  // A single refresh call still works and is charged once.
+  const anonymous = await f.client();
+  assert.equal(((await anonymous.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos', refresh: true } })).structuredContent as { status: string }).status, 'available');
+  assert.equal((await f.pool.query('SELECT count FROM cinev_budgets WHERE key_hash=$1', [f.links.keyHash('refresh:anonymous:127.0.0.1')])).rows[0].count, 1);
+});
+
+test('connection links are signed per stage; forged and dead ones are refused from memory', async t => {
+  const f = await fixture(t, successfulLogin);
+  // Issued directly: an MCP client's background notifications would overlap the measured windows.
+  const { token: invite } = await f.links.issue(f.alice.id, (await f.users.hash(f.alice.id))!, 'cinesunidos');
+  assert.match(invite, /^[a-f0-9]{64}\.[A-Za-z0-9_-]{43}$/);
+  assert.match(await link(await f.client(f.bob.token)), /^[a-f0-9]{64}\.[A-Za-z0-9_-]{43}$/, 'connect_account links are signed too');
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert.equal(f.links.linkFormat(invite, 'invitation'), 'signed');
+  assert.equal(f.links.linkFormat(invite, 'browser'), undefined, 'an invitation never works as a browser token');
+  const query = f.pool.query.bind(f.pool); let queries: string[] = [];
+  const spy = () => { queries = []; f.pool.query = ((...args: Parameters<typeof query>) => { queries.push(String(args[0])); return query(...args); }) as typeof f.pool.query; };
+  spy();
+  const forged = await f.post('/connect/exchange', invite.slice(0, 64) + '.' + 'A'.repeat(43));
+  const asBrowser = await f.post('/connect/login', invite, { username: 'x', password: 'x' });
+  f.pool.query = query;
+  assert.deepEqual([forged.status, asBrowser.status, queries], [403, 403, []]);
+  const exchanged = await (await f.post('/connect/exchange', invite)).json() as { browser_token: string };
+  assert.equal(f.links.linkFormat(exchanged.browser_token, 'browser'), 'signed');
+  // The used invitation is dead: the first replay looks it up, later ones are answered from memory.
+  assert.equal((await f.post('/connect/exchange', invite)).status, 410);
+  spy();
+  assert.equal((await f.post('/connect/exchange', invite)).status, 410);
+  f.pool.query = query;
+  assert.deepEqual(queries, []);
+  assert.equal((await f.post('/connect/login', exchanged.browser_token, { username: 'person@example.test', password: 'SYNTHETIC_PASSWORD' })).status, 200);
+});
+
+test('attackers on a shared address cannot lock out users of signed tokens or signed links', async t => {
+  const f = await fixture(t, successfulLogin, undefined, { trustedVercelProxy: true });
+  const shared = '190.202.9.9';
+  const { tokens } = await enrolled(f.origin);
+  // 600 junk requests and 30 junk credential lookups from the shared address.
+  for (let k = 0; k < 12; k++) await Promise.all(Array.from({ length: 50 }, () => fetch(f.origin + '/nothing', from(shared)).then(r => r.text())));
+  assert.equal((await fetch(f.origin + '/nothing', from(shared))).status, 429, 'the junk itself is limited');
+  assert.equal((await fetch(f.origin + '/connect', from(shared))).status, 200, 'the link page always opens');
+  const mcp = (token: string, network: string) => fetch(f.origin + '/mcp', from(network, { method: 'POST', body: '{}',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' } }));
+  const other = '190.202.9.10';
+  for (let i = 0; i < 30; i++) {
+    await mcp('cva_' + randomBytes(32).toString('base64url'), other);
+    await f.post('/connect/exchange', randomBytes(32).toString('hex'), {}, { 'x-vercel-forwarded-for': other });
+  }
+  assert.equal((await mcp('cva_' + randomBytes(32).toString('base64url'), other)).status, 429, 'unsigned junk is held back');
+  // A real user on either address still gets through.
+  for (const network of [shared, other]) {
+    const status = await mcp(tokens.access_token, network);
+    assert.notEqual(status.status, 429, network); assert.notEqual(status.status, 401, network);
+    const user = await f.users.issue();
+    const invite = await f.links.issue(user.id, (await f.users.hash(user.id))!, 'cinesunidos');
+    assert.equal((await f.post('/connect/exchange', invite.token, {}, { 'x-vercel-forwarded-for': network })).status, 200, network);
+  }
+});
+
+test('a revoked signed token is refused from memory after its first lookup', async t => {
+  const f = await fixture(t);
+  const { client_id, tokens } = await enrolled(f.origin);
+  await form(f.origin, '/oauth/revoke', { token: tokens.access_token, client_id });
+  const mcp = () => fetch(f.origin + '/mcp', { method: 'POST', body: '{}',
+    headers: { Authorization: `Bearer ${tokens.access_token}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' } });
+  assert.equal((await mcp()).status, 401);
+  const query = f.pool.query.bind(f.pool); let queries = 0;
+  f.pool.query = ((...args: Parameters<typeof query>) => { queries++; return query(...args); }) as typeof f.pool.query;
+  const statuses = [];
+  for (let i = 0; i < 40; i++) statuses.push((await mcp()).status);
+  f.pool.query = query;
+  assert.ok(statuses.every(s => s === 401)); assert.equal(queries, 0);
+});
+
+test('an unsigned token that recently worked is not held back by others\' failures', async t => {
+  const f = await fixture(t);
+  const mcp = (token: string) => fetch(f.origin + '/mcp', { method: 'POST', body: '{}',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' } });
+  assert.notEqual((await mcp(f.alice.token)).status, 401, 'operator token works');
+  for (let i = 0; i < 30; i++) await mcp('cva_' + randomBytes(32).toString('base64url'));
+  assert.equal((await mcp('cva_' + randomBytes(32).toString('base64url'))).status, 429);
+  const again = await mcp(f.alice.token);
+  assert.notEqual(again.status, 429); assert.notEqual(again.status, 401);
+});
+
+test('local filters: requests without a signed token are also limited per IPv6 /48', async t => {
+  const f = await fixture(t, undefined, undefined, { trustedVercelProxy: true });
+  const all: number[] = [];
+  for (let k = 0; k < 2401; k += 20) all.push(...await Promise.all(Array.from({ length: Math.min(20, 2401 - k) }, (_, i) =>
+    fetch(f.origin + '/nothing', from(`2001:db8:9:${(k + i).toString(16)}::1`)).then(r => r.status))));
+  assert.equal(all.filter(s => s === 429).length, 1, 'each /64 is under its own limit; the /48 is not');
+  assert.equal((await fetch(f.origin + '/nothing', from('2001:db8:a::1'))).status, 404, 'another /48');
+});
+
+test('local sets remember keys for their lifetime within a bounded size', async () => {
+  const { LocalSet } = await import('../src/local-limit.js');
+  let now = 0;
+  const set = new LocalSet(1000, 3, () => now);
+  set.add('a'); now = 10; set.add('b'); set.add('c');
+  assert.ok(set.has('a') && set.has('c'));
+  set.add('d');
+  assert.equal(set.has('a'), false, 'oldest evicted at capacity'); assert.equal(set.size, 3);
+  now = 1010;
+  assert.equal(set.has('b'), false, 'expired');
+});
+
+test('strained mode reserves one attempt per network and two per /48, even in parallel', async t => {
+  const f = await fixture(t);
+  await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '15 minutes',300)", [f.links.keyHash('signin-fail:global')]);
+  const subject = (network: string, i: number) => ({ network, provider: 'cinex' as const, username: `victim${i}@example.test` });
+  const parallel = await Promise.all(Array.from({ length: 20 }, (_, i) => f.links.admitSignIn(subject('198.51.100.99', i))));
+  assert.equal(parallel.filter(r => r === undefined).length, 1);
+  assert.ok(parallel.filter(Boolean).every(r => r === 'strained'));
+  let admitted = 0;
+  for (let n = 0; n < 40; n++) {
+    const s = subject(`2001:0db8:00aa:${n.toString(16).padStart(4, '0')}::/64`, n);
+    if (await f.links.admitSignIn(s) === undefined) { admitted++; await f.links.signInError(s, new Error('refused')); }
+  }
+  assert.equal(admitted, 1, 'rotating /64s: after one failure the whole /48 is held back');
+  // Before any failure, parallel attempts from many /64s of one /48 get two slots.
+  const fresh = await Promise.all(Array.from({ length: 10 }, (_, n) => f.links.admitSignIn(subject(`2001:0db8:00ab:${n.toString(16).padStart(4, '0')}::/64`, 100 + n))));
+  assert.equal(fresh.filter(r => r === undefined).length, 2);
+  assert.equal(await f.links.admitSignIn(subject('2001:0db8:00ac:0001::/64', 99)), undefined, 'another /48');
+});
+
+test('a proven owner is exempt from network caps and strained mode, but not from their own budget', async t => {
+  const f = await fixture(t);
+  const shared = '190.202.1.1', owner = { network: shared, provider: 'cinex' as const, username: 'owner@example.test', proofs: ['browser:owner-cookie'] };
+  await f.links.signInSucceeded(owner);
+  const fill = (key: string, count: number) => f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 day',$2)", [f.links.keyHash(key), count]);
+  await fill(`signin-fail:day:${shared}`, 100); await fill(`signin-fail:recent:${shared}`, 5); await fill('signin-fail:global', 300);
+  await fill(`oauth:login-ip:${shared}`, 21); await fill('signin:account:cinex:owner@example.test', 5);
+  // Without the owner's proof, the same account on the same network is held back: the exemption cannot be used or observed.
+  assert.equal(await f.links.admitSignIn({ ...owner, proofs: [] }), 'strained');
+  assert.equal(await f.links.admitSignIn({ ...owner, proofs: ['browser:attacker'] }), 'strained');
+  assert.equal(await f.links.admitSignIn({ ...owner, username: 'other@example.test' }), 'strained', 'the proof is per account');
+  for (let i = 0; i < 5; i++) assert.equal(await f.links.admitSignIn({ ...owner }), undefined, `owner attempt ${i + 1}`);
+  assert.equal(await f.links.admitSignIn({ ...owner }), 'account', 'the owner still has their own budget');
+});
+
+test('a refused attempt gives back what it charged, so it cannot spend a strained slot', async t => {
+  const f = await fixture(t);
+  await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '15 minutes',300),($2,now()+interval '15 minutes',5)",
+    [f.links.keyHash('signin-fail:global'), f.links.keyHash('signin:account:cinex:locked@example.test')]);
+  const network = '198.51.100.123';
+  assert.equal(await f.links.admitSignIn({ network, provider: 'cinex', username: 'locked@example.test' }), 'account');
+  assert.equal(await f.links.admitSignIn({ network, provider: 'cinex', username: 'newcomer@example.test' }), undefined, 'the slot is still free');
+  const left = await f.pool.query('SELECT count FROM cinev_budgets WHERE key_hash=$1', [f.links.keyHash(`oauth:login-ip:${network}`)]);
+  assert.equal(left.rows[0].count, 1, 'only the admitted attempt was charged to the network');
+});
+
+test('every spelling of one email shares its account limit', async t => {
+  const f = await fixture(t);
+  const { accountName } = await import('../src/hosted-links.js');
+  const variants = ['Owner@Example.com', 'ówner@example.com', 'ｏwner@example.com', 'o\u200Bwner@example.com', ' OWNER@EXAMPLE.COM '];
+  assert.deepEqual(new Set(variants.map(accountName)), new Set(['owner@example.com']));
+  for (const [a, b] of [['carłos@x.com', 'carlos@x.com'], ['mæva@x.com', 'maeva@x.com'], ['jøse@x.com', 'jose@x.com'], ['điana@x.com', 'diana@x.com'],
+    ['straße@x.de', 'strasse@x.de'], ['a\u0000b@x.com', 'ab@x.com']]) assert.equal(accountName(a), accountName(b), `${a} ~ ${b}`);
+  assert.notEqual(accountName('数@x.com'), accountName('字@x.com'), 'distinct non-ASCII letters retain separate account keys');
+  const results = [];
+  for (const [i, username] of [...variants, 'owner@example.com'].entries()) results.push(await f.links.admitSignIn({ network: `203.0.113.${i}`, provider: 'cinex', username }));
+  assert.deepEqual(results, [undefined, undefined, undefined, undefined, undefined, 'account']);
+});
+
+test('distinct non-ASCII accounts keep separate keys while accent and case variants still fold', () => {
+  assert.notEqual(accountName('数@gmail.com'), accountName('字@gmail.com'));
+  assert.notEqual(accountName('😀@gmail.com'), accountName('😁@gmail.com'));
+  assert.equal(accountName('Ówner@GMAIL.com'), accountName('owner@gmail.com'));
+});
+
+test('a refused admission or a busy double submit spends no link or consent attempt', async t => {
+  let calls = 0;
+  const f = await fixture(t, async (...args) => { calls++; return successfulLogin(...args); });
+  const client = await f.client(f.alice.token);
+  const browser = ((await (await f.post('/connect/exchange', await link(client))).json()) as { browser_token: string }).browser_token;
+  const fill = () => f.pool.query(`INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 minute',21)
+    ON CONFLICT(key_hash) DO UPDATE SET count=21`, [f.links.keyHash('oauth:login-ip:127.0.0.1')]);
+  await fill();
+  for (let i = 0; i < 7; i++) assert.equal((await f.post('/connect/login', browser, { username: 'person@example.test', password: 'SYNTHETIC_PASSWORD' })).status, 429);
+  await f.pool.query('DELETE FROM cinev_budgets');
+  assert.equal((await f.post('/connect/login', browser, { username: 'person@example.test', password: 'SYNTHETIC_PASSWORD' })).status, 200, 'the link still has its attempts');
+  // The same on the consent page (forgetting that this account just became known on this network).
+  await f.pool.query('DELETE FROM cinev_budgets');
+  const consent = await consentForm(f.origin, await register(f.origin));
+  await fill();
+  for (let i = 0; i < 7; i++) assert.equal((await consent.submit({ ...cinema, password: 'SYNTHETIC_PASSWORD' })).status, 429);
+  await f.pool.query('DELETE FROM cinev_budgets');
+  assert.equal((await consent.submit({ ...cinema, password: 'SYNTHETIC_PASSWORD' })).status, 303);
+  assert.equal(calls, 2);
+});
+
+test('refused and unclear sign-ins take the same minimum time, on links and on consent', async t => {
+  const { CredentialsRejected, LoginError } = await import('../src/auth.js');
+  let next: Error = new Error();
+  const f = await fixture(t, async () => { throw next; }, undefined, { signInFloorMs: 300 });
+  const client = await f.client(f.alice.token);
+  const timed = async (error: Error) => {
+    next = error;
+    const browser = ((await (await f.post('/connect/exchange', await link(client))).json()) as { browser_token: string }).browser_token;
+    const started = Date.now();
+    const response = await f.post('/connect/login', browser, { username: `u${Math.random()}@example.test`, password: 'x' });
+    return { status: response.status, elapsed: Date.now() - started };
+  };
+  for (const error of [new CredentialsRejected('no'), new LoginError('timeout')]) {
+    const { status, elapsed } = await timed(error);
+    assert.equal(status, 401); assert.ok(elapsed >= 290, `${error.constructor.name}: ${elapsed} ms`);
+  }
+  next = new CredentialsRejected('no');
+  const consent = await consentForm(f.origin, await register(f.origin));
+  const started = Date.now();
+  assert.equal((await consent.submit({ ...cinema, password: 'WRONG' })).status, 401);
+  assert.ok(Date.now() - started >= 290);
+});
+
+test('expired rate-limit windows and unbound authorization requests are pruned as they accumulate', async t => {
+  const f = await fixture(t);
+  await f.pool.query(`INSERT INTO cinev_budgets(key_hash,expires_at,count)
+    SELECT md5(i::text) || md5((i+1)::text), now()-interval '1 second', 1 FROM generate_series(1,150) i`);
+  for (let i = 0; i < 100; i++) await f.links.budget(`prune:${i}`, 1000);
+  assert.equal((await f.pool.query("SELECT count(*)::int AS n FROM cinev_budgets WHERE expires_at<=now()")).rows[0].n, 0);
+  assert.equal((await f.pool.query("SELECT count(*)::int AS n FROM cinev_budgets WHERE expires_at>now()")).rows[0].n, 100, 'live windows stay');
+  const client_id = await register(f.origin);
+  await f.pool.query(`INSERT INTO cinev_oauth_requests(id,app_id,redirect_uri,resource,challenge,csrf_hash,expires_at)
+    SELECT 'old' || i, $1, 'https://assistant.example/callback', 'r', 'c', 'h', now()-interval '1 second' FROM generate_series(1,60) i`, [client_id]);
+  // An expired request holding a connection is cleanup's to decide, never pruned here.
+  await f.pool.query(`INSERT INTO cinev_oauth_requests(id,app_id,redirect_uri,resource,challenge,csrf_hash,expires_at,user_id)
+    VALUES('bound',$1,'https://assistant.example/callback','r','c','h',now()-interval '1 second',$2)`, [client_id, f.alice.id]);
+  for (let i = 0; i < 50; i++) await fetch((await authorizationRequest(f.origin, client_id)).url);
+  const left = (await f.pool.query("SELECT id FROM cinev_oauth_requests WHERE expires_at<=now()")).rows.map(r => r.id);
+  assert.deepEqual(left, ['bound']);
+});
+
+test('legacy cutoffs follow when signing began, recorded once by the first instance', async t => {
+  const f = await fixture(t);
+  const { legacyCutoffs, readLegacyCutoffs } = await import('../src/oauth.js');
+  const first = await readLegacyCutoffs(f.pool), again = await readLegacyCutoffs(f.pool);
+  assert.deepEqual(first, again, 'recorded once');
+  const since = (await f.pool.query("SELECT value FROM cinev_meta WHERE key='token_signing_since'")).rows[0].value as Date;
+  assert.ok(Math.abs(since.getTime() - Date.now()) < 60000);
+  assert.deepEqual(first, { access: since.getTime() + 86400000, refresh: since.getTime() + 31 * 86400000, link: since.getTime() + 86400000 });
+  assert.deepEqual(legacyCutoffs(undefined), { access: Infinity, refresh: Infinity, link: Infinity }, 'before migration 006');
+  // Once the cutoff has passed, real unsigned tokens and links are refused.
+  const late = await fixture(t);
+  const { digest } = await import('../src/hosted-store.js');
+  const { client_id, tokens } = await enrolled(late.origin);
+  const user = (await late.pool.query('SELECT user_id FROM cinev_oauth_tokens WHERE token_hash=$1', [digest(tokens.access_token)])).rows[0].user_id;
+  const access = 'cva_' + randomBytes(32).toString('base64url'), refresh = 'cvr_' + randomBytes(32).toString('base64url'), linkToken = randomBytes(32).toString('hex');
+  await late.pool.query(`INSERT INTO cinev_oauth_tokens(token_hash,user_id,kind,expires_at) VALUES($1,$3,'access',now()+interval '1 hour'),
+    ($2,$3,'refresh',(SELECT expires_at FROM cinev_oauth_grants WHERE user_id=$3))`, [digest(access), digest(refresh), user]);
+  await late.pool.query(`INSERT INTO cinev_links(token_hash,user_id,provider,stage,expires_at) VALUES($1,$2,'cinex','invitation',now()+interval '10 minutes')`,
+    [digest(linkToken), late.alice.id]);
+  const use = async () => ({
+    access: (await fetch(late.origin + '/mcp', { method: 'POST', body: '{}', headers: { Authorization: `Bearer ${access}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' } })).status,
+    refresh: (await form(late.origin, '/oauth/token', { grant_type: 'refresh_token', client_id, resource: late.origin + '/mcp', refresh_token: refresh })).status,
+  });
+  // Enrolling recorded the epoch (and this instance cached it): move it back and let a fresh read see that.
+  await late.pool.query("UPDATE cinev_meta SET value=now()-interval '40 days' WHERE key='token_signing_since'");
+  (late.oauth as unknown as { cutoffs?: unknown }).cutoffs = undefined;
+  assert.deepEqual(await use(), { access: 401, refresh: 400 });
+  assert.equal((await late.post('/connect/exchange', linkToken)).status, 403, 'an unsigned link is no longer accepted');
+});
+
+test('one network cannot spend the shared registration quota', async t => {
+  const f = await fixture(t, undefined, undefined, { trustedVercelProxy: true });
+  const register = (network: string) => fetch(f.origin + '/oauth/register', from(network, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ client_name: 'T', redirect_uris: ['https://assistant.example/callback'] }) })).then(r => r.status);
+  const statuses = [];
+  for (let i = 0; i < 60; i++) statuses.push(await register('203.0.113.66'));
+  assert.equal(statuses.filter(s => s === 201).length, 10);
+  assert.equal(await register('198.51.100.66'), 201, 'another network still registers');
+});
+
+test('junk from others on a shared address never blocks a signed refresh or code exchange', async t => {
+  const f = await fixture(t, undefined, undefined, { trustedVercelProxy: true });
+  const shared = '190.202.7.7';
+  const { client_id, tokens } = await enrolled(f.origin);
+  const pending = await authorizationRequest(f.origin, client_id), callback = await approve(f.origin, pending.url);
+  assert.match(callback.searchParams.get('code')!, /^cvc_[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{43}$/, 'codes are signed');
+  // Junk consent posts (no approval cookie), authorization starts and requests spend the address's quotas.
+  for (let i = 0; i < 70; i++) {
+    await fetch(f.origin + '/oauth/authorize', from(shared, { method: 'POST', headers: { Origin: f.origin, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ request_id: 'a'.repeat(32), csrf: 'b'.repeat(43), decision: 'approve' }) }));
+    await fetch(pending.url, from(shared));
+  }
+  for (let k = 0; k < 12; k++) await Promise.all(Array.from({ length: 50 }, () => fetch(f.origin + '/nothing', from(shared)).then(r => r.text())));
+  assert.equal((await fetch(pending.url, from(shared))).status, 429, 'the junk itself is limited');
+  // A real user on the address approving a request their browser started still gets through.
+  const started = await fetch(pending.url, from('203.0.113.200'));
+  const page = await started.text();
+  const approval = await fetch(f.origin + '/oauth/authorize', from(shared, { method: 'POST', redirect: 'manual', headers: {
+    Origin: f.origin, 'Content-Type': 'application/x-www-form-urlencoded', Cookie: started.headers.get('set-cookie')!.split(';')[0] },
+    body: new URLSearchParams({ request_id: page.match(/name="request_id" value="([^"]+)"/)![1], csrf: page.match(/name="csrf" value="([^"]+)"/)![1], decision: 'approve' }) }));
+  assert.equal(approval.status, 303);
+  const refreshed = await fetch(f.origin + '/oauth/token', from(shared, { method: 'POST',
+    body: new URLSearchParams({ grant_type: 'refresh_token', client_id, refresh_token: tokens.refresh_token, resource: f.origin + '/mcp' }) }));
+  assert.equal(refreshed.status, 200);
+  const exchanged = await fetch(f.origin + '/oauth/token', from(shared, { method: 'POST', body: new URLSearchParams({
+    grant_type: 'authorization_code', client_id, code: callback.searchParams.get('code')!, code_verifier: pending.verifier,
+    resource: f.origin + '/mcp', redirect_uri: pending.params.redirect_uri }) }));
+  assert.equal(exchanged.status, 200);
+  const next = await refreshed.json() as { access_token: string };
+  assert.equal((await fetch(f.origin + '/oauth/revoke', from(shared, { method: 'POST', body: new URLSearchParams({ token: next.access_token, client_id }) }))).status, 200);
+  // A forged signed code is refused without database work.
+  const forged = 'cvc_' + 'A'.repeat(43) + '.' + 'B'.repeat(43);
+  const query = f.pool.query.bind(f.pool), connect = f.pool.connect.bind(f.pool); let queries = 0;
+  f.pool.query = ((...args: Parameters<typeof query>) => { queries++; return query(...args); }) as typeof f.pool.query;
+  // pool.query connects with a callback; a transaction connects through the promise form.
+  f.pool.connect = ((...args: unknown[]) => { if (!args.length) queries++; return (connect as (...a: unknown[]) => unknown)(...args); }) as typeof f.pool.connect;
+  const refused = await form(f.origin, '/oauth/token', { grant_type: 'authorization_code', client_id, code: forged, code_verifier: pending.verifier, resource: f.origin + '/mcp', redirect_uri: pending.params.redirect_uri });
+  f.pool.query = query; f.pool.connect = connect;
+  assert.equal(refused.status, 400); assert.equal(queries, 0, 'no query and no transaction');
+});
+
+test('dead signed tokens buy no headroom, and signed traffic is also capped per /48', async t => {
+  const f = await fixture(t, undefined, undefined, { trustedVercelProxy: true });
+  const { client_id, tokens } = await enrolled(f.origin);
+  const dead = await enrolled(f.origin);
+  await form(f.origin, '/oauth/revoke', { token: dead.tokens.access_token, client_id: dead.client_id });
+  const shared = '190.202.8.8';
+  const mcp = (token: string, network: string) => fetch(f.origin + '/mcp', from(network, { method: 'POST', body: '{}',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' } }));
+  // A dead token on another route, or on /mcp once known dead, counts like any request from the address.
+  await mcp(dead.tokens.access_token, shared);
+  for (let k = 0; k < 12; k++) await Promise.all(Array.from({ length: 50 }, () => mcp(dead.tokens.access_token, shared).then(r => r.text())));
+  assert.equal((await fetch(f.origin + '/nothing', from(shared, { headers: { Authorization: `Bearer ${dead.tokens.access_token}` } }))).status, 429);
+  const live = await mcp(tokens.access_token, shared);
+  assert.notEqual(live.status, 429); assert.notEqual(live.status, 401);
+  // Live signed traffic from one IPv6 /48 is capped too (6000/min), across tokens and /64s.
+  // One registered client, eleven connections (registration itself is limited per network).
+  const many: Array<{ tokens: { access_token: string } }> = [];
+  for (let i = 0; i < 12; i++) {
+    const request = await authorizationRequest(f.origin, client_id), callback = await approve(f.origin, request.url);
+    const response = await form(f.origin, '/oauth/token', { grant_type: 'authorization_code', client_id, code: callback.searchParams.get('code')!,
+      code_verifier: request.verifier, resource: f.origin + '/mcp', redirect_uri: request.params.redirect_uri });
+    many.push({ tokens: await response.json() as { access_token: string } });
+  }
+  const statuses: number[] = [];
+  for (let k = 0; k < 6000; k += 25) statuses.push(...await Promise.all(Array.from({ length: 25 }, (_, i) =>
+    mcp(many[(k + i) % 11].tokens.access_token, `2001:db8:77:${((k + i) % 4000).toString(16)}::1`).then(r => r.status))));
+  assert.ok(!statuses.includes(401));
+  // A twelfth, unused connection (its own database budget untouched) is held back by the /48 cap alone.
+  const over = await mcp(many[11].tokens.access_token, '2001:db8:77:ffff::1');
+  assert.equal(over.status, 429); assert.match(await over.text(), /Demasiadas consultas/);
+  const elsewhere = await mcp(many[11].tokens.access_token, '2001:db8:78::1');
+  assert.notEqual(elsewhere.status, 429, 'another /48'); assert.notEqual(elsewhere.status, 401);
+});
+
+test('an unreachable cinema spends no link or consent attempt', async t => {
+  const { CinemaUnavailable } = await import('../src/auth.js');
+  let down = true, calls = 0;
+  const f = await fixture(t, async (...args) => { calls++; if (down) throw new CinemaUnavailable('down'); return successfulLogin(...args); });
+  const client = await f.client(f.alice.token);
+  const browser = ((await (await f.post('/connect/exchange', await link(client))).json()) as { browser_token: string }).browser_token;
+  for (let i = 0; i < 7; i++) assert.equal((await f.post('/connect/login', browser, { username: 'person@example.test', password: 'SYNTHETIC_PASSWORD' })).status, 503);
+  down = false;
+  assert.equal((await f.post('/connect/login', browser, { username: 'person@example.test', password: 'SYNTHETIC_PASSWORD' })).status, 200);
+  down = true;
+  const consent = await consentForm(f.origin, await register(f.origin));
+  for (let i = 0; i < 7; i++) assert.equal((await consent.submit({ ...cinema, password: 'SYNTHETIC_PASSWORD' })).status, 503);
+  down = false;
+  assert.equal((await consent.submit({ ...cinema, password: 'SYNTHETIC_PASSWORD' })).status, 303);
+  assert.equal(calls, 16);
+});
+
+test('refused sign-ins are answered in fixed time steps, also when the cinema is slow', async () => {
+  const { signInFloor } = await import('../src/hosted-links.js');
+  for (const [took, expected] of [[0, 300], [100, 300], [350, 600], [610, 900]] as const) {
+    const started = Date.now() - took;
+    await signInFloor(started, 300);
+    const total = Date.now() - started;
+    assert.ok(total >= expected - 5 && total < expected + 80, `took ${took} ms: answered at ${total} ms, expected ${expected}`);
+  }
+});
+
+test('a concurrent double submit on a link runs one sign-in and charges the account once', async t => {
+  let calls = 0;
+  const slow: typeof login = async (...args) => { calls++; await new Promise(r => setTimeout(r, 300)); throw new Error('refused'); };
+  const f = await fixture(t, slow);
+  const client = await f.client(f.alice.token);
+  const browser = ((await (await f.post('/connect/exchange', await link(client))).json()) as { browser_token: string }).browser_token;
+  const submit = () => f.post('/connect/login', browser, { username: 'person@example.test', password: 'x' }).then(r => r.status);
+  const statuses = await Promise.all([submit(), submit()]);
+  assert.deepEqual(statuses.sort(), [401, 429]);
+  assert.equal(calls, 1);
+  assert.equal((await f.pool.query('SELECT count FROM cinev_budgets WHERE key_hash=$1', [f.links.keyHash('signin:account:cinesunidos:person@example.test')])).rows[0].count, 1);
+});
+
+test('the consent page remembers its owner\'s browser after a successful sign-in', async t => {
+  const f = await fixture(t, successfulLogin);
+  const first = await consentForm(f.origin, await register(f.origin));
+  const done = await first.submit({ ...cinema, password: 'SYNTHETIC_PASSWORD' });
+  assert.equal(done.status, 303);
+  const device = done.headers.getSetCookie().find(c => c.startsWith('cinve_device='));
+  assert.match(device ?? '', /^cinve_device=[A-Za-z0-9_-]{43}; HttpOnly; SameSite=Lax; Path=\/oauth\/authorize; Max-Age=2592000/);
+  // The network's attempts are spent: a stranger is held back, the returning owner's browser is not.
+  await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 minute',21) ON CONFLICT(key_hash) DO UPDATE SET count=21",
+    [f.links.keyHash('oauth:login-ip:127.0.0.1')]);
+  const stranger = await consentForm(f.origin, await register(f.origin));
+  assert.equal((await stranger.submit({ ...cinema, password: 'SYNTHETIC_PASSWORD' })).status, 429);
+  const again = await consentForm(f.origin, await register(f.origin));
+  assert.equal((await again.submit({ ...cinema, password: 'SYNTHETIC_PASSWORD' }, { Origin: f.origin, Cookie: `${again.cookie}; ${device!.split(';')[0]}` })).status, 303);
+});
+
+test('the signing epoch is recorded once, at the first signed token, even with concurrent first reads', async t => {
+  const f = await fixture(t);
+  const { readLegacyCutoffs } = await import('../src/oauth.js');
+  assert.equal((await f.pool.query('SELECT 1 FROM cinev_meta')).rowCount, 0);
+  await enrolled(f.origin);
+  assert.equal((await f.pool.query("SELECT 1 FROM cinev_meta WHERE key='token_signing_since'")).rowCount, 1, 'recorded when signing began');
+  // A first read racing another instance's first insert: that insert commits
+  // after the read's snapshot, so the read must look again, not see "none".
+  const fresh = await fixture(t);
+  const other = await fresh.pool.connect();
+  await other.query('BEGIN');
+  await other.query("INSERT INTO cinev_meta VALUES('token_signing_since', now()-interval '2 days')");
+  const reading = readLegacyCutoffs(fresh.pool);
+  await new Promise(resolve => setTimeout(resolve, 200)); // The read now waits on the conflicting insert.
+  await other.query('COMMIT'); other.release();
+  const raced = await reading;
+  assert.notEqual(raced.access, Infinity, 'the racing read found the value');
+  assert.ok(raced.access < Date.now(), 'the other instance\'s value, two days old');
+  // Before migration 006 "not recorded" is kept briefly, then read again.
+  const early = await fixture(t);
+  await early.pool.query('DROP TABLE cinev_meta');
+  assert.equal((await early.oauth.legacy()).access, Infinity);
+  await early.pool.query('CREATE TABLE cinev_meta (key text PRIMARY KEY, value timestamptz NOT NULL)');
+  assert.equal((await early.oauth.legacy()).access, Infinity, 'kept for a minute');
+  const until = (early.oauth as unknown as { cutoffsUntil: number }).cutoffsUntil;
+  assert.ok(until > Date.now() && until <= Date.now() + 60000, 'only for a minute');
+  (early.oauth as unknown as { cutoffsUntil: number }).cutoffsUntil = 0;
+  assert.notEqual((await early.oauth.legacy()).access, Infinity, 'then read again');
+});
+
+test('an outage gives back every charge of the attempt, including a strained slot', async t => {
+  const f = await fixture(t);
+  const { CinemaUnavailable } = await import('../src/auth.js');
+  await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '15 minutes',300)", [f.links.keyHash('signin-fail:global')]);
+  const network = '198.51.100.140';
+  const first = { network, provider: 'cinex' as const, username: 'a@example.test' };
+  assert.equal(await f.links.admitSignIn(first), undefined, 'takes the network\'s only strained slot');
+  assert.equal(await f.links.signInError(first, new CinemaUnavailable('down')), 'unavailable');
+  const counts = await f.pool.query('SELECT count FROM cinev_budgets WHERE key_hash=ANY($1)', [[`signin:strained:${network}`, `oauth:login-ip:${network}`, 'signin:account:cinex:a@example.test'].map(k => f.links.keyHash(k))]);
+  assert.deepEqual(counts.rows.map(r => r.count), [0, 0, 0]);
+  assert.equal(await f.links.admitSignIn({ ...first }), undefined, 'the slot is free again');
+});
+
+test('a device id planted in a browser never becomes a proof for the account signed in there', async t => {
+  const f = await fixture(t, successfulLogin);
+  const planted = 'P'.repeat(43);
+  const consent = await consentForm(f.origin, await register(f.origin));
+  const done = await consent.submit({ ...cinema, password: 'SYNTHETIC_PASSWORD' }, { Origin: f.origin, Cookie: `${consent.cookie}; cinve_device=${planted}` });
+  assert.equal(done.status, 303);
+  const issued = done.headers.getSetCookie().find(c => c.startsWith('cinve_device='))!.split(';')[0].split('=')[1];
+  assert.notEqual(issued, planted, 'a fresh id is issued');
+  const subject = (device: string) => ({ network: '203.0.113.150', provider: 'cinesunidos' as const, username: 'person@example.test', proofs: [`browser:${device}`] });
+  await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 minute',21)", [f.links.keyHash('oauth:login-ip:203.0.113.150')]);
+  assert.equal(await f.links.admitSignIn(subject(planted)), 'network', 'whoever planted the id gets no exemption');
+  assert.equal(await f.links.admitSignIn(subject(issued)), undefined, 'the browser that signed in does');
 });
