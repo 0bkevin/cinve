@@ -2,7 +2,7 @@ import { load } from 'cheerio';
 import { DataError, folded, number, requireArg, text, today } from './core.js';
 import type { DataItem, Operation, Query } from './core.js';
 import type { ReadContext } from './http.js';
-import { object, rows } from './parsers.js';
+import { clock, object, rows, titled } from './parsers.js';
 
 /**
  * Supercines (supercines.com.ve): a Laravel site with six themed venues in
@@ -13,12 +13,6 @@ import { object, rows } from './parsers.js';
 const SC = 'https://supercines.com.ve';
 const scId = /^\d{1,12}$/;
 
-/** Upstream names are upper case ("LA GRANJA", "PUERTO CABELLO"). */
-function titled(value: string): string {
-  const small = new Set(['de', 'del', 'la', 'las', 'los', 'el', 'y']);
-  return value.toLowerCase().replace(/\s+/g, ' ').trim().split(' ')
-    .map((word, i) => i > 0 && small.has(word) ? word : word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
-}
 const label = (value: unknown) => text(value).replace(/\s+/g, ' ').trim();
 
 type Venue = { id: string; name: string; city: string };
@@ -68,16 +62,6 @@ export function parseSupercinesMovies(data: unknown, cinemaId?: string): Movie[]
 }
 async function movies(c: ReadContext, cinemaId?: string): Promise<Movie[]> {
   return parseSupercinesMovies(await c.formJson(`${SC}/api/app/cartelera/list`, { type: 'all', ...(cinemaId ? { idEmpresa: cinemaId } : {}) }, 600000), cinemaId);
-}
-
-/** "5:40 PM" → "17:40". */
-function clock(value: string): string | undefined {
-  const m = value.trim().match(/^(\d{1,2}):(\d{2})\s*([AaPp])\.?\s*[Mm]\.?$/);
-  if (!m) return;
-  const hour = Number(m[1]), minute = Number(m[2]);
-  if (hour < 1 || hour > 12 || minute > 59) return;
-  const h = (hour % 12) + (/[Pp]/.test(m[3]) ? 12 : 0);
-  return `${String(h).padStart(2, '0')}:${m[2]}`;
 }
 
 type Showtime = DataItem & { kind: 'showtime'; cinema_id: string; movie_id: string; date: string; time: string };
