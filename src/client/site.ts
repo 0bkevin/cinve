@@ -1,5 +1,12 @@
-// Copy buttons: each names the element it copies in data-copy. Buttons stay
-// hidden without JavaScript; the text remains selectable.
+// The public pages' behaviour, in three parts: copy buttons, collapsible
+// sections and the sample conversation. One file on purpose: the page loads
+// it with a content hash, and modules it imported would not get one.
+
+const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+
+// --- Copy buttons -----------------------------------------------------------
+// Each names the element it copies in data-copy. Buttons stay hidden without
+// JavaScript; the text remains selectable.
 
 // Some browsers and embedded previews block the async clipboard API, so fall
 // back to selecting the element and copying the selection.
@@ -26,7 +33,7 @@ for (const button of document.querySelectorAll<HTMLButtonElement>('button[data-c
       await copyFrom(source);
       label.textContent = 'Copiado';
       button.dataset.copied = '';
-      // The green 'Copiado' button is the confirmation; the note is only for failures.
+      // The 'Copiado' label is the confirmation; the note is only for failures.
       if (feedback) feedback.textContent = '';
       clearTimeout(reset);
       reset = window.setTimeout(() => { label.textContent = 'Copiar'; delete button.dataset.copied; }, 2500);
@@ -36,6 +43,7 @@ for (const button of document.querySelectorAll<HTMLButtonElement>('button[data-c
   });
 }
 
+// --- Collapsible sections ---------------------------------------------------
 // A link to a collapsed section (such as #cines) opens it before scrolling.
 const openTarget = () => {
   const target = location.hash && document.getElementById(location.hash.slice(1));
@@ -53,7 +61,6 @@ document.addEventListener('click', event => {
 // Collapsible sections slide open and closed. FAQ answers are exclusive:
 // opening one closes the others. Without JavaScript, the FAQ details' shared
 // name keeps them exclusive natively, with no animation.
-const still = matchMedia('(prefers-reduced-motion: reduce)');
 const running = new WeakMap<HTMLDetailsElement, Animation>();
 
 function slide(item: HTMLDetailsElement, open: boolean) {
@@ -63,7 +70,7 @@ function slide(item: HTMLDetailsElement, open: boolean) {
   if (open) { item.removeAttribute('data-closing'); item.open = true; } else item.setAttribute('data-closing', '');
   // Open: the natural height now that the content shows. Closed: the summary alone.
   const to = open ? item.getBoundingClientRect().height : summary.getBoundingClientRect().height;
-  if (still.matches) { finish(item, open); return; }
+  if (reducedMotion.matches) { finish(item, open); return; }
   // fill: forwards holds the end height until the state change, so the
   // section never pops back to full size for a frame before closing.
   const animation = item.animate({ height: [`${from}px`, `${to}px`] }, { duration: open ? 320 : 260, easing: 'cubic-bezier(0.2, 0, 0, 1)', fill: 'forwards' });
@@ -86,11 +93,12 @@ for (const item of document.querySelectorAll<HTMLDetailsElement>('.faq details, 
   });
 }
 
-// Sample conversation: plays once when it scrolls into view. The HTML holds
+// --- Sample conversation ----------------------------------------------------
+// Plays once when it scrolls into view. The HTML holds
 // the finished state, so without JavaScript or with reduced motion nothing
-// is hidden.
+// is hidden (CSS hides it from the first frame only when scripts run).
 const demo = document.querySelector<HTMLElement>('.demo');
-if (demo && !matchMedia('(prefers-reduced-motion: reduce)').matches && 'IntersectionObserver' in window) {
+if (demo && !reducedMotion.matches && 'IntersectionObserver' in window) {
   const bubble = demo.querySelector<HTMLElement>('.demo-me')!;
   const text = bubble.dataset.text ?? '';
   const wait = (ms: number) => new Promise(done => setTimeout(done, ms));

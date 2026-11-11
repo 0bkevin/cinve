@@ -49,9 +49,14 @@ function renderAttributes(props: Record<string, unknown>): string {
   return out;
 }
 
-export function h(tag: string | Component<any>, props: Record<string, unknown> | null, ...children: Child[]): Html {
+// Components are typed where they are used (tsc checks each JSX call
+// against the component's own props), so the factory only needs to know it
+// receives one: `never` accepts any props type without opting out of checks.
+type AnyComponent = (props: never) => Html;
+
+export function h(tag: string | AnyComponent, props: Record<string, unknown> | null, ...children: Child[]): Html {
   const all = { ...props, children: children.length === 0 ? props?.children : children.length === 1 ? children[0] : children };
-  if (typeof tag === 'function') return tag(all);
+  if (typeof tag === 'function') return (tag as (props: typeof all) => Html)(all);
   if (!validName.test(tag)) throw new Error(`Invalid element name: ${tag}`);
   const open = `<${tag}${renderAttributes(all)}>`;
   return new Html(voidElements.has(tag) ? open : `${open}${renderChildren(all.children as Child)}</${tag}>`);

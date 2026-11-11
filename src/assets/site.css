@@ -84,6 +84,7 @@
 .footer-base { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; gap: 16px; padding-top: 24px; font-size: 13px; }
 .footer-base p { margin: 0; font-size: 13px; }
 .footer-base p a { color: var(--cream); }
+.footer-gh svg { width: 20px; height: 20px; }
 .footer-gh { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; margin: -12px -12px -12px 0; }
 
 .lead { font-size: 20px; line-height: 1.5; color: var(--foreground); }
@@ -125,7 +126,7 @@ p a:hover, .note a:hover { text-decoration-color: currentColor; }
 .row-label { margin-left: calc(-14px - var(--gap)); }
 .seat {
   --k: 0; --s: 0;
-  width: var(--size); aspect-ratio: 1 / 0.86; border-radius: 42% 42% 20% 20% / 52% 52% 24% 24%;
+  width: var(--size); aspect-ratio: 1 / 0.86; border-radius: var(--seat-shape);
   background: var(--seat); box-shadow: inset 0 -0.24em 0 rgba(0, 0, 0, 0.32), inset 0 0.1em 0 rgba(255, 255, 255, 0.1);
   /* Rows curve around the screen. */
   translate: 0 calc(var(--k) * var(--curve) * -1); rotate: calc(var(--s) * 7deg);
@@ -155,7 +156,7 @@ p a:hover, .note a:hover { text-decoration-color: currentColor; }
 /* The legend is real text; its keys reuse the seat shape. */
 .legend { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px 22px; margin-top: 20px; font-size: 13px; color: var(--dust); }
 .legend span { display: inline-flex; align-items: center; gap: 8px; }
-.legend i, .glyph { display: inline-block; flex-shrink: 0; width: 16px; aspect-ratio: 1 / 0.86; border-radius: 42% 42% 20% 20% / 52% 52% 24% 24%; background: var(--seat); }
+.legend i, .glyph { display: inline-block; flex-shrink: 0; width: 16px; aspect-ratio: 1 / 0.86; border-radius: var(--seat-shape); background: var(--seat); }
 .legend i[data-state=taken] { background: var(--taken); box-shadow: inset 0 0 0 1px #4a3039; }
 .legend i[data-state=unknown] { background: transparent; box-shadow: inset 0 0 0 1.5px rgba(184, 167, 161, 0.7); }
 
@@ -202,7 +203,7 @@ p a:hover, .note a:hover { text-decoration-color: currentColor; }
 /* What you can ask: four examples, with the per-cinema table one click away. */
 /* Open summary columns: no boxes, each item marked with a small amber seat. */
 .asks { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 32px 40px; }
-.asks li::before { content: ''; display: block; width: 18px; aspect-ratio: 1 / 0.86; margin-bottom: 16px; border-radius: 42% 42% 20% 20% / 52% 52% 24% 24%; background: var(--amber); box-shadow: 0 0 14px rgba(255, 189, 63, 0.4); }
+.asks li::before { content: ''; display: block; width: 18px; aspect-ratio: 1 / 0.86; margin-bottom: 16px; border-radius: var(--seat-shape); background: var(--amber); box-shadow: 0 0 14px rgba(255, 189, 63, 0.4); }
 .asks .topic { display: block; font: 700 clamp(21px, 2vw, 27px)/1.1 var(--font-display); letter-spacing: -0.03em; color: var(--foreground); }
 .asks .ask { display: block; margin-top: 8px; font-size: 15px; color: var(--dust); }
 .more { margin-top: 36px; }
@@ -472,7 +473,7 @@ button:disabled, .btn:disabled { cursor: not-allowed; }
 /* 404: an empty row of seats, numbered like the hero's rows. */
 .lost-row { display: flex; align-items: center; gap: 10px; margin-bottom: 36px; }
 .lost-label { margin-right: 6px; font: 800 22px/1 var(--font-display); letter-spacing: -0.02em; color: var(--amber); }
-.lost-row i { width: 30px; aspect-ratio: 1 / 0.86; border-radius: 42% 42% 20% 20% / 52% 52% 24% 24%; box-shadow: inset 0 0 0 1.5px rgba(184, 167, 161, 0.45); animation: row-in .5s ease-out backwards; }
+.lost-row i { width: 30px; aspect-ratio: 1 / 0.86; border-radius: var(--seat-shape); box-shadow: inset 0 0 0 1.5px rgba(184, 167, 161, 0.45); animation: row-in .5s ease-out backwards; }
 .lost-row i:nth-of-type(2) { animation-delay: .05s; } .lost-row i:nth-of-type(3) { animation-delay: .1s; } .lost-row i:nth-of-type(4) { animation-delay: .15s; }
 .lost-row i:nth-of-type(5) { animation-delay: .2s; } .lost-row i:nth-of-type(6) { animation-delay: .25s; } .lost-row i:nth-of-type(7) { animation-delay: .3s; } .lost-row i:nth-of-type(8) { animation-delay: .35s; }
 .lost-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }
@@ -503,10 +504,10 @@ button:disabled, .btn:disabled { cursor: not-allowed; }
 .demo-screen { height: 5px; margin: 0 8px 6px 28px; border-radius: 0 0 50% 50% / 0 0 100% 100%; border-top: 2px solid rgba(246, 238, 228, .5); }
 .demo-row { display: flex; align-items: center; gap: 5px; }
 .demo-row b { width: 20px; font-size: 12px; font-weight: 700; color: var(--dust); }
-.demo i { display: inline-block; width: 22px; aspect-ratio: 1 / .86; border-radius: 42% 42% 20% 20% / 52% 52% 24% 24%; }
-.demo i[data-s=free] { background: var(--seat); }
-.demo i[data-s=taken] { background: rgba(246, 238, 228, .1); }
-.demo i[data-s=pair] { background: var(--amber); box-shadow: 0 0 14px rgba(255, 189, 63, .6); }
+.demo i { display: inline-block; width: 22px; aspect-ratio: 1 / .86; border-radius: var(--seat-shape); }
+.demo i[data-state=free] { background: var(--seat); }
+.demo i[data-state=taken] { background: rgba(246, 238, 228, .1); }
+.demo i[data-state=pair] { background: var(--amber); box-shadow: 0 0 14px rgba(255, 189, 63, .6); }
 .demo-key { display: flex; gap: 16px; margin-top: 12px; font-size: 12px; color: var(--dust); }
 .demo-key span { display: inline-flex; align-items: center; gap: 6px; }
 .demo .demo-key i { width: 12px; max-width: none; box-shadow: none !important; }
@@ -533,7 +534,7 @@ button:disabled, .btn:disabled { cursor: not-allowed; }
 .demo[data-stage=answer] .demo-answer > p { animation: unfold .35s ease-out both; }
 .demo[data-stage=answer] .demo-row { animation: row-in .4s ease-out both; }
 .demo[data-stage=answer] .demo-row:nth-child(3) { animation-delay: .08s; } .demo[data-stage=answer] .demo-row:nth-child(4) { animation-delay: .16s; } .demo[data-stage=answer] .demo-row:nth-child(5) { animation-delay: .24s; }
-.demo[data-stage=answer] i[data-s=pair] { animation: light .7s .6s ease-out both; }
+.demo[data-stage=answer] i[data-state=pair] { animation: light .7s .6s ease-out both; }
 .demo[data-stage=answer] .demo-key { animation: unfold .35s .5s ease-out both; }
 
 @media (max-width: 1000px) {

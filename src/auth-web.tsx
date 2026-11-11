@@ -1,11 +1,11 @@
-import { h, renderDocument } from './web/jsx.js';
-import { Page } from './web/layout.js';
+import { h, Fragment } from './web/jsx.js';
+import { renderPage } from './web/layout.js';
 import { Alert, Button, icons } from './web/ui.js';
 
 // One card is visible at a time (checking, form, result); connect.js
 // switches between them. Without JavaScript only the noscript notice shows.
 export function loginPage() {
-  return renderDocument(<Page title="Conectar cuentas" compact script="/assets/js/connect.js">
+  return renderPage('Conectar cuentas', <>
     <h1>Conecta tu cuenta del cine.</h1>
     <p class="lead">Así tu asistente podrá consultar precios y asientos con tu cuenta.</p>
     <div class="card" id="checking" hidden><section class="loading" role="status">{icons.spinner()}<span>Comprobando el enlace…</span></section></div>
@@ -43,5 +43,5 @@ export function loginPage() {
     <template id="icon-spinner">{icons.spinner()}</template>
     <noscript><Alert icon={icons.circleAlert()} title="Activa JavaScript para conectar tu cuenta."><p>El enlace se comprueba en tu navegador para que nunca llegue al servidor.</p></Alert></noscript>
     <p class="note">Este enlace caduca en 10 minutos.</p>
-  </Page>);
+  </>, { compact: true, script: '/assets/js/connect.js' });
 }

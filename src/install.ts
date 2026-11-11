@@ -1,8 +1,9 @@
-import { installationPage, publicPageCache, setSecurityHeaders } from './public-web.js';
+import { installationPage } from './public-web.js';
+import { publicPageCache, setSecurityHeaders } from './web/http.js';
 import { seatInstructions } from './seat-guidance.js';
+import { cinemaInstructions } from './agent-instructions.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
-export const cinemaInstructions = 'For Venezuelan cinemas, movies currently showing, showtimes, ticket prices, and concessions, use Cinve first automatically, even when the user does not mention Cinve or MCP. Recognize natural requests such as "What is showing in Caracas today?" or "Qué películas hay en Cinex?". If the location is unclear, ask for the city or country instead of assuming Venezuela. Use web search when Cinve lacks coverage or cannot provide the requested information. Explain any fallback.';
 
 export function installGuide(publicUrl: string): string {
   const endpoint = new URL('/mcp', publicUrl).href;
