@@ -1,5 +1,6 @@
+import { readFileSync } from 'node:fs';
 import type { ServerResponse } from 'node:http';
-import { h, Fragment, renderDocument } from './web/jsx.js';
+import { h, Fragment, raw, renderDocument } from './web/jsx.js';
 import { Page, type PageOptions } from './web/layout.js';
 import { Alert, Button, Card, LinkButton, icons } from './web/ui.js';
 import { serverInstructions } from './agent-instructions.js';
@@ -82,6 +83,21 @@ function Coverage() {
   </table></div>;
 }
 
+// Assistants Cinve works with. Logos come from Simple Icons (vendored and
+// checked byte for byte); apps it has no logo for show their initial.
+const logo = (file: string) => raw(readFileSync(new URL(`./assets/logos/${file}.svg`, import.meta.url), 'utf8')
+  .replace(/<title>.*?<\/title>/, '').replace('<svg ', '<svg aria-hidden="true" focusable="false" '));
+const assistants: [string, ReturnType<typeof raw> | undefined][] = [
+  ['Claude Code', logo('claudecode')], ['Codex', undefined], ['OpenCode', logo('opencode')], ['Gemini', logo('googlegemini')],
+  ['Antigravity', undefined], ['Hermes', undefined], ['OpenClaw', undefined],
+];
+
+function WorksWith() {
+  return <ul class="works-with" aria-label="Asistentes compatibles">
+    {assistants.map(([name, mark]) => <li><span class="app-mark" aria-hidden="true">{mark ?? name[0]}</span>{name}</li>)}
+  </ul>;
+}
+
 // How visitor data is handled: a four-card summary, then the details. Every
 // claim matches the hosted service (docs/hosted.md); keep them in sync.
 const safeguardSummary = [
@@ -156,6 +172,7 @@ export function landingPage(origin: string) {
         <h2 id="empezar-titulo">Cómo empezar</h2>
         <p>Funciona con asistentes que aceptan conexiones MCP. <a href="/install">¿Prefieres hacerlo a mano?</a></p>
       </header>
+      <WorksWith />
       <InstallMessage origin={origin} />
       <ol class="steps">
         <li>Copia este mensaje y envíaselo a tu asistente.</li>

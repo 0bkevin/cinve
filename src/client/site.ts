@@ -25,9 +25,10 @@ for (const button of document.querySelectorAll<HTMLButtonElement>('button[data-c
     try {
       await copyFrom(source);
       label.textContent = 'Copiado';
+      button.dataset.copied = '';
       if (feedback) feedback.textContent = 'Mensaje copiado. Pégalo en tu asistente.';
       clearTimeout(reset);
-      reset = window.setTimeout(() => { label.textContent = 'Copiar'; }, 2500);
+      reset = window.setTimeout(() => { label.textContent = 'Copiar'; delete button.dataset.copied; }, 2500);
     } catch {
       if (feedback) feedback.textContent = 'Selecciona el texto y cópialo.';
     }

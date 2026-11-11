@@ -413,3 +413,13 @@ button:disabled, .btn:disabled { cursor: not-allowed; }
 .snippet pre { flex: 1; min-width: 0; margin: 0; padding: 10px 0; font: 500 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--foreground); white-space: pre-wrap; overflow-wrap: break-word; }
 .snippet pre span { white-space: nowrap; }
 .snippet .btn { flex-shrink: 0; }
+
+/* Assistants Cinve works with: logo (or initial) and name. */
+.works-with { list-style: none; margin: 0 0 28px; padding: 0; display: flex; flex-wrap: wrap; gap: 10px; }
+.works-with li { display: inline-flex; align-items: center; gap: 10px; padding: 6px 14px 6px 6px; border-radius: 999px; background: var(--night); font-size: 14px; font-weight: 500; color: var(--foreground); }
+.app-mark { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--surface); font: 700 13px/1 var(--font-display); color: var(--cream); }
+.app-mark svg { width: 15px; height: 15px; fill: currentColor; }
+
+/* Copy buttons turn green once the text is on the clipboard. */
+.btn[data-copied] { background: var(--success); border-color: transparent; color: #08130b; }
+.btn[data-variant=ghost][data-copied] { background: transparent; color: var(--success); }
