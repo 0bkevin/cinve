@@ -1,4 +1,4 @@
-import { landingPage, servePublicAsset } from './public-web.js';
+import { instructionsPage, landingPage, servePublicAsset } from './public-web.js';
 import { hostedAuthInstructions } from './hosted-auth-guidance.js';
 import { HostedOAuth } from './oauth.js';
 import { ClientMetadataCache } from './client-metadata.js';
@@ -125,8 +125,8 @@ export async function createHostedApp(options: {
         await links.cleanup(); send(200, { cleaned: true }); return;
       }
       const pagePath = req.url?.split('?')[0];
-      if (['GET', 'HEAD'].includes(req.method ?? '') && (pagePath === '/connect' || pagePath === '/')) {
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(req.method === 'HEAD' ? undefined : pagePath === '/' ? landingPage(origin) : loginPage()); return;
+      if (['GET', 'HEAD'].includes(req.method ?? '') && (pagePath === '/connect' || pagePath === '/' || pagePath === '/instrucciones')) {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(req.method === 'HEAD' ? undefined : pagePath === '/' ? landingPage(origin) : pagePath === '/instrucciones' ? instructionsPage(origin) : loginPage()); return;
       }
       if (req.url === '/mcp') {
         const authorization = req.headers.authorization ?? '';

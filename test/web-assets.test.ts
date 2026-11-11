@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { vendored, vendoredSource } from '../scripts/vendor-assets.js';
-import { authorizationPage, installationPage, landingPage, authorizationErrorPage } from '../src/public-web.js';
+import { authorizationPage, installationPage, instructionsPage, landingPage, authorizationErrorPage, escapeHtml } from '../src/public-web.js';
+import { serverInstructions } from '../src/agent-instructions.js';
 import { loginPage } from '../src/auth-web.js';
 
 test('vendored stylesheet and fonts are the pinned package files, unmodified', () => {
@@ -13,10 +14,15 @@ test('vendored stylesheet and fonts are the pinned package files, unmodified', (
 });
 
 test('pages carry no inline styles or scripts, so they render under the CSP without unsafe-inline', () => {
-  const pages = [landingPage('https://cinve.example'), installationPage('https://cinve.example'), authorizationErrorPage(), loginPage(),
+  const pages = [landingPage('https://cinve.example'), installationPage('https://cinve.example'), instructionsPage('https://cinve.example'), authorizationErrorPage(), loginPage(),
     authorizationPage('App', 'https://app.example', 'id', 'csrf')];
   for (const html of pages) {
     assert.doesNotMatch(html, /<style|\sstyle=|\son[a-z]+=|<script>/);
     assert.match(html, /<link rel="stylesheet" href="\/assets\/basecoat\.css\?v=[0-9a-f]+">/);
   }
+});
+
+test('the instructions page shows the exact text the MCP server sends', () => {
+  const html = instructionsPage('https://cinve.example');
+  for (const mode of [{ publicHosted: true }, { accounts: true }]) assert.ok(html.includes(escapeHtml(serverInstructions(mode))));
 });

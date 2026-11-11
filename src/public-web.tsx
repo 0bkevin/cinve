@@ -1,6 +1,10 @@
 import { h, Fragment, renderDocument } from './web/jsx.js';
 import { Page, type PageOptions } from './web/layout.js';
 import { Alert, Button, Card, LinkButton, icons } from './web/ui.js';
+import { serverInstructions } from './agent-instructions.js';
+import { hostedAuthInstructions } from './hosted-auth-guidance.js';
+import { seatInstructions } from './seat-guidance.js';
+import { cinemaInstructions } from './install.js';
 
 export { escapeHtml } from './web/jsx.js';
 export { servePublicAsset } from './web/assets.js';
@@ -197,6 +201,29 @@ export function installationPage(origin: string) {
     <p>Después, pregunta qué películas hay en tu ciudad. Para consultar la cartelera no necesitas una cuenta. Si una consulta requiere conectarte al cine, tu asistente te dará un enlace privado.</p>
     <p class="note"><a href="/install?format=text">Ver las instrucciones completas para el asistente</a></p>
   </>, { compact: true, script: '/assets/js/site.js' });
+}
+
+/** One instruction text, exactly as the assistant receives it. */
+function Prompt({ title, children }: { title: string; children: string }) {
+  return <section class="prompt">
+    <h2>{title}</h2>
+    <pre>{children}</pre>
+  </section>;
+}
+
+export function instructionsPage(origin: string) {
+  return page('Instrucciones para tu asistente', <>
+    <h1>Lo que Cinve le pide a tu asistente.</h1>
+    <p class="lead">Cuando tu asistente se conecta a Cinve, recibe estas instrucciones. Las publicamos tal cual para que sepas qué hace y qué no.</p>
+    <Prompt title="Al conectarse">{serverInstructions({ publicHosted: true })}</Prompt>
+    <Prompt title="Al guardar tu preferencia">{cinemaInstructions + '\n\n' + seatInstructions}</Prompt>
+    <details class="more">
+      <summary>Al conectar tu cuenta del cine {icons.chevronDown()}</summary>
+      <Prompt title="Con tu cuenta conectada">{serverInstructions({ accounts: true })}</Prompt>
+      <Prompt title="Para autorizar la conexión">{hostedAuthInstructions(origin)}</Prompt>
+    </details>
+    <p class="note">La guía de instalación que sigue tu asistente está en <a href="/install?format=text">/install</a>. El código de estas instrucciones es público en <a href="https://github.com/0bkevin/cinve">GitHub</a>.</p>
+  </>, { compact: true });
 }
 
 export function authorizationPage(app: string, destination: string, id: string, csrf: string, publisher?: string) {
