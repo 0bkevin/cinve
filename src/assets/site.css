@@ -81,10 +81,10 @@
 p a, .note a { text-decoration: underline; text-decoration-color: var(--input); }
 p a:hover, .note a:hover { text-decoration-color: currentColor; }
 .note:empty { display: none; }
-.btn { border-radius: 999px; }
+.btn { border-radius: 12px; }
 .password-row .btn { border-radius: var(--radius); }
 .btn svg { width: 16px; height: 16px; }
-.btn[data-size=lg] { height: 52px; padding-inline: 26px; font-size: 16px; font-weight: 600; border-radius: 999px; }
+.btn[data-size=lg] { height: 52px; padding-inline: 26px; font-size: 16px; font-weight: 600; border-radius: 14px; }
 
 /* ── Hero: the house, then one question ──────────────────────────────── */
 .hero { padding: 24px 0 112px; }
@@ -151,7 +151,7 @@ p a:hover, .note a:hover { text-decoration-color: currentColor; }
 .hero-copy .lead { margin: 0 0 28px; max-width: 30ch; }
 
 /* ── Sections ─────────────────────────────────────────────────────────── */
-.section { padding: 96px 0; border-top: 1px solid var(--border); }
+.section { padding: 96px 0; }
 .section-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: end; gap: 12px 48px; margin-bottom: 48px; }
 .section-head h2 { margin: 0; }
 .section-head p { max-width: 44ch; margin: 0; }
@@ -180,17 +180,12 @@ p a:hover, .note a:hover { text-decoration-color: currentColor; }
 .board td[data-access=none] { color: var(--dust); }
 .board td[data-access=none] .glyph { background: transparent; box-shadow: inset 0 0 0 1.5px rgba(184, 167, 161, 0.6); }
 
-/* The hero's one-line summary of what Cinve can look up. */
-.abilities { list-style: none; margin: 0 0 28px; padding: 0; display: grid; grid-template-columns: repeat(2, max-content); gap: 8px; }
-.abilities li { display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px 6px 10px; border: 1px solid var(--border); border-radius: 999px; font-size: 14px; color: var(--foreground); }
-.abilities svg { width: 15px; height: 15px; color: var(--amber); }
-
 /* What you can ask: four examples, with the per-cinema table one click away. */
 .asks { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
 .asks li { padding: 22px 22px 24px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; }
 .asks .topic { display: block; font: 700 clamp(19px, 1.8vw, 24px)/1.1 var(--font-display); letter-spacing: -0.03em; color: var(--foreground); }
 .asks .ask { display: block; margin-top: 8px; font-size: 15px; color: var(--dust); }
-.more { margin-top: 20px; border-top: 1px solid var(--border); }
+.more { margin-top: 12px; }
 .more > summary { display: flex; align-items: center; gap: 10px; width: fit-content; padding: 18px 0 4px; list-style: none; cursor: pointer; font-weight: 600; color: var(--foreground); }
 .more > summary::-webkit-details-marker { display: none; }
 .more > summary:hover { color: var(--amber); }
@@ -204,7 +199,8 @@ p a:hover, .note a:hover { text-decoration-color: currentColor; }
 .safeguards svg { width: 22px; height: 22px; color: var(--amber); margin-bottom: 14px; }
 .safeguards h3 { margin: 0 0 8px; font: 700 20px/1.15 var(--font-display); letter-spacing: -0.02em; color: var(--foreground); }
 .safeguards p { margin: 0; font-size: 15px; }
-#datos > .note { margin-top: 40px; }
+.more > .safeguards { margin-top: 32px; }
+.more > .note { margin-top: 32px; }
 
 .notes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px 48px; margin-top: 40px; }
 .notes p { margin: 0; font-size: 15px; }
@@ -212,13 +208,13 @@ p a:hover, .note a:hover { text-decoration-color: currentColor; }
 /* How to start: the message itself, then three steps. */
 .install { display: flex; align-items: center; gap: 16px; padding: 14px 14px 14px 26px; background: var(--card); border: 1px solid var(--line); border-radius: 18px; }
 .install #install-message { flex: 1; min-width: 0; margin: 0; max-width: none; font: 500 clamp(17px, 1.9vw, 24px)/1.35 var(--font-sans); letter-spacing: -0.01em; color: var(--foreground); overflow-wrap: anywhere; }
-.install .btn { height: 44px; padding-inline: 18px; border-radius: 999px; }
+.install .btn { height: 44px; padding-inline: 18px; border-radius: 10px; }
 .install + .note { margin-top: 12px; }
 .steps { list-style: none; counter-reset: step; margin: 40px 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px 48px; }
 .steps > li { counter-increment: step; color: var(--foreground); }
 .steps > li::before { content: counter(step); display: block; margin-bottom: 12px; font: 800 44px/1 var(--font-display); letter-spacing: -0.04em; color: var(--amber); }
 
-.project-note { padding: 32px 0; border-top: 1px solid var(--border); }
+.project-note { padding: 8px 0 40px; }
 .project-note p { font-size: 14px; max-width: 80ch; }
 
 /* ── Compact pages: install, authorization and account connection ────── */
