@@ -341,7 +341,11 @@ details.more[data-closing] > summary .chevron { transform: none; }
   .manual .snippet .btn { align-self: flex-end; }
   .wrap { width: calc(100% - 32px); }
   .site-nav a:not(.nav-cta) { display: none; }
-  .footer-links { display: grid; grid-template-columns: auto auto; justify-content: start; gap: 40px; }
+  /* Phones: brand on top, then the two link groups splitting the width evenly. */
+  .site-footer { gap: 32px; padding: 40px 0 20px; }
+  .footer-brand { max-width: none; }
+  .footer-links { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+  .footer-base { padding-top: 8px; }
   .consent-actions { flex-direction: column; }
   .consent-actions .btn { width: 100%; }
   .site-header { height: 64px; }
@@ -364,6 +368,11 @@ details.more[data-closing] > summary .chevron { transform: none; }
   .install .btn { width: 100%; }
   .compact { margin: 40px auto 64px; }
   .card > footer .btn { flex: 1; }
+}
+
+/* Narrowest phones: equal halves would break "Reportar un problema". */
+@media (max-width: 380px) {
+  .footer-links { grid-template-columns: auto auto; justify-content: start; gap: 40px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
