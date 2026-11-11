@@ -946,6 +946,7 @@ test('rate limits group an IPv6 subscriber by /64 and keep IPv4 per address', as
   assert.equal(rateLimitNetwork('2001:0db8:0001:0002:ffff:eeee:dddd:cccc'), network);
   assert.notEqual(rateLimitNetwork('2001:db8:1:3::1'), network);
   assert.equal(rateLimitNetwork('unknown'), 'unknown');
+  assert.equal(rateLimitNetwork('attacker-chosen text'), 'unknown');
 });
 
 test('connection-link sign-ins are charged to the network, and failures and successes are recorded', async t => {
@@ -1069,7 +1070,7 @@ test('access tokens are signed: forgeries are refused without a database query, 
 });
 
 test('the access token format is judged in memory, and unsigned tokens stop at the cutoff', async () => {
-  const { accessTokenFormat, legacyAccessTokensUntil } = await import('../src/oauth.js');
+  const { accessTokenFormat } = await import('../src/oauth.js');
   const { createHmac } = await import('node:crypto');
   const key = randomBytes(32), id = randomBytes(32).toString('base64url');
   const signed = `cva_${id}.${createHmac('sha256', key).update('cva_' + id).digest('base64url')}`;
@@ -1077,8 +1078,8 @@ test('the access token format is judged in memory, and unsigned tokens stop at t
   assert.equal(accessTokenFormat(signed, randomBytes(32)), undefined, 'another key');
   assert.equal(accessTokenFormat(`cva_${randomBytes(32).toString('base64url')}.${signed.split('.')[1]}`, key), undefined, 'a signature moved to another id');
   const legacy = 'cva_' + id;
-  assert.equal(accessTokenFormat(legacy, key, legacyAccessTokensUntil - 1), 'legacy');
-  assert.equal(accessTokenFormat(legacy, key, legacyAccessTokensUntil), undefined);
+  assert.equal(accessTokenFormat(legacy, key, 1000, 999), 'legacy');
+  assert.equal(accessTokenFormat(legacy, key, 1000, 1000), undefined);
   for (const bad of ['', 'cva_', signed + 'x', 'cvr_' + id, `cva_${id}.`]) assert.equal(accessTokenFormat(bad, key), undefined);
 });
 
@@ -1135,7 +1136,7 @@ test('refresh tokens are signed: forgeries are refused and revocations ignored w
 });
 
 test('refresh token formats are judged in memory and never accept an access signature', async () => {
-  const { refreshTokenFormat, accessTokenFormat, legacyRefreshTokensUntil } = await import('../src/oauth.js');
+  const { refreshTokenFormat, accessTokenFormat } = await import('../src/oauth.js');
   const { createHmac } = await import('node:crypto');
   const key = randomBytes(32), id = randomBytes(32).toString('base64url');
   const mac = (prefix: string) => createHmac('sha256', key).update(prefix + id).digest('base64url');
@@ -1143,8 +1144,8 @@ test('refresh token formats are judged in memory and never accept an access sign
   assert.equal(refreshTokenFormat(`cvr_${id}.${mac('cva_')}`, key), undefined, 'an access signature on a refresh id');
   assert.equal(accessTokenFormat(`cva_${id}.${mac('cvr_')}`, key), undefined, 'a refresh signature on an access id');
   assert.equal(refreshTokenFormat(`cva_${id}.${mac('cva_')}`, key), undefined, 'an access token is not a refresh token');
-  assert.equal(refreshTokenFormat('cvr_' + id, key, legacyRefreshTokensUntil - 1), 'legacy');
-  assert.equal(refreshTokenFormat('cvr_' + id, key, legacyRefreshTokensUntil), undefined);
+  assert.equal(refreshTokenFormat('cvr_' + id, key, 1000, 999), 'legacy');
+  assert.equal(refreshTokenFormat('cvr_' + id, key, 1000, 1000), undefined);
 });
 
 test('rate-limit keys are stored as HMACs under a derived key, never as plain digests', async t => {
@@ -1469,4 +1470,32 @@ test('expired rate-limit windows and unbound authorization requests are pruned a
   for (let i = 0; i < 50; i++) await fetch((await authorizationRequest(f.origin, client_id)).url);
   const left = (await f.pool.query("SELECT id FROM cinev_oauth_requests WHERE expires_at<=now()")).rows.map(r => r.id);
   assert.deepEqual(left, ['bound']);
+});
+
+test('legacy cutoffs follow when signing began, recorded once by the first instance', async t => {
+  const f = await fixture(t);
+  const { legacyCutoffs, readLegacyCutoffs } = await import('../src/oauth.js');
+  const first = await readLegacyCutoffs(f.pool), again = await readLegacyCutoffs(f.pool);
+  assert.deepEqual(first, again, 'recorded once');
+  const since = (await f.pool.query("SELECT value FROM cinev_meta WHERE key='token_signing_since'")).rows[0].value as Date;
+  assert.ok(Math.abs(since.getTime() - Date.now()) < 60000);
+  assert.deepEqual(first, { access: since.getTime() + 86400000, refresh: since.getTime() + 31 * 86400000, link: since.getTime() + 86400000 });
+  assert.deepEqual(legacyCutoffs(undefined), { access: Infinity, refresh: Infinity, link: Infinity }, 'before migration 006');
+  // Once the cutoff has passed, real unsigned tokens and links are refused.
+  const late = await fixture(t);
+  const { digest } = await import('../src/hosted-store.js');
+  const { client_id, tokens } = await enrolled(late.origin);
+  const user = (await late.pool.query('SELECT user_id FROM cinev_oauth_tokens WHERE token_hash=$1', [digest(tokens.access_token)])).rows[0].user_id;
+  const access = 'cva_' + randomBytes(32).toString('base64url'), refresh = 'cvr_' + randomBytes(32).toString('base64url'), linkToken = randomBytes(32).toString('hex');
+  await late.pool.query(`INSERT INTO cinev_oauth_tokens(token_hash,user_id,kind,expires_at) VALUES($1,$3,'access',now()+interval '1 hour'),
+    ($2,$3,'refresh',(SELECT expires_at FROM cinev_oauth_grants WHERE user_id=$3))`, [digest(access), digest(refresh), user]);
+  await late.pool.query(`INSERT INTO cinev_links(token_hash,user_id,provider,stage,expires_at) VALUES($1,$2,'cinex','invitation',now()+interval '10 minutes')`,
+    [digest(linkToken), late.alice.id]);
+  const use = async () => ({
+    access: (await fetch(late.origin + '/mcp', { method: 'POST', body: '{}', headers: { Authorization: `Bearer ${access}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' } })).status,
+    refresh: (await form(late.origin, '/oauth/token', { grant_type: 'refresh_token', client_id, resource: late.origin + '/mcp', refresh_token: refresh })).status,
+  });
+  await late.pool.query("INSERT INTO cinev_meta VALUES('token_signing_since', now()-interval '40 days')");
+  assert.deepEqual(await use(), { access: 401, refresh: 400 });
+  assert.equal((await late.post('/connect/exchange', linkToken)).status, 403, 'an unsigned link is no longer accepted');
 });

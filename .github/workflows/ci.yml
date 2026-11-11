@@ -27,7 +27,8 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17-alpine
+        # Pinned by digest (17-alpine, 2026-11-06); update it deliberately.
+        image: postgres:17-alpine@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: cinve_test
@@ -45,6 +46,9 @@ jobs:
     steps:
       - name: Descargar el código
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Later steps run dependency code; they need no Git credentials.
+          persist-credentials: false
 
       - name: Preparar Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0

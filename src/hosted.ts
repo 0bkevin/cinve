@@ -71,7 +71,8 @@ function wellFormedOrigin(value: string): boolean {
  */
 export function rateLimitNetwork(address: string): string {
   const bytes = addressBytes(address);
-  if (!bytes) return address;
+  // Not an address (no socket address): one shared key, never caller-chosen text.
+  if (!bytes) return 'unknown';
   if (bytes.length === 4) return bytes.join('.');
   if (bytes.slice(0, 10).every(b => b === 0) && bytes[10] === 0xff && bytes[11] === 0xff) return bytes.slice(12).join('.');
   return Buffer.from(bytes.slice(0, 8)).toString('hex').replace(/(.{4})(?!$)/g, '$1:') + '::/64';
@@ -259,7 +260,7 @@ export async function createHostedApp(options: {
       if (req.headers.origin !== origin || (req.headers['sec-fetch-site'] && req.headers['sec-fetch-site'] !== 'same-origin')) throw new HttpError(403, 'Origen no permitido.');
       const token = req.headers['x-cinev-connection'];
       const format = typeof token === 'string' ? links.linkFormat(token, req.url === '/connect/exchange' ? 'invitation' : 'browser') : undefined;
-      if (typeof token !== 'string' || !format) throw new HttpError(403, 'Enlace no válido.');
+      if (typeof token !== 'string' || !format || (format === 'legacy' && Date.now() >= (await oauth.legacy()).link)) throw new HttpError(403, 'Enlace no válido.');
       // A signed link cannot be forged, so others' failures never hold it back,
       // and one that already failed (used, expired, revoked) fails from memory.
       const linkFailed = () => { if (format === 'signed') deadTokens.add(digest(token)); else localAuthFailures.hit(ip); };

@@ -189,10 +189,12 @@ acceso y de renovación llevan además una firma HMAC-SHA256 con una subclave
 derivada (HKDF) de `CINEV_ENCRYPTION_KEY`: un token falsificado se rechaza en
 memoria, sin consultar la base (también al revocarlo), y uno válido se sigue
 comprobando en ella para respetar su vencimiento, su revocación y la detección
-de reutilización. Los tokens sin firma emitidos antes de este cambio se aceptan
-hasta el 1 de diciembre de 2026 (acceso) y el 1 de enero de 2027 (renovación);
-si se despliega después del 2 de diciembre de 2026, retrasa la fecha de
-renovación al menos 30 días tras el despliegue. Las sesiones de
+de reutilización. Los tokens y enlaces sin firma emitidos antes de este cambio
+se aceptan durante un tiempo limitado desde que la primera instancia empezó a
+firmar, momento que queda registrado en `cinev_meta` (migración 006): un día
+para tokens de acceso y enlaces y 31 días para tokens de renovación. Así la
+transición sigue al despliegue real; mientras no se ejecute la migración 006,
+se siguen aceptando. Las sesiones de
 cine se cifran con AES-256-GCM y se vinculan criptográficamente a su propietario
 y proveedor. El registro, la aprobación y la emisión de tokens tienen límites persistentes
 por red y por prefijo IPv6 /48. Solo el registro (60 por minuto) y el inicio de

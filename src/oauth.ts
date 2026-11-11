@@ -27,16 +27,32 @@ const registration = z.object({
   grant_types: z.array(z.enum(['authorization_code', 'refresh_token'])).default(['authorization_code', 'refresh_token']),
   response_types: z.array(z.literal('code')).default(['code']),
 });
+/** Until when (epoch ms) unsigned tokens and links issued before signing are accepted. */
+export type LegacyCutoffs = { access: number; refresh: number; link: number };
 /**
- * Tokens issued before signing was introduced (a prefix plus 43 random
- * characters) stay valid until these cutoffs, which only have to outlive the
- * deployment that introduces signing: access tokens last one hour, refresh
- * tokens at most the 30-day grant. After them every token must be signed and
- * the legacy branch can be removed. A deployment after 2026-12-02 must move
- * the refresh cutoff to at least 30 days after it.
+ * Cutoffs from the moment the first instance began signing (recorded in
+ * cinev_meta, so they follow the real deployment, not a fixed date). Access
+ * tokens and links last at most an hour and refresh tokens their 30-day
+ * grant; a day of margin covers instances of the previous version still
+ * issuing unsigned ones during a rolling deploy. Without that record (a
+ * deployment before migration 006) every legacy token keeps working.
  */
-export const legacyAccessTokensUntil = Date.parse('2026-12-01T00:00:00Z');
-export const legacyRefreshTokensUntil = Date.parse('2027-01-01T00:00:00Z');
+export function legacyCutoffs(since: Date | undefined): LegacyCutoffs {
+  if (!since) return { access: Infinity, refresh: Infinity, link: Infinity };
+  const day = 86400000, t = since.getTime();
+  return { access: t + day, refresh: t + 31 * day, link: t + day };
+}
+/** Records (once) and reads when signing began. */
+export async function readLegacyCutoffs(pool: Pool): Promise<LegacyCutoffs> {
+  try {
+    const { rows } = await pool.query(`WITH ins AS (INSERT INTO cinev_meta(key,value) VALUES('token_signing_since',now()) ON CONFLICT (key) DO NOTHING RETURNING value)
+      SELECT value FROM ins UNION ALL SELECT value FROM cinev_meta WHERE key='token_signing_since'`);
+    return legacyCutoffs(rows[0]?.value);
+  } catch (error) {
+    if ((error as { code?: string }).code === '42P01') return legacyCutoffs(undefined); // Migration 006 pending.
+    throw error;
+  }
+}
 type TokenPrefix = 'cva_' | 'cvr_';
 // The prefix is part of the signed text, so an access signature never validates a refresh token.
 const tokenMac = (key: Buffer, prefix: TokenPrefix, id: string) => createHmac('sha256', key).update(prefix + id).digest('base64url');
@@ -53,8 +69,9 @@ function tokenFormat(prefix: TokenPrefix, cutoff: number, token: string, key: Bu
   if (signed) return timingSafeEqual(Buffer.from(signed[2]), Buffer.from(tokenMac(key, prefix, signed[1]))) ? 'signed' : undefined;
   return /^[A-Za-z0-9_-]{43}$/.test(token.slice(prefix.length)) && now < cutoff ? 'legacy' : undefined;
 }
-export const accessTokenFormat = (token: string, key: Buffer, now = Date.now()) => tokenFormat('cva_', legacyAccessTokensUntil, token, key, now);
-export const refreshTokenFormat = (token: string, key: Buffer, now = Date.now()) => tokenFormat('cvr_', legacyRefreshTokensUntil, token, key, now);
+/** legacyUntil: when unsigned tokens stop being accepted (Infinity: still accepted). */
+export const accessTokenFormat = (token: string, key: Buffer, legacyUntil = Infinity, now = Date.now()) => tokenFormat('cva_', legacyUntil, token, key, now);
+export const refreshTokenFormat = (token: string, key: Buffer, legacyUntil = Infinity, now = Date.now()) => tokenFormat('cvr_', legacyUntil, token, key, now);
 class OAuthError extends Error {
   constructor(readonly error: string, readonly status = 400) { super(error); }
 }
@@ -101,6 +118,19 @@ export function recognizedDestination(redirect: string, publisher?: string) {
  * it never grants access to an existing cinema session or browser identity. */
 export class HostedOAuth {
   private authorizations = 0;
+  private cutoffs?: Promise<LegacyCutoffs>;
+  /** The legacy cutoffs, read once per instance (and retried after a failure). */
+  legacy(): Promise<LegacyCutoffs> {
+    return this.cutoffs ??= readLegacyCutoffs(this.pool).catch(error => { this.cutoffs = undefined; throw error; });
+  }
+  /**
+   * Whether a token has an acceptable format. Only a legacy-format token
+   * needs the cutoff, so signed and forged ones never cause a query.
+   */
+  private async acceptable(kind: 'access' | 'refresh', token: string) {
+    const format = (kind === 'access' ? accessTokenFormat : refreshTokenFormat)(token, this.tokenKey);
+    return format === 'legacy' ? Date.now() < (await this.legacy())[kind] : !!format;
+  }
   /** tokenKey: a 32-byte key for signing tokens, the same on every instance; budgets: rate limits (with their key). */
   constructor(readonly pool: Pool, readonly getOrigin: () => string, private readonly clientMetadata: ClientMetadataCache,
     private readonly accounts: ConsentAccounts | undefined, private readonly tokenKey: Buffer, private readonly budgets: ConnectionLinks) {
@@ -154,7 +184,7 @@ export class HostedOAuth {
     return `Bearer resource_metadata="${this.getOrigin()}/.well-known/oauth-protected-resource/mcp", scope="${scope}"${invalid ? ', error="invalid_token"' : ''}`;
   }
   async authenticate(token: string) {
-    if (!accessTokenFormat(token, this.tokenKey)) return undefined;
+    if (!await this.acceptable('access', token)) return undefined;
     const { rows } = await this.pool.query(`SELECT c.id,c.token_hash FROM cinev_oauth_tokens t
       JOIN cinev_oauth_grants g ON g.user_id=t.user_id JOIN cinev_clients c ON c.id=t.user_id
       WHERE t.token_hash=$1 AND t.kind='access' AND t.expires_at>clock_timestamp()
@@ -208,7 +238,7 @@ export class HostedOAuth {
     }
     if (grant === 'refresh_token') {
       const token = required(p.get('refresh_token'));
-      if (!refreshTokenFormat(token, this.tokenKey)) throw new OAuthError('invalid_grant'); // Forged: no database work.
+      if (!await this.acceptable('refresh', token)) throw new OAuthError('invalid_grant'); // Forged: no database work.
       if (p.has('scope') && p.get('scope') !== scope) throw new OAuthError('invalid_scope');
       await admit();
       const result = await transaction(this.pool, async client => {
@@ -424,7 +454,7 @@ export class HostedOAuth {
         const p = await payload(req) as URLSearchParams;
         const token = required(p.get('token')), app = required(p.get('client_id'));
         // RFC 7009: an invalid token is answered like a revoked one, here without database work.
-        if (!accessTokenFormat(token, this.tokenKey) && !refreshTokenFormat(token, this.tokenKey)) { send(200, {}); return true; }
+        if (!await this.acceptable('access', token) && !await this.acceptable('refresh', token)) { send(200, {}); return true; }
         await admit();
         await transaction(this.pool, async client => {
           const { rows } = await client.query(`SELECT t.user_id FROM cinev_oauth_tokens t JOIN cinev_oauth_grants g ON g.user_id=t.user_id
