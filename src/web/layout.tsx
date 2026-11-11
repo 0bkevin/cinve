@@ -38,19 +38,19 @@ export type PageOptions = { compact?: boolean; script?: '/assets/js/site.js' | '
 
 export function Page({ title, compact, script, index, canonical, children }: PageOptions & { title: string; children?: Child }) {
   return (
-    <html lang="es">
+    <html lang="es" class="dark">
       <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width,initial-scale=1" />
         <title>{title} · Cinve</title>
         <meta name="description" content={description} />
-        <meta name="color-scheme" content="light dark" />
+        <meta name="color-scheme" content="dark" />
         <meta name="author" content="Kevin Bravo" />
-        <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)" />
-        <meta name="theme-color" content="#0a0a0a" media="(prefers-color-scheme: dark)" />
+        <meta name="theme-color" content="#1f0d15" />
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         {index ? <SocialMeta canonical={canonical} /> : <meta name="robots" content="noindex,nofollow" />}
-        <link rel="preload" href="/assets/inter-latin.woff2" as="font" type="font/woff2" crossorigin />
+        <link rel="preload" href="/assets/big-shoulders-display.woff2" as="font" type="font/woff2" crossorigin />
+        <link rel="preload" href="/assets/instrument-sans.woff2" as="font" type="font/woff2" crossorigin />
         <link rel="stylesheet" href={assetUrl('/assets/basecoat.css')} />
         <link rel="stylesheet" href={assetUrl('/assets/site.css')} />
       </head>

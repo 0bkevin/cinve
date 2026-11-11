@@ -1,14 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
+import { vendored, vendoredSource } from '../scripts/vendor-assets.js';
 import { authorizationPage, installationPage, landingPage, authorizationErrorPage } from '../src/public-web.js';
 import { loginPage } from '../src/auth-web.js';
 
-test('the vendored Basecoat stylesheet is the pinned package build, unmodified', () => {
-  const require = createRequire(import.meta.url);
-  const packaged = readFileSync(require.resolve('basecoat-css/package.json').replace('package.json', 'dist/basecoat.cdn.min.css'));
-  assert.ok(readFileSync(new URL('../src/assets/basecoat.css', import.meta.url)).equals(packaged), 'run: npx tsx scripts/vendor-basecoat.ts');
+test('vendored stylesheet and fonts are the pinned package files, unmodified', () => {
+  for (const [name, file, destination] of vendored) {
+    const copy = readFileSync(new URL(`../src/assets/${destination}`, import.meta.url));
+    assert.ok(copy.equals(readFileSync(vendoredSource(name, file))), `${destination} differs; run: npx tsx scripts/vendor-assets.ts`);
+  }
 });
 
 test('pages carry no inline styles or scripts, so they render under the CSP without unsafe-inline', () => {

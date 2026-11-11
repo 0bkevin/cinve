@@ -11,7 +11,8 @@ const assets: Record<string, Asset> = {
   '/assets/site.css': { file: new URL('../assets/site.css', import.meta.url), type: 'text/css; charset=utf-8', compress: true },
   '/assets/js/site.js': { file: new URL('../assets/js/site.js', import.meta.url), type: 'text/javascript; charset=utf-8', compress: true },
   '/assets/js/connect.js': { file: new URL('../assets/js/connect.js', import.meta.url), type: 'text/javascript; charset=utf-8', compress: true },
-  '/assets/inter-latin.woff2': { file: new URL('../assets/inter-latin.woff2', import.meta.url), type: 'font/woff2' },
+  '/assets/big-shoulders-display.woff2': { file: new URL('../assets/big-shoulders-display.woff2', import.meta.url), type: 'font/woff2' },
+  '/assets/instrument-sans.woff2': { file: new URL('../assets/instrument-sans.woff2', import.meta.url), type: 'font/woff2' },
   '/og.png': { file: new URL('../assets/og.png', import.meta.url), type: 'image/png' },
   '/favicon.svg': { file: new URL('../assets/favicon.svg', import.meta.url), type: 'image/svg+xml', compress: true },
 };

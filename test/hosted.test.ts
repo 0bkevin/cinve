@@ -530,7 +530,7 @@ test('public pages use the configured origin and serve local fonts under the aut
   const compressed = await fetch(f.origin + stylesheet, { headers: { 'Accept-Encoding': 'br' } });
   assert.match(compressed.headers.get('content-type')!, /text\/css/); assert.equal(compressed.headers.get('vary'), 'Accept-Encoding');
   assert.ok((await compressed.text()).includes('.btn'));
-  const font = await fetch(f.origin + '/assets/inter-latin.woff2');
+  const font = await fetch(f.origin + '/assets/instrument-sans.woff2');
   assert.equal(font.headers.get('content-type'), 'font/woff2');
   assert.equal(Buffer.from(await font.arrayBuffer()).subarray(0, 4).toString(), 'wOF2');
   const browser = await fetch(f.origin + '/install', { headers: { Accept: 'text/html' } });

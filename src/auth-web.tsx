@@ -1,12 +1,11 @@
 import { h, renderDocument } from './web/jsx.js';
 import { Page } from './web/layout.js';
-import { Alert, Button, Eyebrow, icons } from './web/ui.js';
+import { Alert, Button, icons } from './web/ui.js';
 
 // One card is visible at a time (checking, form, result); connect.js
 // switches between them. Without JavaScript only the noscript notice shows.
 export function loginPage() {
   return renderDocument(<Page title="Conectar cuentas" compact script="/assets/js/connect.js">
-    <Eyebrow>Conexión privada</Eyebrow>
     <h1>Conecta tu cuenta del cine.</h1>
     <p class="lead">Conecta tu cuenta para consultar precios de entradas y, en Cinex, caramelería.</p>
     <div class="card" id="checking" hidden><section class="loading" role="status">{icons.spinner()}<span>Comprobando el enlace…</span></section></div>
