@@ -215,13 +215,6 @@ p a:hover, .note a:hover { text-decoration-color: currentColor; }
 .steps > li { counter-increment: step; color: var(--foreground); font-size: 16px; }
 .steps > li::before { content: counter(step); display: block; margin-bottom: 8px; font: 800 28px/1 var(--font-display); letter-spacing: -0.04em; color: var(--amber); }
 
-/* Where it works: one column per chain, cities as a quiet two-column list. */
-.cities { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px 48px; }
-.cities h3 { margin: 0; font-size: clamp(24px, 2.4vw, 32px); }
-.cities .count { margin: 6px 0 20px; font-size: 14px; color: var(--amber); }
-.cities ul { list-style: none; margin: 0; padding: 0; columns: 2; column-gap: 24px; }
-.cities li { padding: 3px 0; color: var(--foreground); break-inside: avoid; }
-
 /* "Cómo empezar" sits on a full-width band, the page's one call to act. */
 .band { position: relative; isolation: isolate; }
 .band::before { content: ''; position: absolute; z-index: -1; inset: 0 calc(50% - 50vw); background: var(--surface); }
@@ -285,7 +278,6 @@ p a:hover, .note a:hover { text-decoration-color: currentColor; }
   .hero-copy { grid-template-columns: minmax(0, 1fr); gap: 24px; }
   .notes, .steps { grid-template-columns: minmax(0, 1fr); gap: 20px; }
   .asks, .safeguards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .cities { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .split { grid-template-columns: minmax(0, 1fr); }
   .split > .section-head { position: static; }
   .site-nav a:not(.nav-cta) { display: none; }
@@ -307,7 +299,6 @@ p a:hover, .note a:hover { text-decoration-color: currentColor; }
   .asks { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 20px; }
   .asks li::before { margin-bottom: 12px; }
   .safeguards { grid-template-columns: minmax(0, 1fr); gap: 28px; }
-  .cities { grid-template-columns: minmax(0, 1fr); gap: 32px; }
   .faq summary { padding: 16px; font-size: 17px; }
   .faq details > p { padding: 0 16px 18px; }
   .closing { padding: 80px 0 88px; }

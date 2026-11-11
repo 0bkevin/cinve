@@ -1,7 +1,6 @@
 import { h, Fragment, renderDocument } from './web/jsx.js';
 import { Page, type PageOptions } from './web/layout.js';
 import { Alert, Button, Card, LinkButton, icons } from './web/ui.js';
-import { coverage as coverageCities } from './web/coverage.js';
 
 export { escapeHtml } from './web/jsx.js';
 export { servePublicAsset } from './web/assets.js';
@@ -86,10 +85,6 @@ const safeguards: [JSX.Element, string, string][] = [
   [icons.eyeOff(), 'Sin rastreadores', 'Esta web no carga anuncios, analíticas ni recursos de otros sitios. Cada conexión está separada: otra aplicación no ve tus cuentas.'],
 ];
 
-// Where each chain operates, from the snapshot in src/web/coverage.ts.
-const chains = [['cinex', 'Cinex'], ['cinesunidos', 'Cines Unidos'], ['cinepic', 'Cinepic']] as const;
-const coverageCount = (n: number) => n === 1 ? '1 ciudad' : `${n} ciudades`;
-
 // Answers must stay true to the service; see docs/hosted.md and src/install.ts.
 const faq: [string, string][] = [
   ['¿Cuánto cuesta?', 'Nada. Cinve es gratis y no muestra anuncios.'],
@@ -139,18 +134,6 @@ export function landingPage(origin: string) {
           <p><strong>Solo consulta.</strong> Cinve no compra entradas ni reserva asientos.</p>
         </div>
       </details>
-    </section>
-    <section class="section" id="ciudades" aria-labelledby="ciudades-titulo">
-      <header class="section-head">
-        <h2 id="ciudades-titulo">Dónde funciona</h2>
-      </header>
-      <div class="cities">
-        {chains.map(([key, name]) => <div>
-          <h3>{name}</h3>
-          <p class="count">{coverageCount(coverageCities[key].length)}</p>
-          <ul>{coverageCities[key].map(city => <li>{city}</li>)}</ul>
-        </div>)}
-      </div>
     </section>
     <section class="section band" id="empezar" aria-labelledby="empezar-titulo">
       <header class="section-head">
