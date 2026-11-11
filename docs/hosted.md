@@ -48,21 +48,29 @@ enlaces comparten estos límites:
 - por red (una IPv4 o un prefijo IPv6 /64): 20 intentos por minuto y 100 fallos
   por día; cada /48 de IPv6 admite además 60 intentos por minuto y 300 fallos
   por día;
-- por cuenta del cine (correo sin distinguir mayúsculas): 5 intentos cada 15
-  minutos desde cualquier red; un inicio correcto los reinicia. Así nadie puede
-  adivinar una contraseña repartiendo intentos ni hacer que el cine bloquee la
-  cuenta de su dueño;
-- en todo el servicio: con 300 fallos en 15 minutos, solo pueden iniciar sesión
-  las redes sin fallos recientes. Los inicios correctos no tienen tope global,
-  así que un ataque no bloquea a quien introduce bien sus datos.
+- por cuenta del cine: 5 intentos cada 15 minutos desde todas las redes. El
+  correo se normaliza (NFKC, sin caracteres invisibles ni espacios, sin tildes,
+  sin distinguir mayúsculas), así que sus variantes comparten el límite;
+- en todo el servicio: con 300 fallos en 15 minutos, se rechazan las redes y
+  los /48 con fallos recientes, y cada red solo puede tener un intento (dos por
+  /48) cada 15 minutos, reservado de forma atómica.
+
+Una cuenta que ya inició sesión desde una red en los últimos 30 días tiene en
+esa red solo su propio cupo de 5 intentos cada 15 minutos: lo que hagan otros
+(los topes de la red, el modo de ataque global o los intentos contra la cuenta
+desde otras redes) no puede bloquear a su dueño, por ejemplo detrás de un NAT
+de operador. Un inicio correcto no reinicia ningún contador, para que no se
+pueda deducir. Si un límite rechaza el intento, este no consume los intentos
+del enlace ni de la aprobación.
 
 Solo cuenta como fallo un rechazo del cine: Cinex responde que el login no es
 válido, Cines Unidos devuelve su formulario de acceso, o el envío de las
 credenciales recibe HTTP 400, 401, 403 o 422. Si el cine falla antes de recibir
 las credenciales, Cinve responde que el cine no está disponible (503), no cuenta
 el fallo y devuelve el intento a la cuenta. Un error posterior al envío
-(tiempo de espera, 429 o 5xx) no cuenta como fallo, pero se responde igual que
-un rechazo, para no revelar si la contraseña era correcta.
+(tiempo de espera, 429 o 5xx) solo cuenta para los topes diarios de la red, no
+para el modo de ataque global, y se responde igual que un rechazo, para no
+revelar si la contraseña era correcta.
 
 Las claves de todos los límites (que nombran direcciones IP y correos de cuentas
 del cine) se guardan solo como HMAC-SHA256 con una subclave derivada de

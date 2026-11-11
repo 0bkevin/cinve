@@ -12,8 +12,10 @@ export const signInLimits = {
   networkFailuresPerDay: 100, blockFailuresPerDay: 300,
   accountAttempts: 5, accountWindowSeconds: 900,
   globalFailures: 300, recentWindowSeconds: 900,
+  strainedPerNetwork: 1, strainedPerBlock: 2,
+  knownSeconds: 30 * 86400,
 };
-/** network: a rate-limit network (rateLimitNetwork); username as typed, compared case-insensitively. */
+/** network: a rate-limit network (rateLimitNetwork); username as typed (see accountName). */
 export type SignInSubject = { network: string; provider: AuthProviderId; username: string };
 export type SignInRefusal = 'account' | 'network' | 'strained';
 export const signInRefusalMessage: Record<SignInRefusal, string> = {
@@ -24,14 +26,30 @@ export const signInRefusalMessage: Record<SignInRefusal, string> = {
 /** For a sign-in whose credentials never reached the cinema. */
 export const cinemaUnavailableMessage = 'El cine no está respondiendo en este momento. Inténtalo de nuevo en unos minutos.';
 const globalFailures = 'signin-fail:global';
-const accountKey = (s: SignInSubject) => `signin:account:${s.provider}:${s.username.trim().toLowerCase()}`;
+/**
+ * The account a username names, for limits only. Cinemas may compare
+ * usernames with accent-, case- and width-insensitive collations, so every
+ * variant must share one counter: NFKC, then drop default-ignorable
+ * characters and whitespace, strip combining marks and fold case. Merging
+ * more names than the cinema does only makes the limit stricter.
+ */
+export function accountName(username: string) {
+  return username.normalize('NFKC').replace(/[\p{Default_Ignorable_Code_Point}\s]/gu, '')
+    .normalize('NFD').replace(/\p{M}/gu, '').toUpperCase().toLowerCase();
+}
+const account = (s: SignInSubject) => `${s.provider}:${accountName(s.username)}`;
+const accountKey = (s: SignInSubject) => `signin:account:${account(s)}`;
+// An account that signed in from this network before: its owner's usual network.
+const knownKey = (s: SignInSubject) => `signin:known:${account(s)}:${s.network}`;
+const pairKey = (s: SignInSubject) => `signin:pair:${account(s)}:${s.network}`;
 /** The /48 an IPv6 /64 rate-limit network belongs to; undefined for IPv4. Catches rotation across a larger IPv6 allocation. */
 export function ipv6Block(network: string) {
   return network.endsWith('::/64') ? network.split(':').slice(0, 3).join(':') + '::/48' : undefined;
 }
 function failureKeys(network: string) {
   const block = ipv6Block(network);
-  return { day: `signin-fail:day:${network}`, recent: `signin-fail:recent:${network}`, block, blockDay: block && `signin-fail:day:${block}` };
+  return { day: `signin-fail:day:${network}`, recent: `signin-fail:recent:${network}`, block,
+    blockDay: block && `signin-fail:day:${block}`, blockRecent: block && `signin-fail:recent:${block}` };
 }
 /**
  * budgetKey keys rate-limit keys. Those name addresses and cinema account
@@ -114,8 +132,11 @@ export class ConnectionLinks {
       return connection;
     });
   }
-  async release(token: string) {
-    await this.locked(token, 'browser', async client => { await client.query('UPDATE cinev_links SET busy=false WHERE token_hash=$1', [digest(token)]); });
+  /** refund gives back the attempt claim counted, for a sign-in that never ran. */
+  async release(token: string, refund = false) {
+    await this.locked(token, 'browser', async client => {
+      await client.query(`UPDATE cinev_links SET busy=false${refund ? ',attempts=GREATEST(attempts-1,0)' : ''} WHERE token_hash=$1`, [digest(token)]);
+    });
   }
   async complete(token: string, value: AuthSession, key: Buffer) {
     return this.locked(token, 'browser', async (client, connection) => {
@@ -155,41 +176,63 @@ export class ConnectionLinks {
       expires_at=CASE WHEN cinev_budgets.expires_at<=now() THEN EXCLUDED.expires_at ELSE cinev_budgets.expires_at END`,
     [entries.map(([key]) => this.keyHash(key)), entries.map(([, seconds]) => seconds)]);
   }
+  // The per-account budget each admitted attempt was charged to, for a refund.
+  private charged = new WeakMap<SignInSubject, string>();
   /**
    * Admission for one cinema sign-in, from the consent page or a connection
    * link (connections are self-service, so per-connection limits alone would
    * let one network test unbounded credentials through Cinve). Returns why it
-   * is refused, or undefined. Every outcome must be reported afterwards with
-   * signInFailed or signInSucceeded.
+   * is refused, or undefined. Every admitted attempt must be reported with
+   * signInError or signInSucceeded, passing the same subject object.
    *
-   * - Per network (an IPv4 address or IPv6 /64) and per IPv6 /48: attempts
-   *   per minute, and failures per day.
-   * - Per cinema account: attempts in 15 minutes, reserved atomically so
-   *   parallel guesses cannot overshoot, and cleared by a success. This bounds
-   *   guessing one password from any number of networks, and keeps attackers
-   *   from getting the owner's account locked at the cinema.
-   * - Service-wide failures: past the threshold only networks with no recent
-   *   failure may sign in. There is no cap on successful sign-ins, so failing
-   *   attackers cannot lock out users whose sign-ins succeed.
+   * - A known pair (this account signed in from this network within 30
+   *   days) is its owner's usual network: it has only its own budget of 5
+   *   attempts per 15 minutes, so nothing others do (network caps, strained
+   *   mode, guesses at the account from elsewhere) locks the owner out, and
+   *   an attacker sharing that network is still bounded per account.
+   * - Otherwise, per network (an IPv4 address or IPv6 /64) and per IPv6
+   *   /48: attempts per minute and failures per day; and per cinema account
+   *   5 attempts per 15 minutes from all networks together, reserved
+   *   atomically so parallel guesses cannot overshoot.
+   * - Service-wide failures: past the threshold ("strained"), networks or
+   *   /48s with a recent failure are refused, and each may hold only one
+   *   attempt (two per /48) per 15 minutes, reserved atomically. Successful
+   *   sign-ins have no global cap.
    */
   async admitSignIn(subject: SignInSubject): Promise<SignInRefusal | undefined> {
-    const keys = failureKeys(subject.network);
-    const [day, recent, global, blockDay = 0] = await this.counts([keys.day, keys.recent, globalFailures, ...(keys.blockDay ? [keys.blockDay] : [])]);
-    if (day >= signInLimits.networkFailuresPerDay || blockDay >= signInLimits.blockFailuresPerDay) return 'network';
-    if (global >= signInLimits.globalFailures && recent > 0) return 'strained';
-    if (!await this.budget(`oauth:login-ip:${subject.network}`, signInLimits.networkPerMinute)) return 'network';
-    if (keys.block && !await this.budget(`signin:block:${keys.block}`, signInLimits.blockPerMinute)) return 'network';
-    if (!await this.budget(accountKey(subject), signInLimits.accountAttempts, signInLimits.accountWindowSeconds)) return 'account';
+    const keys = failureKeys(subject.network), L = signInLimits;
+    const [known, day, recent, global, blockDay = 0, blockRecent = 0] = await this.counts([knownKey(subject), keys.day, keys.recent, globalFailures,
+      ...(keys.block ? [keys.blockDay!, keys.blockRecent!] : [])]);
+    if (known > 0) {
+      if (!await this.budget(pairKey(subject), L.accountAttempts, L.accountWindowSeconds)) return 'account';
+      this.charged.set(subject, pairKey(subject));
+      return undefined;
+    }
+    if (day >= L.networkFailuresPerDay || blockDay >= L.blockFailuresPerDay) return 'network';
+    if (global >= L.globalFailures) {
+      if (recent > 0 || blockRecent > 0) return 'strained';
+      if (!await this.budget(`signin:strained:${subject.network}`, L.strainedPerNetwork, L.recentWindowSeconds) ||
+          (keys.block && !await this.budget(`signin:strained:${keys.block}`, L.strainedPerBlock, L.recentWindowSeconds))) return 'strained';
+    }
+    if (!await this.budget(`oauth:login-ip:${subject.network}`, L.networkPerMinute)) return 'network';
+    if (keys.block && !await this.budget(`signin:block:${keys.block}`, L.blockPerMinute)) return 'network';
+    if (!await this.budget(accountKey(subject), L.accountAttempts, L.accountWindowSeconds)) return 'account';
+    this.charged.set(subject, accountKey(subject));
     return undefined;
   }
-  /** A sign-in that did not produce a session: rejected credentials, or a cinema that did not deliver one. */
+  /** Refused credentials (or a failure of unknown kind): every failure counter. */
   async signInFailed(subject: SignInSubject) {
     const keys = failureKeys(subject.network), day = 86400, recent = signInLimits.recentWindowSeconds;
-    await this.record([[keys.day, day], [keys.recent, recent], [globalFailures, recent], ...(keys.blockDay ? [[keys.blockDay, day] as [string, number]] : [])]);
+    await this.record([[keys.day, day], [keys.recent, recent], [globalFailures, recent],
+      ...(keys.block ? [[keys.blockDay!, day], [keys.blockRecent!, recent]] as Array<[string, number]> : [])]);
   }
-  /** The credentials never reached the cinema: give that account its attempt back (nothing was tested). */
+  /**
+   * The credentials never reached the cinema: give back the attempt this
+   * subject was charged (nothing was tested).
+   */
   async signInUnavailable(subject: SignInSubject) {
-    await this.pool.query('UPDATE cinev_budgets SET count=GREATEST(count-1,0) WHERE key_hash=$1 AND expires_at>now()', [this.keyHash(accountKey(subject))]);
+    const key = this.charged.get(subject);
+    if (key) await this.pool.query('UPDATE cinev_budgets SET count=GREATEST(count-1,0) WHERE key_hash=$1 AND expires_at>now()', [this.keyHash(key)]);
   }
   /**
    * How a failed sign-in counts. Only a refusal counts as a failure (and a
@@ -200,11 +243,20 @@ export class ConnectionLinks {
   async signInError(subject: SignInSubject, error: unknown): Promise<'unavailable' | 'refused'> {
     if (error instanceof CinemaUnavailable) { await this.signInUnavailable(subject); return 'unavailable'; }
     if (!(error instanceof LoginError) || error instanceof CredentialsRejected) await this.signInFailed(subject);
+    else {
+      // Unclear (the cinema failed after receiving the credentials): bounded by
+      // the daily network caps, but never strained mode, which outages must not trip.
+      const keys = failureKeys(subject.network);
+      await this.record([[keys.day, 86400], ...(keys.blockDay ? [[keys.blockDay, 86400] as [string, number]] : [])]);
+    }
     return 'refused';
   }
-  /** Correct credentials: clear that account's attempts (network and service-wide counts are never cleared). */
+  /**
+   * Correct credentials: remember this account and network as a known pair.
+   * Nothing is cleared, so a success cannot be observed through the limits.
+   */
   async signInSucceeded(subject: SignInSubject) {
-    await this.pool.query('DELETE FROM cinev_budgets WHERE key_hash=$1', [this.keyHash(accountKey(subject))]);
+    await this.record([[knownKey(subject), signInLimits.knownSeconds]]);
   }
   async cleanup() {
     // A cinema connected on the consent page whose code was never exchanged

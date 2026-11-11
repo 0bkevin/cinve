@@ -352,7 +352,11 @@ export class HostedOAuth {
               // The per-address budget counts sign-ins, not duplicate submits that only wait.
               const subject = { network: ip, provider: provider.data, username };
               const refusal = await this.budgets.admitSignIn(subject);
-              if (refusal) return again(429, signInRefusalMessage[refusal]);
+              if (refusal) {
+                // The sign-in never ran: give back the request's attempt.
+                await this.pool.query('UPDATE cinev_oauth_requests SET attempts=GREATEST(attempts-1,0) WHERE id=$1', [id]);
+                return again(429, signInRefusalMessage[refusal]);
+              }
               const staged = new class extends SessionStore { override async save(value: AuthSession) { session = value; } }();
               try { await this.accounts!.authenticate(provider.data, username, password, staged); }
               catch (error) {

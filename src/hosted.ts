@@ -277,18 +277,19 @@ export async function createHostedApp(options: {
       if (req.url === '/connect/cancel') { await links.consume(token); send(200, { cancelled: true }); return; }
       if (req.url !== '/connect/login') throw new HttpError(404, 'Ruta no disponible.');
       if (connection.busy || connection.attempts >= 5 || !await links.budget(`login:${connection.user}`, 10)) throw new HttpError(429, 'Demasiados intentos. Pide un enlace nuevo más tarde.');
-      let claimed = false;
+      let claimed = false, refund = false;
       let data: Record<string, unknown> = {};
       try {
         const parsed = await body(req, 16384);
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new HttpError(400, 'Solicitud no válida.');
         data = parsed as Record<string, unknown>;
         if (Object.keys(data).some(k => !['username', 'password'].includes(k)) || typeof data.username !== 'string' || !data.username.trim() || data.username.length > 320 || typeof data.password !== 'string' || !data.password || data.password.length > 4096) throw new HttpError(400, 'Revisa correo y contraseña.');
-        const subject: SignInSubject = { network: ip, provider: connection.provider, username: data.username };
-        const refusal = await links.admitSignIn(subject);
-        if (refusal) throw new HttpError(429, signInRefusalMessage[refusal]);
+        // Claim first: a duplicate submit that only finds the link busy uses no sign-in attempt.
         if (!await links.claim(token)) throw new HttpError(429, 'Conexión en uso o vencida. Pide un enlace nuevo.');
         claimed = true;
+        const subject: SignInSubject = { network: ip, provider: connection.provider, username: data.username };
+        const refusal = await links.admitSignIn(subject);
+        if (refusal) { refund = true; throw new HttpError(429, signInRefusalMessage[refusal]); }
         let stagedSession: AuthSession | undefined;
         // Stage credentials in memory. Commit only if the invitation still exists
         // after upstream login (disconnect/cancel/revocation may happen meanwhile).
@@ -306,7 +307,7 @@ export async function createHostedApp(options: {
         await links.signInSucceeded(subject);
         if (!await links.complete(token, stagedSession, options.key)) throw new HttpError(410, 'Conexión cancelada, vencida o revocada.');
         send(200, { connected: true, profile_update_requested: profile });
-      } finally { data.username = ''; data.password = ''; if (claimed) await links.release(token); }
+      } finally { data.username = ''; data.password = ''; if (claimed) await links.release(token, refund); }
     } catch (error) {
       send(error instanceof HttpError ? error.status : 500, { error: error instanceof HttpError ? error.message : 'No se pudo completar la solicitud.' });
     }
