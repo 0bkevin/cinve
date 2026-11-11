@@ -341,11 +341,17 @@ details.more[data-closing] > summary .chevron { transform: none; }
   .manual .snippet .btn { align-self: flex-end; }
   .wrap { width: calc(100% - 32px); }
   .site-nav a:not(.nav-cta) { display: none; }
-  /* Phones: brand on top, then the two link groups splitting the width evenly. */
-  .site-footer { gap: 32px; padding: 40px 0 20px; }
-  .footer-brand { max-width: none; }
-  .footer-links { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
-  .footer-base { padding-top: 8px; }
+  /* Phones: logo and tagline on top, each link group flows as one wrapping row; the group names stay
+     available to screen readers. */
+  .site-footer { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "brand brand" "links links" "made gh"; gap: 28px 16px; padding: 40px 0 24px; }
+  .footer-brand { grid-area: brand; max-width: none; }
+  .footer-links { grid-area: links; display: grid; gap: 14px; }
+  .footer-links div { display: flex; flex-wrap: wrap; gap: 0 18px; }
+  .footer-links h2 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .footer-links a { color: var(--foreground); opacity: .8; }
+  .footer-base { display: contents; }
+  .footer-base p { grid-area: made; align-self: center; }
+  .footer-gh { grid-area: gh; margin: -12px -12px -12px 0; }
   .consent-actions { flex-direction: column; }
   .consent-actions .btn { width: 100%; }
   .site-header { height: 64px; }
@@ -368,11 +374,6 @@ details.more[data-closing] > summary .chevron { transform: none; }
   .install .btn { width: 100%; }
   .compact { margin: 40px auto 64px; }
   .card > footer .btn { flex: 1; }
-}
-
-/* Narrowest phones: equal halves would break "Reportar un problema". */
-@media (max-width: 380px) {
-  .footer-links { grid-template-columns: auto auto; justify-content: start; gap: 40px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
