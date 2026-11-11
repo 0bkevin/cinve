@@ -104,7 +104,7 @@ const faq: [string, string][] = [
   ['¿Con qué asistentes funciona?', 'Con los que aceptan conexiones MCP remotas, como Claude Code, Codex u OpenCode. Si tu asistente no tiene esa opción, todavía no puede usar Cinve.'],
   ['¿Necesito crear una cuenta?', 'En Cinve, no. Para ver precios y asientos de Cinex y Cines Unidos, tu asistente te pedirá conectar tu cuenta de ese cine. En Supercines es opcional: sin ella ves las tarifas públicas.'],
   ['¿Qué tan actualizada está la información?', 'Cinve la consulta en la web del cine cuando preguntas y reutiliza algunas respuestas por unos minutos. Los asientos pueden cambiar: confírmalos en la web del cine antes de comprar.'],
-  ['¿Puedo comprar entradas desde el chat?', 'No. Cinve solo consulta; la compra se hace en la web o la app del cine.'],
+  ['¿Puedo comprar entradas desde el chat?', 'No. Cinve solo consulta, pero cuando el cine lo publica, tu asistente te da el enlace para comprar esa función en su web.'],
   ['¿Por qué no aparece mi cine o mi ciudad?', 'Cinve muestra las sedes que cada cine publica en su web, y Cinepic por ahora solo en Caracas. Si falta alguna, avísanos en GitHub.'],
   ['¿Cómo desconecto mi cuenta del cine?', 'Escríbele a tu asistente «desconecta mi cuenta de Cinex» (o de Cines Unidos o Supercines) y borramos la sesión guardada.'],
   ['¿Cinve es oficial?', 'No. Es un proyecto independiente, sin relación con los cines.'],
@@ -183,7 +183,8 @@ export function landingPage(origin: string) {
         <h2 id="preguntas-titulo">Preguntas frecuentes</h2>
       </header>
       <div class="faq">
-        {faq.map(([question, answer]) => <details>
+        {/* name= makes the questions exclusive: opening one closes the others, natively. */}
+        {faq.map(([question, answer]) => <details name="faq">
           <summary><span>{question}</span>{icons.plus()}</summary>
           <p>{answer}</p>
         </details>)}
