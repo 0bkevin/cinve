@@ -32,3 +32,17 @@ if (button && message && feedback) {
     }
   });
 }
+
+// A link to a collapsed section (such as #cines) opens it before scrolling.
+const openTarget = () => {
+  const target = location.hash && document.getElementById(location.hash.slice(1));
+  if (target instanceof HTMLDetailsElement) target.open = true;
+};
+addEventListener('hashchange', openTarget);
+openTarget();
+// hashchange does not fire when the hash is already set, so also open on click.
+document.addEventListener('click', event => {
+  const link = (event.target as Element).closest?.('a[href^="#"]');
+  const target = link && document.getElementById(link.getAttribute('href')!.slice(1));
+  if (target instanceof HTMLDetailsElement) target.open = true;
+});

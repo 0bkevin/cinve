@@ -161,7 +161,8 @@ p a:hover, .note a:hover { text-decoration-color: currentColor; }
 .hero-copy { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 32px 64px; align-items: end; margin-top: clamp(40px, 6vw, 72px); }
 .hero h1 { margin: 0; font-size: clamp(60px, 9vw, 128px); line-height: 0.88; letter-spacing: -0.032em; font-weight: 800; }
 .hero h1 span { display: block; }
-.hero-copy .lead { margin: 0 0 28px; max-width: 30ch; }
+.hero-copy .lead { margin: 0 0 28px; max-width: 34ch; }
+.hero-copy .lead a { color: var(--foreground); white-space: nowrap; }
 
 /* ── Sections ─────────────────────────────────────────────────────────── */
 .section { padding: 84px 0; }

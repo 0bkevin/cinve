@@ -103,7 +103,7 @@ showCard(checking);
 request<Exchange>('/connect/exchange', {}, invitation).then(data => {
   token = data.browser_token;
   const name = providerNames[data.provider] ?? data.provider;
-  element('login-title').textContent = `Conecta tu cuenta de ${name}`;
+  element('login-title').textContent = `Tu cuenta de ${name}`;
   // The app name is self-declared unless Cinve verified who publishes it.
   const app = data.app;
   element('login-account').textContent = !app ? 'Se conectará a tu acceso Cinve.'

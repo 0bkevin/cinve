@@ -85,7 +85,7 @@ function Coverage() {
 // claim matches the hosted service (docs/hosted.md); keep them in sync.
 const safeguardSummary = [
   ['Tu contraseña', 'Se usa una vez para entrar al cine y no se guarda.'],
-  ['Sesión cifrada', 'Con AES-256-GCM y atada a tu conexión.'],
+  ['Sesión cifrada', 'Atada a la conexión de tu asistente.'],
   ['Enlaces privados', 'De un solo uso; caducan en 10 minutos.'],
   ['Tú decides', 'Desconecta tu cuenta cuando quieras.'],
 ];
@@ -103,7 +103,7 @@ const faq: [string, string][] = [
   ['¿Cuánto cuesta?', 'Nada. Cinve es gratis y no muestra anuncios.'],
   ['¿Con qué asistentes funciona?', 'Con los que aceptan conexiones MCP remotas, como Claude Code, Codex u OpenCode. Si tu asistente no tiene esa opción, todavía no puede usar Cinve.'],
   ['¿Necesito crear una cuenta?', 'En Cinve, no. Para ver precios y asientos de Cinex y Cines Unidos, tu asistente te pedirá conectar tu cuenta de ese cine. En Supercines es opcional: sin ella ves las tarifas públicas.'],
-  ['¿Qué tan actualizada está la información?', 'Cinve la consulta en la web del cine cuando preguntas y reutiliza algunas respuestas por unos minutos. Los asientos pueden cambiar antes de que compres.'],
+  ['¿Qué tan actualizada está la información?', 'Cinve la consulta en la web del cine cuando preguntas y reutiliza algunas respuestas por unos minutos. Los asientos pueden cambiar: confírmalos en la web del cine antes de comprar.'],
   ['¿Puedo comprar entradas desde el chat?', 'No. Cinve solo consulta; la compra se hace en la web o la app del cine.'],
   ['¿Por qué no aparece mi cine o mi ciudad?', 'Cinve muestra las sedes que cada cine publica en su web, y Cinepic por ahora solo en Caracas. Si falta alguna, avísanos en GitHub.'],
   ['¿Cómo desconecto mi cuenta del cine?', 'Escríbele a tu asistente «desconecta mi cuenta de Cinex» (o de Cines Unidos o Supercines) y borramos la sesión guardada.'],
@@ -124,7 +124,7 @@ export function landingPage(origin: string) {
       <div class="hero-copy">
         <h1 id="titulo"><span>¿Qué</span> <span>vemos hoy?</span></h1>
         <div>
-          <p class="lead">Pregúntaselo a tu asistente. Con Cinve, él revisa Cinex, Cines Unidos, Cinepic, Supercines y Gran Cine por ti.</p>
+          <p class="lead">Pregúntaselo a tu asistente. Con Cinve consulta la cartelera, los precios y los asientos de los principales cines de Venezuela. <a href="#cines">Ver qué cines incluye</a></p>
           <LinkButton href="#empezar" size="lg">Añadir Cinve a mi asistente</LinkButton>
         </div>
       </div>
@@ -137,7 +137,7 @@ export function landingPage(origin: string) {
         {coverage.map(({ topic, ask }) => <li><span class="topic">{topic}</span><span class="ask">“{ask}”</span></li>)}
       </ul>
       {/* The per-cinema detail stays one click away; <details> works without JavaScript. */}
-      <details class="more">
+      <details class="more" id="cines">
         <summary><span>Ver qué ofrece cada cine</span>{icons.chevronDown()}</summary>
         <Coverage />
         <div class="notes">
@@ -162,7 +162,7 @@ export function landingPage(origin: string) {
     <section class="section" id="datos" aria-labelledby="datos-titulo">
       <header class="section-head">
         <h2 id="datos-titulo">Cómo cuidamos tus datos</h2>
-        <p>No necesitas crear una cuenta en Cinve, y solo guardamos lo necesario para consultar con la tuya del cine.</p>
+        <p>Solo guardamos algo si conectas tu cuenta del cine, y es lo mínimo para consultar con ella.</p>
       </header>
       <ul class="asks">
         {safeguardSummary.map(([title, text]) => <li><span class="topic">{title}</span><span class="ask">{text}</span></li>)}
@@ -208,7 +208,7 @@ export function installationPage(origin: string) {
       <p class="note">Elige HTTP si te pide el tipo de conexión. Tu asistente debe admitir servidores MCP remotos.</p>
     </Card>
     <p>Después, pregunta qué películas hay en tu ciudad. Para consultar la cartelera no necesitas una cuenta. Si una consulta requiere conectarte al cine, tu asistente te dará un enlace privado.</p>
-    <p class="note"><a href="/install?format=text">Ver las instrucciones completas para el asistente</a></p>
+    <p class="note"><a href="/instrucciones">Ver qué instrucciones recibe tu asistente</a></p>
   </>, { compact: true, script: '/assets/js/site.js' });
 }
 
