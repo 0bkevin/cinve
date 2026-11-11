@@ -180,3 +180,5 @@ confirmar directamente con el cine cualquier precio, disponibilidad o compra.
 
 El código de Cinve se distribuye bajo la [licencia MIT](LICENSE). La fuente Inter
 incluida conserva su propia [licencia SIL Open Font](src/assets/Inter-LICENSE.txt).
+Las páginas web usan la hoja de estilos precompilada de [Basecoat](https://basecoatui.com),
+que conserva su propia [licencia MIT](src/assets/Basecoat-LICENSE.md).
