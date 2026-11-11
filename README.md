@@ -1,70 +1,58 @@
 # Cinve
 
-Consulta la cartelera de cine de Venezuela desde un asistente compatible con
-[Model Context Protocol (MCP)](https://modelcontextprotocol.io/).
+Cartelera de cine de Venezuela para tu asistente de IA.
+
+Cinve es un servidor [MCP](https://modelcontextprotocol.io/) que permite a
+asistentes como Claude Code, Codex o Cursor consultar películas, horarios, precios,
+caramelería y disponibilidad de asientos de **Cinex, Cines Unidos, Cinepic,
+Supercines y Gran Cine**.
 
 [Sitio web](https://cinve.kevinbravo.com) ·
-[Cómo instalarlo](https://cinve.kevinbravo.com/install) ·
+[Instalación](https://cinve.kevinbravo.com/install) ·
 [Reportar un problema](https://github.com/0bkevin/cinve/issues/new/choose)
 
-Cinve reúne películas, horarios, precios, caramelería y disponibilidad de
-asientos publicada por distintos cines venezolanos.
+> Cinve es un proyecto independiente y sin fines de lucro, no afiliado a ninguna
+> cadena de cines. Solo consulta información: no compra entradas ni reserva
+> asientos.
 
-> **Cinve es un proyecto independiente, gratuito y sin fines de lucro.** No está
-> afiliado, asociado, patrocinado ni respaldado por Cinex, Cines Unidos,
-> Cinepic, Supercines, Gran Cine ni por ninguna otra cadena de cines. Sus responsables no
-> reciben pagos, comisiones, contraprestaciones ni beneficios económicos de los
-> cines o proveedores consultados.
+## Uso rápido
 
-Cinve solo consulta y organiza información. No compra entradas, no reserva
-asientos y no interviene en pagos o transacciones. La disponibilidad puede
-cambiar antes de completar una compra.
-
-## Qué puedes consultar
-
-- Ciudades, sedes, películas y funciones.
-- Precios de entradas y caramelería cuando el proveedor los publica.
-- Mapas de asientos de Cinex, Cines Unidos y Cinepic.
-- Datos de Cinepic, Cines Unidos, Cinex, Supercines y Gran Cine (cine de autor,
-  incluidas las salas del Paseo Las Mercedes).
-
-Algunas consultas de Cinex y Cines Unidos requieren que conectes tu cuenta del
-cine. En Supercines la cuenta es opcional: sin ella ves las tarifas públicas, y
-con ella Cinve las lee como tu cuenta (por si incluye tarifas o canjes propios). Las credenciales se introducen únicamente en el formulario privado; no se
-envían al chat ni se guardan como contraseñas en Cinve.
-
-## Usar el servicio alojado
-
-Envía este mensaje a un asistente compatible con MCP:
+Pídele a tu asistente:
 
 ```text
 Instala Cinve siguiendo https://cinve.kevinbravo.com/install
 ```
 
-También puedes añadir manualmente un servidor MCP remoto llamado `Cinve`:
+O añade manualmente un servidor MCP remoto con esta URL:
 
 ```text
 https://cinve.kevinbravo.com/mcp
 ```
 
-Las consultas públicas no requieren una cuenta de Cinve. Si una operación
-necesita autenticación, el asistente iniciará el flujo seguro para conectar la
-cuenta del cine.
+Después pregunta con naturalidad:
 
-## Ejecutar Cinve localmente
+- «¿Qué películas hay hoy en Caracas?»
+- «¿A qué hora dan la nueva película de Pixar en Cinex?»
+- «¿Cuánto cuestan las entradas y las cotufas en Cines Unidos?»
+- «¿Quedan asientos para la función de las 7?»
 
-Necesitas Node.js 22 o posterior y acceso a Internet.
+Las consultas públicas no requieren cuenta. Algunas consultas de Cinex y
+Cines Unidos necesitan tu cuenta del cine: el asistente te
+abrirá un formulario privado para conectarla. Nunca escribas contraseñas en el
+chat.
+
+## Ejecutarlo en tu equipo
+
+Requiere Node.js 22 o posterior.
 
 ```sh
 git clone https://github.com/0bkevin/cinve.git
 cd cinve
 npm ci
 npm run build
-node dist/index.js
 ```
 
-El último comando usa `stdio`: no muestra un menú porque la salida estándar está
-reservada para el protocolo MCP. Configura tu cliente para iniciarlo:
+Configura tu cliente MCP para iniciarlo por `stdio`:
 
 ```json
 {
@@ -77,113 +65,77 @@ reservada para el protocolo MCP. Configura tu cliente para iniciarlo:
 }
 ```
 
-Hay un ejemplo listo para adaptar en [`mcp.example.json`](mcp.example.json).
-
-### Conectar cuentas en modo local
-
-Ejecuta estos comandos en tu propia terminal. Nunca compartas contraseñas,
-cookies ni tokens en un chat, un issue o los argumentos del proceso.
+Para conectar tus cuentas de cine, ejecuta en tu propia terminal:
 
 ```sh
-npm run login -- cinex
-npm run login -- cinesunidos
-npm run login -- supercines   # opcional
+npm run login -- cinex        # o cinesunidos, supercines
 npm run auth:status
+npm run logout -- cinex
 ```
 
-Cinve guarda sesiones, no contraseñas, en `$XDG_CONFIG_HOME/cinev` o
-`~/.config/cinev`. Para eliminarlas:
+Las sesiones (nunca las contraseñas) se guardan en `~/.config/cinev`.
+
+## Alojar tu propio servidor
+
+El modo HTTP sirve a varios usuarios con OAuth y guarda sesiones cifradas en
+PostgreSQL.
+
+**Variables de entorno**
+
+| Variable               | Descripción                                                     |
+| ---------------------- | --------------------------------------------------------------- |
+| `DATABASE_URL`         | Conexión a PostgreSQL (con TLS).                                |
+| `CINEV_PUBLIC_URL`     | Origen HTTPS público, p. ej. `https://cine.ejemplo.com`.        |
+| `CINEV_ENCRYPTION_KEY` | 64 caracteres hex: `openssl rand -hex 32`. Consérvala.          |
+| `CRON_SECRET`          | Secreto para la limpieza diaria (`openssl rand -hex 32`).        |
+| `PORT`                 | Puerto HTTP (por defecto `3000`). Solo fuera de Vercel.         |
+
+Cambiar `CINEV_ENCRYPTION_KEY` obliga a todos a reconectar sus cuentas.
+
+### En Vercel
+
+1. Crea un proyecto en Vercel y conecta una base PostgreSQL (p. ej. Neon).
+2. Define las variables de entorno anteriores.
+3. Aplica las migraciones: `npm run db:migrate`.
+4. Despliega: `vercel --prod`. `vercel.json` ya incluye las rutas y la tarea
+   diaria de limpieza.
+5. Verifica: `curl https://<dominio>/health`.
+
+### En cualquier servidor con Node.js
 
 ```sh
-npm run logout -- cinex
-npm run logout -- cinesunidos
+npm ci
+npm run build
+npm run db:migrate
+npm run start:hosted
 ```
+
+Ponlo detrás de un proxy con HTTPS y programa la limpieza diaria (por ejemplo,
+con cron):
+
+```sh
+npm run db:cleanup
+```
+
+Tu servidor MCP quedará en `https://<dominio>/mcp`. Consulta la
+[guía de despliegue](docs/hosted.md) para los detalles de OAuth, límites de uso
+y seguridad.
 
 ## Desarrollo
 
 ```sh
-npm ci
-npm run check
-npm test
-npm run build
+npm run check   # tipos
+npm test        # pruebas con PostgreSQL temporal (requiere initdb y pg_ctl)
+npm run smoke   # prueba en vivo contra los cines
 ```
 
-`npm test` usa datos sintéticos y una instancia temporal de PostgreSQL; no
-consulta las webs de los cines. Necesitas `initdb` y `pg_ctl` disponibles, o una
-base de pruebas indicada mediante `TEST_DATABASE_URL`. Nunca uses una base de
-producción para las pruebas.
-
-La prueba en vivo es opcional y sí consulta a los proveedores:
-
-```sh
-npm run smoke
-```
-
-Antes de proponer cambios, lee [`CONTRIBUTING.md`](CONTRIBUTING.md). Los reportes
-de vulnerabilidades siguen el proceso privado de [`SECURITY.md`](SECURITY.md).
-
-## Cómo funciona
-
-Cinve expone herramientas MCP sobre `stdio` y HTTP. Los adaptadores consultan
-fuentes públicas o sesiones autorizadas, validan las respuestas y normalizan los
-resultados antes de entregarlos al asistente.
-
-```text
-Asistente MCP → servidor Cinve → adaptador del proveedor → sitio o API del cine
-```
-
-- `src/server.ts`: contrato y herramientas MCP.
-- `src/service.ts`: respuestas, filtros y paginación.
-- `src/providers.ts`: integración con los proveedores.
-- `src/http.ts`: acceso HTTP, límites y caché.
-- `src/parsers.ts`: lectura segura de JSON y HTML.
-- `src/auth.ts`: sesiones locales autorizadas.
-
-Consulta la [referencia técnica](docs/reference.md) para herramientas, estados,
-límites y mapas de asientos, y la [guía de despliegue](docs/hosted.md) para el
-servicio HTTP con Vercel y PostgreSQL.
-
-## Alcance y precisión
-
-Los cines pueden cambiar sus sitios sin aviso. Cinve distingue una respuesta
-vacía de un fallo, conserva advertencias y marca resultados parciales cuando no
-puede verificar todos los datos. No inventa identificadores, precios ni estados
-de asientos.
-
-Los datos de terceros pertenecen a sus respectivos titulares. Cinve no garantiza
-disponibilidad, exactitud ni precios finales; confirma la información con el cine
-antes de comprar.
-
-## Independencia y uso no comercial
-
-Cinve no representa a las cadenas de cines ni actúa en su nombre. Los nombres,
-marcas, logotipos y demás elementos identificativos mencionados pertenecen a sus
-respectivos titulares y se utilizan únicamente para indicar la fuente de la
-información consultada.
-
-El proyecto no vende datos, publicidad, entradas ni servicios de intermediación;
-no cobra suscripciones o comisiones y no obtiene lucro de las consultas. Su
-finalidad es facilitar el acceso a información de cartelera mediante software
-abierto.
-
-Las consultas se limitan a información publicada por los proveedores o a datos
-que el propio usuario autoriza a consultar mediante su sesión. Cinve no elude
-pagos, no realiza compras, no modifica cuentas y no reserva asientos. Cada
-persona sigue siendo responsable de respetar las condiciones aplicables y de
-confirmar directamente con el cine cualquier precio, disponibilidad o compra.
-
-## Comunidad
-
-- [Contribuir](CONTRIBUTING.md)
-- [Código de conducta](CODE_OF_CONDUCT.md)
-- [Soporte](SUPPORT.md)
-- [Seguridad](SECURITY.md)
+Lee [`CONTRIBUTING.md`](CONTRIBUTING.md) antes de proponer cambios y
+[`SECURITY.md`](SECURITY.md) para reportar vulnerabilidades. La
+[referencia técnica](docs/reference.md) describe las herramientas MCP, el
+contrato de respuesta y los mapas de asientos.
 
 ## Licencia
 
-El código de Cinve se distribuye bajo la [licencia MIT](LICENSE). Las páginas web
-incluyen las fuentes Bricolage Grotesque e Instrument Sans, cada una con su
-[licencia SIL Open Font](src/assets/BricolageGrotesque-LICENSE.txt)
-([Instrument Sans](src/assets/InstrumentSans-LICENSE.txt)), y la hoja de estilos
-precompilada de [Basecoat](https://basecoatui.com), que conserva su propia
-[licencia MIT](src/assets/Basecoat-LICENSE.md).
+[MIT](LICENSE). Las fuentes y hojas de estilo incluidas en `src/assets`
+conservan sus propias licencias. Los nombres y marcas de los cines pertenecen a
+sus titulares.
