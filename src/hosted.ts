@@ -246,7 +246,7 @@ export async function createHostedApp(options: {
           // provider reads (for example, Cinex venue discovery). Keep it scarce so
           // one client cannot get the shared egress address blocked upstream.
           // A service-wide cap too, since many addresses could each use their own.
-          if (refreshCall(parsed) && (!await links.budget(`refresh:${clientKey}`, 10) || !await links.budget('refresh:global', 120))) throw new HttpError(429, 'Demasiadas consultas con refresh=true. Repite sin refresh o inténtalo en un minuto.');
+          if (refreshCall(parsed) && (!await links.budget(`refresh:${clientKey}`, 10) || !await links.budget(principal ? 'refresh:global' : 'refresh:global:anon', 120))) throw new HttpError(429, 'Demasiadas consultas con refresh=true. Repite sin refresh o inténtalo en un minuto.');
           const store = principal ? storeFor(principal.id) : new AnonymousSessions(origin);
           const service = new HostedService(new HostedHttpClient(options.request ?? fetch, 15000, store, publicHttp), cinexCatalog,
             store instanceof EncryptedSessionStore ? store : undefined);

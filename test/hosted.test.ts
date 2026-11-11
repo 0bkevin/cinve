@@ -1037,14 +1037,33 @@ test('networks have daily failure limits, and IPv6 /64s also share their /48', a
   assert.deepEqual(rows.rows.map(r => r.count), [1, 1]);
 });
 
-test('refresh=true also has a service-wide budget across addresses', async t => {
+test('refresh=true also has separate service-wide budgets across addresses', async t => {
   const f = await fixture(t);
-  const { digest } = await import('../src/hosted-store.js');
-  const anonymous = await f.client();
-  await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 minute',120)", [f.links.keyHash('refresh:global')]);
-  await assert.rejects(anonymous.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos', refresh: true } }));
-  const cached = await anonymous.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos' } });
-  assert.equal((cached.structuredContent as { status: string }).status, 'available');
+  for (const [client, key] of [[await f.client(), 'refresh:global:anon'], [await f.client(f.alice.token), 'refresh:global']] as const) {
+    await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 minute',120)", [f.links.keyHash(key)]);
+    await assert.rejects(client.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos', refresh: true } }));
+    const cached = await client.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos' } });
+    assert.equal((cached.structuredContent as { status: string }).status, 'available');
+  }
+});
+
+test('an exhausted anonymous global refresh budget does not block authenticated refreshes', async t => {
+  const f = await fixture(t, undefined, undefined, { trustedVercelProxy: true });
+  const refresh = (network: string) => fetch(f.origin + '/mcp', from(network, { method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', 'MCP-Protocol-Version': '2025-06-18' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'list_cities', arguments: { provider: 'cinesunidos', refresh: true } } }) }));
+  // Twelve anonymous callers spend ten refreshes each, staying within their per-caller caps.
+  for (let i = 0; i < 120; i++) {
+    const response = await refresh(`203.0.113.${1 + Math.floor(i / 10)}`);
+    assert.equal(response.status, 200);
+    await response.text();
+  }
+  const blocked = await refresh('203.0.113.13');
+  assert.equal(blocked.status, 429, 'a fresh anonymous caller is held back by the global cap');
+  assert.match(await blocked.text(), /Demasiadas consultas con refresh=true/);
+  const alice = await f.client(f.alice.token);
+  const result = await alice.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos', refresh: true } });
+  assert.equal((result.structuredContent as { status: string }).status, 'available');
 });
 
 test('HTTPS responses send HSTS for the host and its subdomains; plain HTTP sends none', async () => {
