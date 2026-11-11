@@ -1242,3 +1242,22 @@ test('OAuth quotas also apply per IPv6 /48, so rotating /64s does not multiply t
   assert.equal((await fetch(f.origin + '/oauth/revoke', from('2001:db8:6::1', { method: 'POST',
     body: new URLSearchParams({ token: 'cva_' + randomBytes(32).toString('base64url'), client_id: 'cvapp_x' }) }))).status, 200, 'another /48');
 });
+
+test('JSON-RPC batches are refused, so one request is one call for every limit', async t => {
+  let upstream = 0;
+  const f = await fixture(t, undefined, async () => { upstream++; return new Response('["Caracas"]'); });
+  const call = (id: number) => ({ jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'list_cities', arguments: { provider: 'cinesunidos', refresh: true } } });
+  const post = (body: unknown) => fetch(f.origin + '/mcp', { method: 'POST', body: JSON.stringify(body),
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', 'MCP-Protocol-Version': '2025-06-18' } });
+  for (const batch of [Array.from({ length: 50 }, (_, i) => call(i + 1)), [call(1)], []]) {
+    const response = await post(batch);
+    assert.equal(response.status, 400);
+    assert.equal((await response.json() as { error: { code: number } }).error.code, -32600);
+  }
+  assert.equal(upstream, 0, 'no provider read');
+  assert.equal((await f.pool.query('SELECT 1 FROM cinev_budgets WHERE key_hash=$1', [f.links.keyHash('refresh:anonymous:127.0.0.1')])).rowCount, 0);
+  // A single refresh call still works and is charged once.
+  const anonymous = await f.client();
+  assert.equal(((await anonymous.callTool({ name: 'list_cities', arguments: { provider: 'cinesunidos', refresh: true } })).structuredContent as { status: string }).status, 'available');
+  assert.equal((await f.pool.query('SELECT count FROM cinev_budgets WHERE key_hash=$1', [f.links.keyHash('refresh:anonymous:127.0.0.1')])).rows[0].count, 1);
+});

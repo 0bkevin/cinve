@@ -97,15 +97,12 @@ async function body(req: IncomingMessage, max: number, deadlineMs = 10000): Prom
   } finally { clearTimeout(timer); }
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new HttpError(400, 'Solicitud no válida.'); }
 }
-/** Tool calls in a JSON-RPC message (single or batch) that ask to bypass the public cache. */
-function refreshCalls(message: unknown): number {
-  const calls = Array.isArray(message) ? message : [message];
-  return calls.filter(m => {
-    if (!m || typeof m !== 'object') return false;
-    const { method, params } = m as { method?: unknown; params?: unknown };
-    const args = params && typeof params === 'object' ? (params as { arguments?: unknown }).arguments : undefined;
-    return method === 'tools/call' && !!args && typeof args === 'object' && (args as { refresh?: unknown }).refresh === true;
-  }).length;
+/** Whether a (single) JSON-RPC message is a tool call that asks to bypass the public cache. */
+function refreshCall(message: unknown): boolean {
+  if (!message || typeof message !== 'object') return false;
+  const { method, params } = message as { method?: unknown; params?: unknown };
+  const args = params && typeof params === 'object' ? (params as { arguments?: unknown }).arguments : undefined;
+  return method === 'tools/call' && !!args && typeof args === 'object' && (args as { refresh?: unknown }).refresh === true;
 }
 export async function createHostedApp(options: {
   publicUrl: string; pool: Pool; key: Buffer; allowLocal?: boolean; trustedVercelProxy?: boolean; cleanupSecret?: string;
@@ -195,6 +192,14 @@ export async function createHostedApp(options: {
         let handler: ReturnType<typeof createMcpHandler> | undefined;
         try {
           const parsed = req.method === 'POST' ? await body(req, 65536, options.bodyTimeoutMs) : undefined;
+          // JSON-RPC batches were removed from MCP (2025-06-18) and no client
+          // sends them. Every limit here counts HTTP requests, so a batch would
+          // multiply them (one request carrying 100 refresh=true calls).
+          if (Array.isArray(parsed)) {
+            res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Las solicitudes por lotes (batch) no están admitidas.' } }));
+            return;
+          }
           // Discover public tools anonymously. Calling the connection tool triggers
           // the client's standard OAuth flow, which retries this same tool afterward.
           if (!principal && parsed && typeof parsed === 'object' && !Array.isArray(parsed) &&
@@ -207,9 +212,8 @@ export async function createHostedApp(options: {
           // refresh bypasses the shared public cache and can fan out to many
           // provider reads (for example, Cinex venue discovery). Keep it scarce so
           // one client cannot get the shared egress address blocked upstream.
-          const refreshes = refreshCalls(parsed);
           // A service-wide cap too, since many addresses could each use their own.
-          if (refreshes && (!await links.budget(`refresh:${clientKey}`, 10) || !await links.budget('refresh:global', 120))) throw new HttpError(429, 'Demasiadas consultas con refresh=true. Repite sin refresh o inténtalo en un minuto.');
+          if (refreshCall(parsed) && (!await links.budget(`refresh:${clientKey}`, 10) || !await links.budget('refresh:global', 120))) throw new HttpError(429, 'Demasiadas consultas con refresh=true. Repite sin refresh o inténtalo en un minuto.');
           const store = principal ? storeFor(principal.id) : new AnonymousSessions(origin);
           const service = new HostedService(new HostedHttpClient(options.request ?? fetch, 15000, store, publicHttp), cinexCatalog,
             store instanceof EncryptedSessionStore ? store : undefined);
