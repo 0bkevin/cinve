@@ -420,6 +420,7 @@ button:disabled, .btn:disabled { cursor: not-allowed; }
 .app-mark { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--surface); font: 700 13px/1 var(--font-display); color: var(--cream); }
 .app-mark svg { width: 15px; height: 15px; fill: currentColor; }
 
-/* Copy buttons turn green once the text is on the clipboard. */
-.btn[data-copied] { background: var(--success); border-color: transparent; color: #08130b; }
-.btn[data-variant=ghost][data-copied] { background: transparent; color: var(--success); }
+/* The install page's command snippets turn amber once copied; the main
+   install message button keeps its look and only changes its label. */
+/* Specific enough to beat Basecoat's dark-mode ghost hover rule. */
+.manual .snippet .btn[data-variant=ghost][data-copied] { color: var(--amber); }
