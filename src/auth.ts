@@ -217,7 +217,7 @@ export async function login(provider: AuthProviderId, username: string, password
       await store.save({ version: 1, provider, expires_at: Date.now() + 24 * 3600000, cookie_jar: JSON.stringify(await http.jar.serialize()) });
       return { provider, authenticated: true, profile_update_requested: data.usuario_dataupdate !== 'S' };
     }
-    if (provider === 'supercines') return await supercinesLogin(http, username, password, store);
+    if (provider === 'supercines') return await supercinesLogin(http, username, password, store, submit);
     const base = 'https://www.cinesunidos.com';
     const csrf = JSON.parse((await http.read(`${base}/api/auth/csrf`)).body).csrfToken;
     if (typeof csrf !== 'string' || !csrf) throw new LoginError('Cines Unidos no entregó CSRF de login.');
@@ -256,23 +256,21 @@ export async function login(provider: AuthProviderId, username: string, password
  * only the resulting cookies are stored. Accounts created with Google have no
  * password and cannot use this flow.
  */
-async function supercinesLogin(http: LoginHttp, username: string, password: string, store: SessionStore) {
+async function supercinesLogin(http: LoginHttp, username: string, password: string, store: SessionStore,
+  submit: (url: string, init: RequestInit) => Promise<{ url: string; body: string }>) {
   const base = 'https://supercines.com.ve';
   const page = await http.read(`${base}/cartelera`);
   const token = page.body.match(/<input type="hidden" name="_token" value="([A-Za-z0-9]{20,128})"/)?.[1]
     ?? page.body.match(/<meta\s+name="csrf-token"\s+content="([A-Za-z0-9]{20,128})"/)?.[1];
   if (!token) throw new LoginError('Supercines no mostró su formulario de login.');
-  let reply;
-  try {
-    reply = await http.read(`${base}/do-login`, { method: 'POST',
-      body: new URLSearchParams({ _token: token, email: username, password, urlActual: `${base}/cartelera` }),
-      headers: { 'X-CSRF-TOKEN': token, 'X-Requested-With': 'XMLHttpRequest', Accept: 'application/json', Origin: base, Referer: `${base}/cartelera` } });
-  } catch (e) {
-    if (e instanceof LoginError) throw new LoginError('Supercines no aceptó el login. Revisa el correo y la contraseña en su sitio (las cuentas creadas con Google no tienen contraseña).');
-    throw e;
-  }
+  // Submit the credentials through the classifier: a refusal is CredentialsRejected,
+  // a challenge or transport failure on this hop is an outage, never a verdict.
+  const reply = await submit(`${base}/do-login`, { method: 'POST',
+    body: new URLSearchParams({ _token: token, email: username, password, urlActual: `${base}/cartelera` }),
+    headers: { 'X-CSRF-TOKEN': token, 'X-Requested-With': 'XMLHttpRequest', Accept: 'application/json', Origin: base, Referer: `${base}/cartelera` } });
   let data; try { data = JSON.parse(reply.body); } catch { throw new LoginError('Supercines no aceptó la solicitud de login.'); }
-  if (data?.status !== true) throw new LoginError('Supercines no aceptó el login. Revisa el correo y la contraseña en su sitio.');
+  // A 200 with status:false is Laravel evaluating the credentials and refusing them.
+  if (data?.status !== true) throw new CredentialsRejected('Supercines no aceptó el login. Revisa el correo y la contraseña en su sitio (las cuentas creadas con Google no tienen contraseña).');
   const cookies = await http.jar.getCookies(`${base}/`);
   const session = cookies.find(c => c.key === 'supercines_session');
   if (!session || !cookies.some(c => c.key === 'XSRF-TOKEN')) throw new LoginError('Supercines no estableció una sesión válida.');
