@@ -19,63 +19,100 @@ function InstallMessage({ origin }: { origin: string }) {
   </>;
 }
 
-// The hero's seat map: rows A–G of a 3 + 8 + 3 house, fixed so every load
-// looks the same. On load the seats fill in as taken, leaving one free pair.
-const rows = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
-const taken = new Set(['A1', 'A2', 'A6', 'A7', 'A8', 'B4', 'B5', 'B9', 'B10', 'B13', 'C5', 'C6', 'C7', 'C8', 'C9', 'C12', 'D1', 'D4', 'D5', 'D6',
-  'D9', 'D10', 'D11', 'E4', 'E5', 'E6', 'E9', 'E10', 'E11', 'E14', 'F3', 'F6', 'F7', 'F8', 'F9', 'G1', 'G2', 'G6', 'G7', 'G12', 'G13', 'G14']);
-const pair = new Set(['E7', 'E8']);
-const blocks = [[1, 2, 3], [4, 5, 6, 7, 8, 9, 10, 11], [12, 13, 14]];
+// The hero's seat map: an illustrative house of rows A–G, 4 + 10 + 4 seats,
+// fixed so every load looks the same. On load the seats fill in as taken and
+// the one free pair in the middle of row E lights up.
+// . free  x taken  ? not confirmed  * the free pair
+const house: [string, string][] = [
+  ['A', '..x.xx..xx..x..x..'],
+  ['B', '.x...xxxx.xxx...x.'],
+  ['C', 'x..xxxx.xxxx.x.x..'],
+  ['D', '..xxx.xxxxxx.xx..x'],
+  ['E', '.x..xxxx**xx.xx.x.'],
+  ['F', 'x.x..xxxxxxxx..x.x'],
+  ['G', '..x.xx.xx.xx..????'],
+];
+const seatState = { '.': 'free', x: 'taken', '?': 'unknown', '*': 'pair' } as const;
 
 function SeatMap() {
-  return <div class="seating" role="img" aria-label="Mapa de una sala con dos asientos libres juntos en la fila E.">
-    {rows.map(row => <div class="row">
+  return <div class="seating" role="img" aria-label="Ejemplo de mapa de una sala: quedan dos asientos libres juntos en el centro de la fila E.">
+    <div class="screen"><span>Pantalla</span></div>
+    {house.map(([row, seats]) => <div class="row">
       <span class="row-label">{row}</span>
-      {blocks.map(block => <span class="block">
-        {block.map(n => <span class="seat" data-state={pair.has(row + n) ? 'pair' : taken.has(row + n) ? 'taken' : 'free'}></span>)}
-      </span>)}
+      {[...seats].map(seat => <span class="seat" data-state={seatState[seat as keyof typeof seatState]}></span>)}
     </div>)}
   </div>;
 }
 
-// What people ask, and what they get back.
-const questions = [
-  ['¿Qué hay hoy en Caracas?', 'Películas, cines y horarios.'],
-  ['¿Cuánto cuesta la entrada?', 'El precio de la función que elijas.'],
-  ['¿Quedan dos asientos juntos?', 'El mapa de la sala, antes de comprar.'],
-  ['¿Qué combos tienen?', 'La caramelería, cuando el cine la publica.'],
+// What each cinema publishes and whether it needs the visitor's own account.
+type Access = 'open' | 'account' | 'none';
+const accessLabel: Record<Access, string> = { open: 'Sin cuenta', account: 'Con tu cuenta', none: 'No suele publicarla' };
+const cinemas = ['Cinex', 'Cines Unidos', 'Cinepic'];
+const coverage: { topic: string; ask: string; access: [Access, Access, Access] }[] = [
+  { topic: 'Cartelera y horarios', ask: '¿Qué hay hoy en Caracas?', access: ['open', 'open', 'open'] },
+  { topic: 'Precios', ask: '¿Cuánto cuesta la entrada?', access: ['account', 'account', 'open'] },
+  { topic: 'Asientos', ask: '¿Quedan dos asientos juntos?', access: ['account', 'account', 'open'] },
+  { topic: 'Caramelería', ask: '¿Qué combos tienen?', access: ['account', 'open', 'none'] },
 ];
+
+function Coverage() {
+  return <table class="board">
+    <caption class="visually-hidden">Qué puede consultar tu asistente en cada cine</caption>
+    <thead><tr><td></td>{cinemas.map(name => <th scope="col">{name}</th>)}</tr></thead>
+    <tbody>
+      {coverage.map(({ topic, ask, access }) => <tr>
+        <th scope="row"><span class="topic">{topic}</span><span class="ask">{ask}</span></th>
+        {access.map(level => <td data-access={level}><span class="mark"><span class="glyph" aria-hidden="true">{level === 'account' && icons.lock()}</span>{accessLabel[level]}</span></td>)}
+      </tr>)}
+    </tbody>
+  </table>;
+}
 
 export function landingPage(origin: string) {
   return page('Consulta de cines en Venezuela', <>
     <section class="hero" aria-labelledby="titulo">
-      <SeatMap />
-      <h1 id="titulo">La cartelera, en tu chat.</h1>
-      <p class="lead">Pregúntale a tu asistente qué ver hoy y él revisa Cinex, Cines Unidos y Cinepic por ti.</p>
-      <LinkButton href="#empezar" size="lg">Añadir Cinve a mi asistente</LinkButton>
+      <figure class="house">
+        <SeatMap />
+        <figcaption class="legend">
+          <span class="tag">Ejemplo</span>
+          <span><i data-state="free"></i>Libre</span>
+          <span><i data-state="taken"></i>Ocupado</span>
+          <span><i data-state="unknown"></i>Sin confirmar</span>
+        </figcaption>
+      </figure>
+      <div class="hero-copy">
+        <h1 id="titulo"><span>¿Qué</span> <span>vemos hoy?</span></h1>
+        <div>
+          <p class="lead">Pregúntaselo a tu asistente. Con Cinve, él revisa Cinex, Cines Unidos y Cinepic por ti.</p>
+          <LinkButton href="#empezar" size="lg">Añadir Cinve a mi asistente</LinkButton>
+        </div>
+      </div>
     </section>
-    <section class="section">
-      <header><h2>Qué puedes preguntar</h2><p class="note">Dile en qué ciudad estás y, si quieres, el cine o la película.</p></header>
-      <dl class="questions">
-        {questions.map(([question, answer]) => <div><dt>{question}</dt><dd>{answer}</dd></div>)}
-      </dl>
+    <section class="section" id="preguntar" aria-labelledby="preguntar-titulo">
+      <header class="section-head">
+        <h2 id="preguntar-titulo">Qué puedes preguntar</h2>
+        <p>Dile en qué ciudad estás y, si quieres, el cine o la película.</p>
+      </header>
+      <Coverage />
+      <div class="notes">
+        <p><strong>Con tu cuenta.</strong> Tu asistente te da un enlace privado para conectar tu cuenta del cine. Escribes la contraseña en esa página, nunca en el chat, y Cinve no la guarda.</p>
+        <p><strong>Asientos.</strong> El mapa distingue los libres, los ocupados y los que no se pudieron confirmar. Puede cambiar antes de que compres.</p>
+        <p><strong>Solo consulta.</strong> Cinve no compra entradas ni reserva asientos.</p>
+      </div>
     </section>
-    <section class="section" id="empezar">
-      <header><h2>Cómo empezar</h2></header>
+    <section class="section" id="empezar" aria-labelledby="empezar-titulo">
+      <header class="section-head">
+        <h2 id="empezar-titulo">Cómo empezar</h2>
+        <p>Funciona con asistentes que aceptan conexiones MCP. <a href="/install">¿Prefieres hacerlo a mano?</a></p>
+      </header>
+      <InstallMessage origin={origin} />
       <ol class="steps">
-        <li>
-          <p>Copia este mensaje y envíaselo a tu asistente.</p>
-          <InstallMessage origin={origin} />
-        </li>
-        <li><p>Tu asistente añade Cinve y te pide permiso. No tienes que crear ninguna cuenta.</p><p class="fine">Funciona con asistentes que aceptan conexiones MCP. <a href="/install">¿Prefieres hacerlo a mano?</a></p></li>
-        <li><p>Pregunta qué quieres ver, como en cualquier chat.</p></li>
+        <li>Copia este mensaje y envíaselo a tu asistente.</li>
+        <li>Tu asistente añade Cinve y te pide permiso. No tienes que crear ninguna cuenta.</li>
+        <li>Pregunta qué quieres ver, como en cualquier chat.</li>
       </ol>
     </section>
-    <section class="section">
-      <header><h2>¿Necesito mi cuenta del cine?</h2></header>
-      <p class="answer">Para la cartelera y los horarios, no. Para precios y asientos, solo en Cinex y Cines Unidos: tu asistente te dará un enlace privado para conectarla. Escribes la contraseña ahí, nunca en el chat, y Cinve no la guarda.</p>
-    </section>
-    <aside class="project-note" aria-label="Sobre Cinve"><p>Cinve es gratis e independiente; no está afiliado a Cinex, Cines Unidos ni Cinepic. Solo consulta lo que cada cine publica: no compra entradas ni reserva asientos.</p></aside>
+    <aside class="project-note" aria-label="Sobre Cinve"><p>Cinve es gratis e independiente; no está afiliado a Cinex, Cines Unidos ni Cinepic. Solo consulta lo que cada cine publica.</p></aside>
   </>, { index: true, canonical: origin + '/', script: '/assets/js/site.js' });
 }
 

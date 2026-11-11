@@ -14,8 +14,8 @@ const packageRoot = (name: string) => dirname(require.resolve(`${name}/package.j
 export const vendored: [string, string, string][] = [
   ['basecoat-css', 'dist/basecoat.cdn.min.css', 'basecoat.css'],
   ['basecoat-css', 'LICENSE.md', 'Basecoat-LICENSE.md'],
-  ['@fontsource-variable/big-shoulders-display', 'files/big-shoulders-display-latin-wght-normal.woff2', 'big-shoulders-display.woff2'],
-  ['@fontsource-variable/big-shoulders-display', 'LICENSE', 'BigShouldersDisplay-LICENSE.txt'],
+  ['@fontsource-variable/bricolage-grotesque', 'files/bricolage-grotesque-latin-opsz-normal.woff2', 'bricolage-grotesque.woff2'],
+  ['@fontsource-variable/bricolage-grotesque', 'LICENSE', 'BricolageGrotesque-LICENSE.txt'],
   ['@fontsource-variable/instrument-sans', 'files/instrument-sans-latin-wght-normal.woff2', 'instrument-sans.woff2'],
   ['@fontsource-variable/instrument-sans', 'LICENSE', 'InstrumentSans-LICENSE.txt'],
 ];

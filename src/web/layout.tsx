@@ -46,10 +46,10 @@ export function Page({ title, compact, script, index, canonical, children }: Pag
         <meta name="description" content={description} />
         <meta name="color-scheme" content="dark" />
         <meta name="author" content="Kevin Bravo" />
-        <meta name="theme-color" content="#1f0d15" />
+        <meta name="theme-color" content="#120a0e" />
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         {index ? <SocialMeta canonical={canonical} /> : <meta name="robots" content="noindex,nofollow" />}
-        <link rel="preload" href="/assets/big-shoulders-display.woff2" as="font" type="font/woff2" crossorigin />
+        <link rel="preload" href="/assets/bricolage-grotesque.woff2" as="font" type="font/woff2" crossorigin />
         <link rel="preload" href="/assets/instrument-sans.woff2" as="font" type="font/woff2" crossorigin />
         <link rel="stylesheet" href={assetUrl('/assets/basecoat.css')} />
         <link rel="stylesheet" href={assetUrl('/assets/site.css')} />

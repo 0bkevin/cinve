@@ -7,7 +7,7 @@ import { Alert, Button, icons } from './web/ui.js';
 export function loginPage() {
   return renderDocument(<Page title="Conectar cuentas" compact script="/assets/js/connect.js">
     <h1>Conecta tu cuenta del cine.</h1>
-    <p class="lead">Conecta tu cuenta para consultar precios de entradas y, en Cinex, caramelería.</p>
+    <p class="lead">Conecta tu cuenta para consultar precios de entradas, asientos y, en Cinex, caramelería.</p>
     <div class="card" id="checking" hidden><section class="loading" role="status">{icons.spinner()}<span>Comprobando el enlace…</span></section></div>
     <form class="card" id="login" hidden>
       <header><h2 id="login-title">Conecta tu cuenta</h2><p id="login-account"></p></header>

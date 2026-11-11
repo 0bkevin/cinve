@@ -82,7 +82,7 @@ form.addEventListener('submit', async event => {
     const pending = request<Login>('/connect/login', body); body.password = '';
     const data = await pending;
     connected = true; token = ''; form.reset();
-    showResult('success', 'Cuenta conectada', 'Vuelve a tu asistente para consultar precios.' + (data.profile_update_requested ? ' Cinex solicita actualizar tu perfil en su sitio.' : ''));
+    showResult('success', 'Cuenta conectada', 'Vuelve a tu asistente para consultar precios y asientos.' + (data.profile_update_requested ? ' Cinex solicita actualizar tu perfil en su sitio.' : ''));
   } catch (error) {
     showError((error as Error).message || 'No se pudo conectar. Pide un enlace nuevo a tu asistente.');
   } finally {
