@@ -80,40 +80,78 @@ p a:hover, .note a:hover { text-decoration-color: currentColor; }
 .btn[data-size=lg] { height: 48px; padding-inline: 22px; font-size: 15px; }
 
 /* ── The auditorium: the landing page's hero ─────────────────────────── */
-.auditorium { display: grid; justify-items: center; text-align: center; padding: 16px 0 72px; }
-.auditorium .lead { margin: 22px auto 0; max-width: 46ch; }
-.auditorium .actions { justify-content: center; }
+/* One orchestrated moment: the screen warms up, a conversation plays on it,
+   and when the assistant names two seats, that pair lights up in the house. */
+.auditorium { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: center; text-align: center; padding: 8px 0 80px; }
+.stage { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); justify-items: center; width: 100%; padding-top: 40px; }
+/* The pelmet: a scalloped velvet valance across the top of the stage. */
+.stage::before {
+  content: ''; position: absolute; z-index: 2; top: 0; left: 0; right: 0; height: 30px; pointer-events: none;
+  background:
+    linear-gradient(180deg, #5c0e1b, #8e1b2c) top / 100% 14px no-repeat,
+    radial-gradient(circle at 50% 0, #8e1b2c 0 15px, rgba(142, 27, 44, 0) 16px) 0 8px / 32px 22px repeat-x;
+  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.45));
+}
+
+/* Velvet curtains drawn back to either side of the screen. */
+.curtain {
+  position: absolute; top: 0; width: clamp(60px, 11vw, 150px); height: 440px; pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, 0) 55%, var(--velvet) 100%),
+    repeating-linear-gradient(90deg, #4a0b17 0, #8e1b2c 9px, #b0283b 13px, #7a1424 19px, #4a0b17 26px);
+  filter: drop-shadow(0 10px 30px rgba(0, 0, 0, 0.5));
+}
+.curtain[data-side=left] { left: 0; clip-path: polygon(0 0, 100% 0, 62% 52%, 34% 100%, 0 100%); }
+.curtain[data-side=right] { right: 0; clip-path: polygon(0 0, 100% 0, 100% 100%, 66% 100%, 38% 52%); }
 
 .screen {
-  position: relative; display: grid; place-items: center; width: min(100%, 800px); aspect-ratio: 2.39 / 1; padding: 24px clamp(20px, 5vw, 56px);
-  background: linear-gradient(180deg, #f7f6fb 0%, var(--screen) 55%, #d4d0e1 100%); color: var(--velvet);
-  /* CinemaScope proportions; the screen bows slightly at top and bottom. */
+  position: relative; z-index: 1; width: min(100% - 2 * clamp(48px, 9vw, 130px), 700px); aspect-ratio: 2.15 / 1; margin: 0;
+  display: grid; place-items: center; padding: clamp(18px, 3vw, 30px) clamp(18px, 4vw, 44px);
+  background: linear-gradient(180deg, #f8f7fc 0%, var(--screen) 60%, #d6d2e3 100%); color: var(--velvet);
   border-radius: 50% / 5%;
-  box-shadow: 0 0 0 1px rgba(236, 234, 244, 0.4), 0 0 48px rgba(236, 234, 244, 0.26), 0 40px 140px rgba(236, 234, 244, 0.14);
-  animation: projector 1.6s ease-out both;
+  box-shadow: 0 0 0 1px rgba(236, 234, 244, 0.45), 0 0 50px rgba(236, 234, 244, 0.3), 0 40px 150px rgba(236, 234, 244, 0.16);
+  animation: projector 1.4s ease-out both;
 }
-.screen h1 { margin: 0 auto; max-width: 15ch; font-size: clamp(44px, 6.6vw, 84px); line-height: 0.92; color: var(--velvet); text-wrap: balance; }
 /* The projected light falling on the seats. */
 .screen::after {
-  content: ''; position: absolute; left: 6%; right: 6%; top: 100%; height: 220px; pointer-events: none;
-  background: radial-gradient(60% 100% at 50% 0%, rgba(236, 234, 244, 0.13), transparent 70%);
+  content: ''; position: absolute; left: 4%; right: 4%; top: 100%; height: 260px; pointer-events: none;
+  background: radial-gradient(60% 100% at 50% 0%, rgba(236, 234, 244, 0.14), transparent 70%);
 }
+.screen figcaption { position: absolute; right: 22px; bottom: 12px; font-size: 12px; color: #6d6378; }
 
-.seating { display: grid; gap: clamp(5px, 1.1vw, 10px); margin-top: clamp(28px, 5vw, 48px); transform: perspective(760px) rotateX(30deg); transform-origin: 50% 0; }
+.chat { display: grid; gap: 10px; width: min(100%, 520px); text-align: left; }
+.bubble {
+  max-width: 82%; margin: 0; padding: 10px 15px; border-radius: 18px; font-size: clamp(14px, 1.6vw, 16.5px); line-height: 1.4;
+  animation: bubble 0.45s ease-out both;
+}
+.bubble strong { color: inherit; font-weight: 650; }
+.bubble[data-from=you] { justify-self: end; background: var(--velvet); color: var(--screen); border-bottom-right-radius: 5px; }
+.bubble[data-from=assistant] { justify-self: start; background: #ffffff; color: var(--velvet); border-bottom-left-radius: 5px; box-shadow: 0 1px 2px rgba(31, 13, 21, 0.12); }
+.bubble:nth-child(1) { animation-delay: 1.0s; }
+.bubble:nth-child(2) { animation-delay: 1.9s; }
+.bubble:nth-child(3) { animation-delay: 3.0s; }
+.bubble:nth-child(4) { animation-delay: 3.9s; }
+
+.seating { position: relative; z-index: 1; display: grid; gap: clamp(5px, 1.1vw, 10px); margin-top: clamp(28px, 4vw, 40px); transform: perspective(700px) rotateX(34deg); transform-origin: 50% 0; }
 .row { display: flex; align-items: center; gap: clamp(3px, 0.9vw, 7px); }
 .row-label { width: 14px; margin-right: clamp(4px, 1vw, 10px); font: 700 clamp(10px, 1.6vw, 13px)/1 var(--font-display); color: var(--dust); }
 .block { display: flex; gap: clamp(3px, 0.9vw, 7px); }
 .block + .block { margin-left: clamp(10px, 3vw, 28px); }
 .seat {
-  width: clamp(14px, 3vw, 26px); aspect-ratio: 1 / 0.86; border-radius: 40% 40% 18% 18% / 50% 50% 22% 22%;
+  width: clamp(14px, 2.6vw, 22px); aspect-ratio: 1 / 0.86; border-radius: 40% 40% 18% 18% / 50% 50% 22% 22%;
   background: var(--curtain); box-shadow: inset 0 -0.22em 0 rgba(0, 0, 0, 0.32), inset 0 0.12em 0 rgba(255, 255, 255, 0.08);
 }
 .seat[data-state=taken] { background: var(--aisle); box-shadow: inset 0 -0.22em 0 rgba(0, 0, 0, 0.3); }
-.seat[data-state=pair] { background: var(--bulb); box-shadow: 0 0 16px rgba(245, 184, 65, 0.55), inset 0 -0.22em 0 rgba(120, 70, 0, 0.35); animation: bulbs 1s 1.3s ease-out both; }
-.seat-caption { margin: 18px auto 0; font: 700 15px/1.3 var(--font-display); letter-spacing: 0.04em; color: var(--bulb); }
+.seat[data-state=pair] { background: var(--bulb); box-shadow: 0 0 18px rgba(245, 184, 65, 0.65), inset 0 -0.22em 0 rgba(120, 70, 0, 0.35); animation: bulbs 0.7s 4.3s ease-out both; }
 
-@keyframes projector { from { filter: brightness(0.25); box-shadow: none; } 40% { filter: brightness(0.6); } to { filter: brightness(1); } }
-@keyframes bulbs { from { background: var(--curtain); box-shadow: none; } to { } }
+/* The headline, set below the house like a marquee title. */
+.auditorium h1 { margin: clamp(28px, 4vw, 44px) 0 0; font-size: clamp(56px, 9vw, 112px); line-height: 0.88; letter-spacing: 0.002em; text-wrap: balance; }
+.auditorium h1 + .lead { margin: 22px auto 0; max-width: 44ch; }
+.auditorium .actions { justify-content: center; }
+
+@keyframes projector { from { filter: brightness(0.2); box-shadow: none; } 45% { filter: brightness(0.65); } to { filter: brightness(1); } }
+@keyframes bubble { from { opacity: 0; transform: translateY(8px) scale(0.98); } }
+@keyframes bulbs { from { background: var(--curtain); box-shadow: none; } }
 
 /* ── Sections below the hero ─────────────────────────────────────────── */
 .section { padding: 72px 0; border-top: 1px solid var(--border); }
@@ -183,7 +221,10 @@ p a:hover, .note a:hover { text-decoration-color: currentColor; }
 @media (max-width: 720px) {
   .wrap { width: calc(100% - 32px); }
   .auditorium { padding: 16px 0 52px; }
-  .screen { aspect-ratio: auto; padding: 34px 18px; border-radius: 50% / 7%; }
+  .screen { width: 100%; aspect-ratio: auto; padding: 26px 14px 34px; border-radius: 50% / 4%; }
+  .curtain, .stage::before { display: none; }
+  .stage { padding-top: 12px; }
+  .bubble { max-width: 90%; }
   .lead { font-size: 17px; }
   .auditorium .actions { display: grid; width: 100%; }
   .auditorium .btn { width: 100%; }
@@ -202,6 +243,6 @@ p a:hover, .note a:hover { text-decoration-color: currentColor; }
 
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
-  .screen, .seat[data-state=pair] { animation: none; }
+  .screen, .bubble, .seat[data-state=pair] { animation: none; }
   .spinner { animation-duration: 2.4s; }
 }

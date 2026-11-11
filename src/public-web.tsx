@@ -54,10 +54,24 @@ const questions = [
 export function landingPage(origin: string) {
   return page('Consulta de cines en Venezuela', <>
     <section class="auditorium" aria-labelledby="estreno">
-      <div class="screen"><h1 id="estreno">Consulta películas, horarios y precios.</h1></div>
-      <Auditorium />
-      <p class="seat-caption">Fila E, asientos 7 y 8: libres y juntos.</p>
-      <p class="lead">Pregúntale a tu asistente por la cartelera de Cinex, Cines Unidos y Cinepic. Cinve consulta al cine y te responde en el chat.</p>
+      <div class="stage">
+        <span class="curtain" data-side="left" aria-hidden="true"></span>
+        <span class="curtain" data-side="right" aria-hidden="true"></span>
+        {/* The screen plays a short exchange with an assistant; the pair of
+            seats it names lights up in the house below when it answers. */}
+        <figure class="screen">
+          <div class="chat">
+            <p class="bubble" data-from="you">¿Qué dan hoy en el Sambil de Caracas?</p>
+            <p class="bubble" data-from="assistant">En Cinex Sambil: <strong>Coyote vs. Acme</strong> a las 7:10 y a las 9:40 pm.</p>
+            <p class="bubble" data-from="you">¿Quedan dos juntos a las 7:10?</p>
+            <p class="bubble" data-from="assistant">Sí: <strong>fila E, asientos 7 y 8</strong>.</p>
+          </div>
+          <figcaption>Ejemplo de conversación con tu asistente</figcaption>
+        </figure>
+        <Auditorium />
+      </div>
+      <h1 id="estreno">La cartelera, en tu chat.</h1>
+      <p class="lead">Pregúntale a tu asistente por las películas, los horarios, los precios y los asientos de Cinex, Cines Unidos y Cinepic. Cinve consulta al cine y te responde en la conversación.</p>
       <div class="actions">
         <LinkButton href="#como-usarlo" size="lg">Añadir Cinve a mi asistente</LinkButton>
         <LinkButton href="#que-puedes-consultar" variant="outline" size="lg">Ver qué puedo preguntar</LinkButton>
