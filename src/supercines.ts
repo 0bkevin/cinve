@@ -1,5 +1,5 @@
 import { load } from 'cheerio';
-import { DataError, folded, number, requireArg, text, today } from './core.js';
+import { DataError, folded, isPastDate, nowTime, number, requireArg, text, today } from './core.js';
 import type { DataItem, Operation, Query } from './core.js';
 import type { ReadContext } from './http.js';
 import { clock, object, rows, titled } from './parsers.js';
@@ -72,19 +72,27 @@ async function movies(c: ReadContext, cinemaId?: string): Promise<Movie[]> {
 
 type Showtime = DataItem & { kind: 'showtime'; cinema_id: string; movie_id: string; date: string; time: string };
 /** Functions of one title on one date, grouped by venue, from listCartelerafecha. */
-export function parseSupercinesShowtimes(html: string, movie: { id: string; name: string }, date: string, c: Pick<ReadContext, 'partial' | 'warnings'>): Showtime[] {
+/** A function the page lists without online sales: no identifier, only venue and time. */
+export type OfflineFunction = { movie: string; venue: string; time: string };
+export function parseSupercinesShowtimes(html: string, movie: { id: string; name: string }, date: string, c: Pick<ReadContext, 'partial' | 'warnings'>, offline?: OfflineFunction[]): Showtime[] {
   const $ = load(html), items: Showtime[] = [];
   // A day without functions is a redirect (see schedule()); a page without
   // any venue block means the markup changed, not that nothing is on.
   if (!$('.st_calender_row_cont').length) throw new DataError('error', 'No se reconoció la programación de Supercines (cambió la estructura de la página).');
-  let malformed = 0, disabled = 0, lateNight = 0;
+  let malformed = 0, lateNight = 0;
   // The fragment also carries an older layout inside HTML comments, which the
   // parser ignores: only the live blocks are read.
   $('.st_calender_row_cont').each((_, block) => {
     const venueName = label($(block).find('h6').first().text());
-    $(block).find('a[id^="hora_"]').each((_, a) => {
+    $(block).find('a[id^="hora_"], a.disabledFunction, a[onclick*="ventasDesactivadas"]').each((_, a) => {
       const onclick = $(a).attr('onclick') ?? '';
-      if (/ventasDesactivadas/.test(onclick) || $(a).hasClass('disabledFunction')) { disabled++; return; }
+      // The page greys these out (past functions, or a venue without online
+      // sales) and gives them no identifier: report venue and time only.
+      if (/ventasDesactivadas/.test(onclick) || $(a).hasClass('disabledFunction')) {
+        const time = clock($(a).text());
+        if (time && venueName) offline?.push({ movie: movie.name, venue: venueName, time });
+        return;
+      }
       const m = onclick.match(/getDetailsNoauth\(\s*(\d{1,12})\s*,\s*'hora_(\d{1,12})'\s*,\s*'(\d{1,12})'\s*,\s*'(\d{1,12})'\s*,\s*'(\d{4}-\d{2}-\d{2})'\s*\)/);
       const time = clock($(a).text());
       if (!m || m[2] !== m[3] || $(a).attr('id') !== `hora_${m[2]}` || m[4] !== movie.id || !time || !venueName) { malformed++; return; }
@@ -103,7 +111,6 @@ export function parseSupercinesShowtimes(html: string, movie: { id: string; name
     c.partial = true;
     c.warnings.push(`Supercines devolvió ${malformed} funciones de ${movie.name} con identificador u hora no reconocibles; se omitieron.`);
   }
-  if (disabled) c.warnings.push(`Supercines muestra ${disabled} funciones de ${movie.name} con la venta en línea desactivada; se omitieron porque no publican identificador.`);
   if (lateNight) c.warnings.push('Supercines agrupa las funciones por fecha comercial; en las de madrugada se omite starts_at porque la fecha calendario no está confirmada.');
   return items;
 }
@@ -127,6 +134,11 @@ const workers = 2;
 async function showtimes(q: Query, c: ReadContext): Promise<DataItem[]> {
   const deadline = Date.now() + budgetMs;
   const date = q.date ?? today();
+  if (isPastDate(date)) {
+    // The upstream still answers for past dates; its pages never show them.
+    c.warnings.push('Esa fecha ya pasó: Supercines solo muestra funciones de hoy en adelante.');
+    return [];
+  }
   const all = await venues(c);
   let allowed: Set<string> | undefined;
   if (q.cinema_id) {
@@ -159,12 +171,15 @@ async function showtimes(q: Query, c: ReadContext): Promise<DataItem[]> {
     c.warnings.push(`Se consultaron ${titlesLimit} de ${work.length} títulos de Supercines; usa movie_id o query para los demás.`);
     work = work.slice(0, titlesLimit);
   }
-  const items: DataItem[] = [];
-  let steps = 0;
+  const items: DataItem[] = [], offline: OfflineFunction[] = [];
+  let steps = 0, unscheduled = 0;
   const { done, failures, skipped: left, stopped } = await fanOut(work, async movie => {
     const html = await schedule(c, movie.id, date);
-    if (html !== undefined) items.push(...parseSupercinesShowtimes(html, movie, date, c).filter(s => !allowed || allowed.has(s.cinema_id)));
+    if (html === undefined) { unscheduled++; return; }
+    items.push(...parseSupercinesShowtimes(html, movie, date, c, offline).filter(s => !allowed || allowed.has(s.cinema_id)));
   }, { deadline, minRemainingMs: readMs, workers, onStep: () => c.progress(`Supercines: ${++steps} de ${work.length} títulos consultados.`) });
+  offlineWarning(offline, all, allowed, date, c);
+  if (done && unscheduled === done) c.warnings.push(`Supercines no publica funciones de ${work.length === 1 ? 'ese título' : 'estos títulos'} para ${date}; publica la cartelera día a día y las preventas en sus propias fechas.`);
   const skipped = left.length;
   if (stopped) {
     c.partial = true;
@@ -180,6 +195,29 @@ async function showtimes(q: Query, c: ReadContext): Promise<DataItem[]> {
   }
   if (work.length && !done) throw stopped ?? failures[0] ?? new DataError('unavailable', 'Se agotó el tiempo de consulta de Supercines; usa movie_id.');
   return items;
+}
+
+/**
+ * Functions the page lists greyed out, without online sales or identifier
+ * (a venue that only sells at the box office). Past ones today are just
+ * closed and are not reported.
+ */
+function offlineWarning(offline: OfflineFunction[], all: Venue[], allowed: Set<string> | undefined, date: string, c: ReadContext) {
+  const now = date === today() ? nowTime() : undefined;
+  const byVenue = new Map<string, string[]>();
+  for (const f of offline) {
+    const venue = all.find(v => v.name === `Supercines ${titled(f.venue)}`);
+    if (!venue || (allowed && !allowed.has(venue.id))) continue;
+    // Before 05:00 a time belongs to the night after the date: still ahead.
+    if (now && f.time >= '05:00' && f.time < now) continue;
+    const list = byVenue.get(venue.name) ?? [];
+    list.push(`${f.movie} ${f.time}`);
+    byVenue.set(venue.name, list);
+  }
+  for (const [venue, list] of byVenue) {
+    const shown = list.slice(0, 20).join(', ') + (list.length > 20 ? ` y ${list.length - 20} más` : '');
+    c.warnings.push(`${venue} lista ${list.length} funciones sin venta en línea (sin identificador; se compran en taquilla): ${shown}.`);
+  }
 }
 
 /** The booking page publishes the exchange rate and whether the title is 3D. */
@@ -223,6 +261,12 @@ export function parseSupercinesPrices(html: string, q: Query, rate: number | und
 }
 
 export function parseSupercinesConcessions(html: string, cinemaId: string, c: ReadContext): DataItem[] {
+  // A venue without online concessions answers with an empty body, and its
+  // page shows no products.
+  if (!html.trim()) {
+    c.warnings.push('Supercines no ofrece caramelería en línea para esta sede: su web no muestra productos.');
+    return [];
+  }
   const $ = load(html), categories = new Map<string, string>(), items: DataItem[] = [];
   if (!$('#carameleria-products').length) throw new DataError('error', 'No se reconoció el catálogo de caramelería de Supercines (cambió la estructura de la página).');
   $('button[data-filtro]').each((_, b) => { const id = $(b).attr('data-filtro') ?? '', name = label($(b).text()); if (/^\d{1,6}$/.test(id) && name) categories.set(id, name); });
@@ -262,6 +306,7 @@ export async function supercines(op: Operation, q: Query, c: ReadContext): Promi
   if (op === 'prices') {
     const cinemaId = requireArg(q, 'cinema_id'), sessionId = requireArg(q, 'session_id'), movieId = requireArg(q, 'movie_id');
     const date = q.date ?? today();
+    if (isPastDate(date)) throw new DataError('unavailable', 'Esa fecha ya pasó: Supercines solo vende funciones de hoy en adelante.');
     // Fares depend on the date and the venue: confirm the function first, so
     // a mismatched ID never returns another function's fares.
     // Only the function's identity matters here: no title lookup, and the
@@ -279,6 +324,7 @@ export async function supercines(op: Operation, q: Query, c: ReadContext): Promi
   }
   const cinemaId = requireArg(q, 'cinema_id');
   if (!(await venues(c)).some(v => v.id === cinemaId)) throw new DataError('unavailable', 'Sede Supercines no reconocida; consulta list_cinemas.');
-  c.warnings.push('Precios VES del catálogo de caramelería de la sede; la existencia por producto y los cargos finales no se verifican.');
-  return parseSupercinesConcessions(await c.form(`${SC}/listCarameleria`, { idEmpresa: cinemaId }, 600000), cinemaId, c);
+  const products = parseSupercinesConcessions(await c.form(`${SC}/listCarameleria`, { idEmpresa: cinemaId }, 600000), cinemaId, c);
+  if (products.length) c.warnings.push('Precios VES del catálogo de caramelería de la sede; la existencia por producto y los cargos finales no se verifican.');
+  return products;
 }

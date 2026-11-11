@@ -140,6 +140,19 @@ export const text = (v: unknown): string => typeof v === 'string' && !v.startsWi
 export const number = (v: unknown): number | undefined => (typeof v === 'number' || (typeof v === 'string' && /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(v.trim()))) && Number.isFinite(Number(v)) ? Number(v) : undefined;
 export const folded = (s: string) => s.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
 export const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Caracas', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+/** Caracas wall-clock time, "HH:MM" (24 h). */
+export const nowTime = () => new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Caracas', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date());
+/**
+ * A calendar date whose functions are over. Schedules are grouped by
+ * commercial date, so yesterday still counts until 05:00 (late-night
+ * functions belong to it).
+ */
+export function isPastDate(date: string): boolean {
+  const current = today();
+  if (date >= current) return false;
+  const yesterday = new Date(Date.parse(`${current}T12:00:00Z`) - 86400000).toISOString().slice(0, 10);
+  return !(date === yesterday && nowTime() < '05:00');
+}
 export function requireArg(q: Query, field: keyof Query): string {
   const value = q[field];
   if (typeof value !== 'string' || !value) throw new DataError('unavailable', `Se requiere ${field}; obtén el identificador mediante las herramientas de catálogo.`);

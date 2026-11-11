@@ -6,9 +6,12 @@ import { HttpClient, assertPublicForm, assertPublicRead } from '../src/http.js';
 import { HostedHttpClient } from '../src/hosted-http.js';
 import { SessionStore } from '../src/auth.js';
 import { fanOut } from '../src/fanout.js';
-import { DataError } from '../src/core.js';
+import { DataError, today } from '../src/core.js';
 import { inputSchema } from '../src/server.js';
-import { EmptySessionStore } from './fixtures.js';
+import { EmptySessionStore, shiftDate } from './fixtures.js';
+
+// Dates relative to today: past dates are answered without reading the provider.
+const D = today(), D1 = shiftDate(D, 1), DFAR = shiftDate(D, 60);
 
 const SC = 'https://supercines.com.ve';
 const directory = [
@@ -28,11 +31,13 @@ const billboard = {
 const block = (venue: string, anchors: string) => `<div class="st_calender_row_cont"><h6>${venue}</h6><div class="horariosNew"><ul>${anchors}</ul></div></div>`;
 const slot = (cinema: number, id: number, movie: number, date: string, time: string) =>
   `<li><a href="javascript:void(0)" id="hora_${id}" onclick="getDetailsNoauth(${cinema},'hora_${id}','${id}','${movie}','${date}')">${time}   </a></li>`;
-const schedule3991 = `<!-- ${block('LA GRANJA', slot(7, 999, 3991, '2026-11-11', '1:00 PM'))} -->` +
-  block('LA GRANJA', slot(7, 100, 3991, '2026-11-11', '5:40 PM') + slot(7, 101, 3991, '2026-11-11', '12:10 AM') +
-    '<li><a href="javascript:void(0)" id="hora_102" class="disabledFunction" onclick="ventasDesactivadas()">9:00 PM</a></li>' +
-    slot(7, 103, 4000, '2026-11-11', '7:00 PM')) +
-  block('UNICENTRO', slot(9, 200, 3991, '2026-11-11', '12:30 PM'));
+// Disabled functions carry no id, as on the live page (past, or no online sales).
+const off = (time: string) => `<li><a href="javascript:void(0)" class="disabledFunction" onclick="ventasDesactivadas()">${time}   </a></li>`;
+const schedule3991 = (date: string) => `<!-- ${block('LA GRANJA', slot(7, 999, 3991, date, '1:00 PM'))} -->` +
+  block('LA GRANJA', slot(7, 100, 3991, date, '5:40 PM') + slot(7, 101, 3991, date, '12:10 AM') + off('9:00 PM') +
+    slot(7, 103, 4000, date, '7:00 PM')) +
+  block('UNICENTRO', slot(9, 200, 3991, date, '12:30 PM')) +
+  block('LOS AVIADORES', off('4:00 PM') + off('6:25 PM'));
 const booking = (threeD: '0' | '1') => `<meta name="csrf-token" content="TOKEN0000000000000000000000000000000000">
 <script>const tasa = '901.62';
 const listBoletosPromise = postRequest("/listBoletos",\`idFuncion=\${idTurno}&fecha=\${fechaInicial}&unico=3991&tresD=${threeD}&idEmpresa=\${idEmpresa}\`);</script>`;
@@ -72,11 +77,11 @@ function fetcherFor(options: Options = {}) {
     if (call.path === '/listCartelerafecha') {
       if (options.scheduleStatus) return new Response('', { status: options.scheduleStatus });
       if (options.scheduleBody !== undefined) return new Response(options.scheduleBody);
-      if (form.get('id') === '3991') return new Response(schedule3991);
+      if (form.get('id') === '3991') return new Response(schedule3991(form.get('fecha') ?? ''));
       return new Response('', { status: 302, headers: { location: SC } });
     }
     if (call.path === '/listBoletos') return options.fareRedirect ? new Response('', { status: 302, headers: { location: SC } }) : new Response(fares);
-    if (call.path === '/listCarameleria') return new Response(candy);
+    if (call.path === '/listCarameleria') return new Response(form.get('idEmpresa') === '4' ? '' : candy);
     throw new Error(`Unexpected POST ${call.path}`);
   };
   return { calls, fetcher };
@@ -87,15 +92,15 @@ function provider(options: Options = {}) {
 }
 
 test('Supercines reads only its public listing routes, with exactly their fields', () => {
-  assert.doesNotThrow(() => assertPublicForm(`${SC}/listCartelerafecha`, { fecha: '2026-11-11', id: '3991' }));
+  assert.doesNotThrow(() => assertPublicForm(`${SC}/listCartelerafecha`, { fecha: `${D}`, id: '3991' }));
   assert.doesNotThrow(() => assertPublicForm(`${SC}/api/app/cartelera/list`, { type: 'all' }));
   assert.doesNotThrow(() => assertPublicRead(`${SC}/booking/3991`));
   for (const [url, fields] of [
     [`${SC}/bookSeat`, {}], [`${SC}/addSessionbook`, {}], [`${SC}/do-login`, {}], [`${SC}/verifyCortesia`, {}],
-    [`${SC}/listCartelerafecha`, { fecha: '2026-11-11', id: '3991', extra: '1' }],
-    [`${SC}/listCartelerafecha`, { fecha: '2026-11-11' }],
+    [`${SC}/listCartelerafecha`, { fecha: `${D}`, id: '3991', extra: '1' }],
+    [`${SC}/listCartelerafecha`, { fecha: `${D}` }],
     [`${SC}/listCarameleria`, { idEmpresa: '7', constructor: 'x' }],
-    [`${SC}/listBoletos`, { idFuncion: '1', fecha: '2026-11-11', unico: '2', tresD: '2', idEmpresa: '7' }],
+    [`${SC}/listBoletos`, { idFuncion: '1', fecha: `${D}`, unico: '2', tresD: '2', idEmpresa: '7' }],
     [`${SC}/listCarameleria?x=1`, { idEmpresa: '7' }],
     ['https://evil.example/listCarameleria', { idEmpresa: '7' }],
   ] as const) assert.throws(() => assertPublicForm(url, fields), /no permitida/);
@@ -132,42 +137,41 @@ test('Supercines billboard keeps presales, drops unsafe images and maps ratings 
   const gato = result.items.find(m => m.id === '4092')!;
   assert.equal(gato.format, '3D'); assert.equal(gato.rating, 'A'); assert.equal(gato.image_url, undefined);
   assert.equal(result.items.find(m => m.id === '3991')?.image_url, `${SC}/storage/image/image-pelicula1.jpg`);
-  assert.equal(inputSchema('movies').safeParse({ provider: 'supercines', date: '2026-11-11' }).success, false);
+  assert.equal(inputSchema('movies').safeParse({ provider: 'supercines', date: `${D}` }).success, false);
 });
 
 test('Supercines functions: live blocks only, 12-hour clock, late night without timestamp, venue filter', async () => {
   const { service } = provider();
-  const result = await service.query('showtimes', { provider: 'supercines', cinema_id: '7', date: '2026-11-11' });
+  const result = await service.query('showtimes', { provider: 'supercines', cinema_id: '7', date: `${D}` });
   // The service sorts by starts_at, then name: the late-night function last.
   assert.deepEqual(result.items.map(s => [s.id, s.time, s.starts_at ?? null, s.cinema_name]), [
-    ['100', '17:40', '2026-11-11T17:40:00-04:00', 'Supercines La Granja'],
+    ['100', '17:40', `${D}T17:40:00-04:00`, 'Supercines La Granja'],
     ['101', '00:10', null, 'Supercines La Granja'],
   ]);
   // A function attributed to another title is not reported under this one.
   assert.equal(result.partial, true);
-  assert.ok(result.warnings.some(w => /venta en línea desactivada/.test(w)));
   // Titles without functions that day (redirect to the home page) are empty, not failures.
   assert.ok(!result.warnings.some(w => /No se pudieron consultar/.test(w)));
-  const city = await service.query('showtimes', { provider: 'supercines', city: 'Maracay', date: '2026-11-11' });
+  const city = await service.query('showtimes', { provider: 'supercines', city: 'Maracay', date: `${D}` });
   assert.deepEqual(city.items.map(s => [s.id, s.cinema_id, s.time]), [['200', '9', '12:30']]);
   assert.equal(inputSchema('showtimes').safeParse({ provider: 'supercines' }).success, false);
 });
 
 test('Supercines fares require the function to exist and never keep an inconsistent amount', async () => {
   const { service, calls } = provider();
-  const result = await service.query('prices', { provider: 'supercines', cinema_id: '7', movie_id: '3991', session_id: '100', date: '2026-11-11' });
+  const result = await service.query('prices', { provider: 'supercines', cinema_id: '7', movie_id: '3991', session_id: '100', date: `${D}` });
   assert.equal(result.status, 'available');
   assert.deepEqual(result.items.map(r => [r.id, r.prices]), [['77', [{ currency: 'VES', amount: 4057.29, basis: 'provider' }, { currency: 'USD', amount: 4.5, basis: 'provider_conversion' }]]]);
   assert.equal(result.items[0].final_total_verified, false);
   assert.equal(result.partial, true);
   const fareRead = new URLSearchParams(calls.find(c => c.path === '/listBoletos')!.body);
-  assert.deepEqual(Object.fromEntries(fareRead), { fecha: '2026-11-11', idEmpresa: '7', idFuncion: '100', tresD: '0', unico: '3991' });
+  assert.deepEqual(Object.fromEntries(fareRead), { fecha: `${D}`, idEmpresa: '7', idFuncion: '100', tresD: '0', unico: '3991' });
   // The same function ID at another venue is not this function.
-  const other = await service.query('prices', { provider: 'supercines', cinema_id: '9', movie_id: '3991', session_id: '100', date: '2026-11-11' });
+  const other = await service.query('prices', { provider: 'supercines', cinema_id: '9', movie_id: '3991', session_id: '100', date: `${D}` });
   assert.equal(other.status, 'unavailable');
   assert.equal(inputSchema('prices').safeParse({ provider: 'supercines', cinema_id: '7', session_id: '100' }).success, false);
-  assert.equal(inputSchema('prices').safeParse({ provider: 'supercines', cinema_id: '7', session_id: '100', movie_id: '3991', date: '2026-11-11' }).success, true);
-  assert.equal(inputSchema('prices').safeParse({ provider: 'cinepic', cinema_id: '123300', session_id: 'f1', movie_id: 'p1', date: '2026-11-11' }).success, false);
+  assert.equal(inputSchema('prices').safeParse({ provider: 'supercines', cinema_id: '7', session_id: '100', movie_id: '3991', date: `${D}` }).success, true);
+  assert.equal(inputSchema('prices').safeParse({ provider: 'cinepic', cinema_id: '123300', session_id: 'f1', movie_id: 'p1', date: `${D}` }).success, false);
 });
 
 test('Supercines concessions keep category and price, and skip products without a price', async () => {
@@ -192,31 +196,31 @@ test('hosted calls share one Supercines visitor session, cache and request limit
   const shared = new HttpClient(fetcher, 15000, new EmptySessionStore());
   // hosted.ts builds one HostedHttpClient per MCP request over a shared public client.
   const call = () => new CinemaService(new HostedHttpClient(fetcher, 15000, new SessionStore(), shared));
-  await call().query('showtimes', { provider: 'supercines', cinema_id: '7', date: '2026-11-11' });
+  await call().query('showtimes', { provider: 'supercines', cinema_id: '7', date: `${D}` });
   const cold = calls.length;
-  await call().query('showtimes', { provider: 'supercines', cinema_id: '7', date: '2026-11-11' });
+  await call().query('showtimes', { provider: 'supercines', cinema_id: '7', date: `${D}` });
   assert.equal(calls.filter(c => c.path === '/cartelera').length, 1);
   assert.equal(calls.length, cold, 'a second hosted call is served from the shared cache');
 });
 
 test('titles without functions that day are cached like schedules', async () => {
   const { service, calls } = provider();
-  await service.query('showtimes', { provider: 'supercines', cinema_id: '7', date: '2026-11-11' });
+  await service.query('showtimes', { provider: 'supercines', cinema_id: '7', date: `${D}` });
   const cold = calls.length;
-  const warm = await service.query('showtimes', { provider: 'supercines', cinema_id: '7', date: '2026-11-11' });
+  const warm = await service.query('showtimes', { provider: 'supercines', cinema_id: '7', date: `${D}` });
   assert.equal(calls.length, cold);
   assert.equal(warm.status, 'available');
 });
 
 test('a redirect outside the schedule route is a failure, not an empty result', async () => {
   const { service } = provider({ fareRedirect: true });
-  const result = await service.query('prices', { provider: 'supercines', cinema_id: '7', movie_id: '3991', session_id: '100', date: '2026-11-11' });
+  const result = await service.query('prices', { provider: 'supercines', cinema_id: '7', movie_id: '3991', session_id: '100', date: `${D}` });
   assert.equal(result.status, 'unavailable');
 });
 
 test('fares read no billboard and carry no schedule warnings', async () => {
   const { service, calls } = provider();
-  const result = await service.query('prices', { provider: 'supercines', cinema_id: '7', movie_id: '3991', session_id: '100', date: '2026-11-11' });
+  const result = await service.query('prices', { provider: 'supercines', cinema_id: '7', movie_id: '3991', session_id: '100', date: `${D}` });
   assert.equal(calls.filter(c => c.path === '/api/app/cartelera/list').length, 0);
   assert.ok(!result.warnings.some(w => /madrugada|desactivada/.test(w)));
 });
@@ -224,7 +228,7 @@ test('fares read no billboard and carry no schedule warnings', async () => {
 test('a rate limit or an outage stops the schedule fan-out', async () => {
   for (const [status, expected] of [[429, 'rate_limited'], [503, 'error']] as const) {
     const { service, calls } = provider({ scheduleStatus: status });
-    const result = await service.query('showtimes', { provider: 'supercines', date: '2026-11-11', city: 'Maracay' });
+    const result = await service.query('showtimes', { provider: 'supercines', date: `${D}`, city: 'Maracay' });
     assert.equal(result.status, expected);
     // Two workers: at most the reads already in flight, plus the third
     // consecutive failure for an outage; never the whole queue.
@@ -233,7 +237,7 @@ test('a rate limit or an outage stops the schedule fan-out', async () => {
     if (status === 429) {
       const before = calls.length;
       assert.equal((await service.query('cinemas', { provider: 'supercines' })).status, 'available');
-      const again = await service.query('showtimes', { provider: 'supercines', date: '2026-11-12', movie_id: '3991' });
+      const again = await service.query('showtimes', { provider: 'supercines', date: `${D1}`, movie_id: '3991' });
       assert.equal(again.status, 'rate_limited');
       assert.equal(calls.length, before);
     }
@@ -241,7 +245,7 @@ test('a rate limit or an outage stops the schedule fan-out', async () => {
 });
 
 test('changed Supercines markup fails visibly instead of returning empty lists', async () => {
-  const schedule = await provider({ scheduleBody: '<div class="nuevo"></div>' }).service.query('showtimes', { provider: 'supercines', movie_id: '3991', date: '2026-11-11' });
+  const schedule = await provider({ scheduleBody: '<div class="nuevo"></div>' }).service.query('showtimes', { provider: 'supercines', movie_id: '3991', date: `${D}` });
   assert.equal(schedule.status, 'error');
 });
 
@@ -249,7 +253,7 @@ test('an expired visitor session is renewed once for concurrent reads', async ()
   const { service, calls } = provider({ staleToken: 'TOKEN100000000000000000000000000000000000', delayMs: 5 });
   // The first session's token is refused for every read after it is issued.
   const results = await Promise.all([
-    service.query('showtimes', { provider: 'supercines', movie_id: '3991', date: '2026-11-11' }),
+    service.query('showtimes', { provider: 'supercines', movie_id: '3991', date: `${D}` }),
     service.query('concessions', { provider: 'supercines', cinema_id: '7' }),
   ]);
   assert.ok(results.every(r => r.status === 'available'), JSON.stringify(results.map(r => [r.status, r.warnings])));
@@ -265,4 +269,38 @@ test('fan-out starts a read only while a whole read still fits before the deadli
   const refused = await fanOut([1, 2, 3, 4, 5], async () => { throw new DataError('rate_limited', 'x'); }, { deadline: Date.now() + 1000, minRemainingMs: 0, workers: 2 });
   assert.equal(refused.failures.length, 2);
   assert.equal(refused.skipped.length, 3);
+});
+
+test('functions listed without online sales are reported by venue and time, never with an ID', async () => {
+  const { service } = provider();
+  // A venue whose every function is box-office only (Playa Mar on the live site).
+  const boxOffice = await service.query('showtimes', { provider: 'supercines', cinema_id: '4', date: D1 });
+  assert.equal(boxOffice.status, 'empty');
+  assert.ok(boxOffice.warnings.some(w => w.includes('Supercines Los Aviadores lista 2 funciones sin venta en línea') && w.includes('CLAYFACE 16:00, CLAYFACE 18:25')));
+  const granja = await service.query('showtimes', { provider: 'supercines', cinema_id: '7', date: D1 });
+  assert.ok(granja.warnings.some(w => w.includes('Supercines La Granja lista 1 funciones sin venta en línea') && w.includes('CLAYFACE 21:00')));
+  // Other venues' box-office functions stay out of a venue query.
+  assert.ok(!granja.warnings.some(w => w.includes('Los Aviadores')));
+});
+
+test('past dates are answered without reading Supercines', async () => {
+  const { service, calls } = provider();
+  const past = shiftDate(D, -2);
+  const showtimes = await service.query('showtimes', { provider: 'supercines', cinema_id: '7', date: past });
+  assert.equal(showtimes.status, 'empty');
+  assert.ok(showtimes.warnings.some(w => /ya pasó/.test(w)));
+  const prices = await service.query('prices', { provider: 'supercines', cinema_id: '7', movie_id: '3991', session_id: '100', date: past });
+  assert.equal(prices.status, 'unavailable');
+  assert.equal(calls.length, 0);
+});
+
+test('a day with no published functions says so, and a venue without online concessions is empty', async () => {
+  const { service } = provider();
+  const presale = await service.query('showtimes', { provider: 'supercines', movie_id: '3976', date: D });
+  assert.equal(presale.status, 'empty');
+  assert.ok(presale.warnings.some(w => /no publica funciones de ese título/.test(w)));
+  const candyless = await service.query('concessions', { provider: 'supercines', cinema_id: '4' });
+  assert.equal(candyless.status, 'empty');
+  assert.ok(candyless.warnings.some(w => /no ofrece caramelería en línea/.test(w)));
+  assert.ok(!candyless.warnings.some(w => /catálogo de caramelería/.test(w)));
 });
