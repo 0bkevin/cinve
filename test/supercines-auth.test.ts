@@ -71,7 +71,9 @@ test('a refused Supercines login stores nothing and leaks neither the password n
 // One function (id 100, La Granja, today) of title 3991, and its fare list.
 const fare = (id: number, name: string, a: string, b: string, shown: string) => `<div class="row"><h6>${name}</h6>
 <button onclick="changeQtyBoleto(1,${id},'${name}   ','${a}','${b}'); return false;">+</button><div class="col-md-3"><h6>Bs. ${shown}</h6></div></div>`;
-const fares = (member: boolean) => `<div id="seleccionboletos">${fare(77, 'BOLETO GENERAL 2D', '86.00', '3971.29', '4,057.29')}${member ? fare(90, 'CANJE SUPERPUNTOS', '0.00', '0.00', '0.00') : ''}</div>`;
+// Signed in, the live page adds the account's courtesy-ticket container (observed November 2026).
+const courtesies = `<hr class="my-4"><div class="row" id="superfriends-cortesias-div"><div class="col-12"><h6 class="">Mis Cortesías Super Friends</h6><div id="cortesias-usuario-container" class="mb-3"><span>Cargando cortesías...</span></div></div></div>`;
+const fares = (member: boolean) => `<div id="seleccionboletos">${fare(77, 'BOLETO GENERAL 2D', '86.00', '3971.29', '4,057.29')}${member ? fare(90, 'CANJE SUPERPUNTOS', '0.00', '0.00', '0.00') + courtesies : ''}</div>`;
 function site(options: { expired?: boolean } = {}) {
   const calls: { path: string; cookie: string; xsrf: string; csrf: string }[] = [];
   const fetcher: typeof fetch = async (input, init) => {
@@ -114,6 +116,8 @@ test('a connected Supercines account reads fares as that account, uncached', asy
   const result = await service.query('prices', query);
   assert.equal(result.status, 'available');
   assert.deepEqual(result.items.map(i => i.name), ['BOLETO GENERAL 2D', 'CANJE SUPERPUNTOS']);
+  // The courtesy-ticket section is not a fare and does not make the result partial.
+  assert.equal(result.partial, false);
   assert.ok(result.warnings.some(w => /leídas con tu cuenta de Supercines/.test(w)));
   // Exactly one fare read, made with the account; no guest fare read.
   assert.deepEqual(calls.filter(c => c.path === '/listBoletos').map(c => !!c.xsrf), [true]);

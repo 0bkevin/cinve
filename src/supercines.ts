@@ -274,6 +274,10 @@ export function parseSupercinesPrices(html: string, q: Query, rate: number | und
   if (!$('#seleccionboletos').length) throw new DataError('error', 'No se reconoció la lista de tarifas de Supercines (cambió la estructura de la página).');
   let unrecognized = 0;
   $('#seleccionboletos > .row').each((_, row) => {
+    // Signed in, the list ends with the account's courtesy tickets ("Mis
+    // Cortesías Super Friends"), an empty container the site fills from
+    // another request: not a fare, and never read.
+    if ($(row).is('#superfriends-cortesias-div') || $(row).find('#cortesias-usuario-container').length) return;
     const plus = $(row).find('button[onclick^="changeQtyBoleto(1,"]').attr('onclick') ?? '';
     const m = plus.match(/^changeQtyBoleto\(1,(\d{1,12}),'([^']{1,200})','(\d+(?:\.\d+)?)','(\d+(?:\.\d+)?)'\)/);
     if (!m) { if ($(row).find('h6').length) unrecognized++; return; }
