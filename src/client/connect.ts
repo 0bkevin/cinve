@@ -121,7 +121,8 @@ function setBusy(busy: boolean) {
 
 async function request<T>(path: string, body: Record<string, string> = {}, credential = token): Promise<T> {
   const localizedPath = `${path}${path.includes('?') ? '&' : '?'}lang=${currentLocale}`;
-  const response = await fetch(localizedPath, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Cinev-Connection': credential }, body: JSON.stringify(body), cache: 'no-store', credentials: 'omit' });
+  const response = await fetch(localizedPath, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Cinev-Connection': credential }, body: JSON.stringify(body), cache: 'no-store', credentials: 'omit' })
+    .catch(() => { throw Object.assign(new Error(copy().genericError), { key: 'generic' }); });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw Object.assign(new Error(data.error || copy().genericError), { key: data.error_key ?? 'generic' });
   return data as T;

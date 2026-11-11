@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { parseHTML } from 'linkedom';
 import { loginPage } from '../src/auth-web.js';
+import { installationPage } from '../src/public-web.js';
 
 const settle = () => new Promise<void>(resolve => setImmediate(resolve));
 
@@ -69,4 +70,32 @@ test('an error returned in the earlier request language follows the current page
   assert.equal(c.document.getElementById('feedback-text')!.textContent, 'Check your email and password.');
   c.switchTo('es');
   assert.equal(c.document.getElementById('feedback-text')!.textContent, 'Revisa correo y contraseña.');
+});
+
+test('network failures use the current language instead of the browser error text', async () => {
+  const c = client((async path => {
+    if (String(path).startsWith('/connect/exchange')) return Response.json({ browser_token: 'BROWSER_TOKEN', provider: 'cinex', app: null });
+    throw new TypeError('Failed to fetch');
+  }) as typeof fetch);
+  await settle();
+  c.document.getElementById('login')!.dispatchEvent(new c.window.Event('submit', { cancelable: true }));
+  await settle();
+  assert.equal(c.document.getElementById('feedback-text')!.textContent, 'No se pudo completar la solicitud.');
+  c.switchTo('en');
+  assert.equal(c.document.getElementById('feedback-text')!.textContent, 'Could not complete the request.');
+});
+
+test('public language links preserve the current section, including after navigation', () => {
+  const { document } = parseHTML(installationPage('https://cinve.example', 'en'));
+  const location = new URL('https://cinve.example/install?lang=en#mano');
+  const hashListeners: (() => void)[] = [];
+  const script = readFileSync(new URL('../src/assets/js/site.js', import.meta.url), 'utf8').replace(/^export \{\};\s*$/m, '');
+  new Function('document', 'location', 'matchMedia', 'addEventListener', 'HTMLDetailsElement', script)(document, location,
+    () => ({ matches: true }), (event: string, callback: () => void) => { if (event === 'hashchange') hashListeners.push(callback); }, class {});
+  const links = () => [...document.querySelectorAll<HTMLAnchorElement>('[data-locale-switch]')].map(link => new URL(link.getAttribute('href')!, location));
+  assert.deepEqual(links().map(url => url.hash), ['#mano', '#mano']);
+  assert.deepEqual(links().map(url => url.searchParams.get('lang')), ['es', 'en']);
+  location.hash = '#contenido';
+  for (const listener of hashListeners) listener();
+  assert.deepEqual(links().map(url => url.hash), ['#contenido', '#contenido']);
 });

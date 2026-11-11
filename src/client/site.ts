@@ -5,6 +5,17 @@
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const browserText = (document.documentElement.dataset.browserText ? JSON.parse(document.documentElement.dataset.browserText) : {}) as { copied?: string; copy?: string; copyFailure?: string };
 
+// Keep the current section when changing language on a public page.
+const keepSection = () => {
+  for (const link of document.querySelectorAll<HTMLAnchorElement>('[data-locale-switch]')) {
+    const url = new URL(link.getAttribute('href')!, location.href);
+    url.hash = location.hash;
+    link.href = url.pathname + url.search + url.hash;
+  }
+};
+addEventListener('hashchange', keepSection);
+keepSection();
+
 // --- Copy buttons -----------------------------------------------------------
 // Each names the element it copies in data-copy. Buttons stay hidden without
 // JavaScript; the text remains selectable.
