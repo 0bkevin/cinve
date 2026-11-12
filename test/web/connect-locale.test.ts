@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { parseHTML } from 'linkedom';
 import { loginPage } from '../../src/auth-web.js';
 import { installationPage } from '../../src/public-web.js';
+import { invalidEmails, invalidPasswords, validEmails, validPasswords } from '../helpers/credential-cases.js';
 
 const settle = () => new Promise<void>(resolve => setImmediate(resolve));
 
@@ -20,7 +21,15 @@ function client(request: typeof fetch) {
   const script = readFileSync(new URL('../../src/assets/js/connect.js', import.meta.url), 'utf8').replace(/^export \{\};\s*$/m, '');
   new Function('document', 'location', 'history', 'fetch', script)(document, location, history, request);
   const switchTo = (locale: string) => document.querySelector(`[data-locale-switch="${locale}"]`)!.dispatchEvent(new window.Event('click', { bubbles: true, cancelable: true }));
-  return { document, window, switchTo, get url() { return url; } };
+  const fill = (email: string, password: string) => {
+    (document.getElementById('username') as HTMLInputElement).value = email;
+    (document.getElementById('password') as HTMLInputElement).value = password;
+  };
+  const submit = (email = 'person@example.test', password = 'SYNTHETIC_PASSWORD') => {
+    fill(email, password);
+    form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+  };
+  return { document, window, switchTo, submit, get url() { return url; } };
 }
 
 test('switching languages during and after exchange keeps one private connection and translates the whole page', async () => {
@@ -56,7 +65,7 @@ test('switching languages during and after exchange keeps one private connection
   c.switchTo('es'); c.switchTo('en');
   assert.equal(calls.length, 1, 'locale switches must not reuse the single-use invitation');
   assert.equal(c.url.href.includes('PRIVATE'), false);
-  c.document.getElementById('login')!.dispatchEvent(new c.window.Event('submit', { bubbles: true, cancelable: true }));
+  c.submit();
   await settle();
   assert.equal(calls[1]!.url, '/connect/login?lang=en');
   assert.equal(calls[1]!.token, 'PRIVATE_BROWSER_TOKEN');
@@ -76,7 +85,7 @@ test('an error returned in the earlier request language follows the current page
   const c = client((async path => String(path).startsWith('/connect/exchange')
     ? Response.json({ browser_token: 'BROWSER_TOKEN', provider: 'cinex', app: null }) : login) as typeof fetch);
   await settle();
-  c.document.getElementById('login')!.dispatchEvent(new c.window.Event('submit', { cancelable: true }));
+  c.submit();
   c.switchTo('en');
   finishLogin(Response.json({ error: 'Revisa correo y contraseña.', error_key: 'credentials' }, { status: 400 }));
   await settle();
@@ -91,7 +100,7 @@ test('network failures use the current language instead of the browser error tex
     throw new TypeError('Failed to fetch');
   }) as typeof fetch);
   await settle();
-  c.document.getElementById('login')!.dispatchEvent(new c.window.Event('submit', { cancelable: true }));
+  c.submit();
   await settle();
   assert.equal(c.document.getElementById('feedback-text')!.textContent, 'No se pudo completar la solicitud.');
   c.switchTo('en');
@@ -111,4 +120,70 @@ test('public language links preserve the current section, including after naviga
   location.hash = '#contenido';
   for (const listener of hashListeners) listener();
   assert.deepEqual(links().map(url => url.hash), ['#contenido', '#contenido']);
+});
+
+test('the eye button inside the password field reveals it and keeps an accessible label in each language', async () => {
+  const c = client((async () => Response.json({ browser_token: 'BROWSER_TOKEN', provider: 'cinex', app: null })) as typeof fetch);
+  await settle();
+  const show = c.document.getElementById('show')!;
+  const password = c.document.getElementById('password') as HTMLInputElement;
+  assert.ok(show.closest('.password-field')?.contains(password), 'the toggle sits inside the password field');
+  assert.equal(show.textContent, '', 'the toggle is an icon, labelled for assistive technology');
+  assert.equal(show.getAttribute('aria-label'), 'Mostrar contraseña');
+  show.dispatchEvent(new c.window.Event('click'));
+  assert.equal(password.type, 'text');
+  assert.equal(show.getAttribute('aria-pressed'), 'true');
+  assert.equal(show.getAttribute('aria-label'), 'Ocultar contraseña');
+  c.switchTo('en');
+  assert.equal(show.getAttribute('aria-label'), 'Hide password');
+  assert.equal(show.textContent, '');
+});
+
+test('the page refuses what the server refuses, before anything is sent', async () => {
+  const sent: string[] = [];
+  const c = client((async (path, init) => {
+    if (String(path).startsWith('/connect/exchange')) return Response.json({ browser_token: 'BROWSER_TOKEN', provider: 'cinex', app: null });
+    sent.push(String(init!.body));
+    return Response.json({ error: 'Revisa correo y contraseña.', error_key: 'credentials' }, { status: 400 });
+  }) as typeof fetch);
+  await settle();
+  for (const email of invalidEmails) { c.submit(email); await settle(); }
+  for (const password of invalidPasswords) { c.submit('person@example.test', password); await settle(); }
+  assert.equal(sent.length, 0);
+  for (const email of validEmails) { c.submit(email); await settle(); }
+  for (const password of validPasswords) { c.submit('person@example.test', password); await settle(); }
+  assert.equal(sent.length, validEmails.length + validPasswords.length);
+  assert.equal(JSON.parse(sent[3]!).username, 'padded@example.com', 'the email is sent trimmed');
+});
+
+test('a field that breaks a rule says what to fix, in the page language, until it is fixed', async () => {
+  const c = client((async () => Response.json({ browser_token: 'BROWSER_TOKEN', provider: 'cinex', app: null })) as typeof fetch);
+  await settle();
+  const username = c.document.getElementById('username') as HTMLInputElement;
+  const emailError = c.document.getElementById('username-error')!;
+  const passwordError = c.document.getElementById('password-error')!;
+  c.submit('<script>alert(1)</script>', '');
+  assert.equal(username.getAttribute('aria-invalid'), 'true');
+  assert.equal(emailError.hidden, false);
+  assert.equal(emailError.textContent, 'Escribe un correo válido, como nombre@ejemplo.com.');
+  assert.equal(passwordError.hidden, false);
+  assert.equal(c.document.getElementById('feedback')!.hidden, true, 'field mistakes stay next to their field');
+  c.switchTo('en');
+  assert.equal(emailError.textContent, 'Enter a valid email, like name@example.com.');
+  username.value = 'person@example.test';
+  username.dispatchEvent(new c.window.Event('input'));
+  assert.equal(username.hasAttribute('aria-invalid'), false);
+  assert.equal(emailError.hidden, true);
+});
+
+test('a field the server refuses is marked like one the page refused', async () => {
+  const c = client((async path => String(path).startsWith('/connect/exchange')
+    ? Response.json({ browser_token: 'BROWSER_TOKEN', provider: 'cinex', app: null })
+    : Response.json({ error: 'Escribe un correo válido, como nombre@ejemplo.com.', error_key: 'email' }, { status: 400 })) as typeof fetch);
+  await settle();
+  c.submit();
+  await settle();
+  assert.equal(c.document.getElementById('username')!.getAttribute('aria-invalid'), 'true');
+  assert.equal(c.document.getElementById('username-error')!.textContent, 'Escribe un correo válido, como nombre@ejemplo.com.');
+  assert.equal(c.document.getElementById('feedback')!.hidden, true);
 });

@@ -107,7 +107,6 @@ p a, .note a { text-decoration: underline; text-decoration-color: var(--input); 
 p a:hover, .note a:hover { text-decoration-color: currentColor; }
 .note:empty { display: none; }
 .btn { border-radius: 12px; }
-.password-row .btn { border-radius: var(--radius); }
 .btn svg { width: 16px; height: 16px; }
 .btn[data-size=lg] { height: 52px; padding-inline: 26px; font-size: 16px; font-weight: 600; border-radius: 14px; }
 
@@ -299,9 +298,52 @@ details.more[data-closing] > summary .chevron { transform: none; }
 .code { display: block; font: 600 15px/1.5 var(--font-sans); color: var(--foreground); background: var(--muted); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; overflow-wrap: anywhere; }
 .stack { display: grid; gap: 20px; }
 
-/* Account connection */
-.password-row { display: flex; gap: 8px; }
-.password-row .input { flex: 1; min-width: 0; }
+/* Account connection: the form sits on the page itself, under a rule,
+   like the landing page sections; no card around it. */
+.compact > .connect-panel { margin: 40px 0 0; padding-top: 32px; border-top: 1px solid var(--line); }
+.compact > .connect-panel[hidden] { display: none; }
+.compact > .lead { color: var(--dust); }
+.connect-form { display: grid; gap: 22px; }
+.connect-form > header h2 { font-size: clamp(28px, 4vw, 34px); margin: 0 0 8px; }
+.connect-form > header p { margin: 0; font-size: 15px; color: var(--dust); }
+.connect-form .field { display: grid; gap: 8px; }
+.connect-form .field > label { font-size: 15px; font-weight: 600; color: var(--foreground); }
+.connect-form .field input {
+  height: 52px; width: 100%; padding: 0 16px; font: 400 17px var(--font-sans); color: var(--foreground);
+  background: var(--muted); border: 1px solid var(--input); border-radius: 12px; box-shadow: none;
+  transition: border-color .15s, box-shadow .15s, background-color .15s;
+}
+.connect-form .field input:hover { border-color: #6e4a5d; }
+.connect-form .field input:focus-visible { border-color: var(--amber); box-shadow: 0 0 0 3px rgba(255, 189, 63, 0.22); background: var(--night); }
+.connect-form .field input:read-only { opacity: .7; }
+.connect-form .field input[aria-invalid=true] { border-color: var(--destructive); }
+.connect-form .field input[aria-invalid=true]:focus-visible { box-shadow: 0 0 0 3px rgba(255, 143, 122, 0.22); }
+.field-error { margin: 0; font-size: 14px; line-height: 1.45; color: var(--destructive); }
+.field-error[hidden] { display: none; }
+.password-field { position: relative; }
+.connect-form .password-field input { padding-right: 56px; }
+.password-field .reveal {
+  position: absolute; top: 50%; right: 6px; transform: translateY(-50%);
+  width: 40px; height: 40px; padding: 0; border-radius: 9px; color: var(--dust);
+}
+.password-field .reveal:hover { color: var(--foreground); background: var(--accent); }
+.password-field .reveal:focus-visible { outline: 2px solid var(--ring); outline-offset: 0; }
+.password-field .reveal svg { width: 20px; height: 20px; }
+.reveal > span { display: contents; }
+.reveal .when-shown, .reveal[aria-pressed=true] .when-hidden { display: none; }
+.reveal[aria-pressed=true] .when-shown { display: contents; }
+.connect-form #feedback { border-color: rgba(255, 143, 122, 0.4); background: rgba(255, 143, 122, 0.08); }
+.connect-form #feedback p { color: var(--foreground); }
+.connect-form #connect { height: 54px; margin-top: 4px; border-radius: 12px; font-size: 17px; font-weight: 600; }
+.connect-form .safe { display: flex; gap: 10px; margin: 0; color: var(--dust); line-height: 1.5; }
+.connect-form .safe svg { flex-shrink: 0; width: 16px; height: 16px; margin: 3px 0 0; color: var(--amber); }
+.connect-form > footer {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 20px;
+  padding-top: 20px; border-top: 1px solid var(--line);
+}
+.connect-form > footer .note { margin: 0; color: var(--dust); }
+.connect-form .cancel { height: auto; padding: 0; font-size: 14px; color: var(--dust); text-decoration: underline; text-decoration-color: var(--input); text-underline-offset: 4px; }
+.connect-form .cancel:hover { color: var(--foreground); text-decoration-color: currentColor; }
 .status-panel { display: grid; justify-items: start; gap: 8px; }
 .status-panel svg { width: 34px; height: 34px; margin-bottom: 4px; }
 .status-panel[data-tone=success] svg { color: var(--success); }
@@ -401,6 +443,8 @@ details.more[data-closing] > summary .chevron { transform: none; }
   .install #install-message { font-size: 13.5px; }
   .compact { margin: 40px auto 64px; }
   .card > footer .btn { flex: 1; }
+  .compact > .connect-panel { margin-top: 32px; padding-top: 28px; }
+  .connect-form { gap: 20px; }
 }
 
 /* Phones: brand on top, then the two titled columns side by side. */
@@ -638,4 +682,11 @@ button:disabled, .btn:disabled { cursor: not-allowed; }
 }
 @media (prefers-reduced-motion: reduce) {
   .demo-thinking i, .demo[data-stage] * { animation: none !important; }
+}
+
+/* The narrowest phones: the brand, the start link and the language menu stay
+   on one line in both languages instead of wrapping under each other. */
+@media (max-width: 360px) {
+  .site-nav { flex-wrap: nowrap; gap: 12px; font-size: 14px; }
+  .site-header .brand { font-size: 26px; }
 }

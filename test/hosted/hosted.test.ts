@@ -227,10 +227,10 @@ test('hosted rejects rebinding, excess bodies, field injection, reused/revoked l
   const { browser_token } = await (await f.post('/connect/exchange', invite)).json() as { browser_token: string };
   assert.equal((await f.post('/connect/login', browser_token, { provider: 'cinex', username: 'x', password: 'x' })).status, 400);
   assert.equal((await f.post('/connect/login', browser_token, { username: 'x', password: 'x'.repeat(17000) })).status, 413);
-  const failure = await f.post('/connect/login', browser_token, { username: 'x', password: 'x' });
+  const failure = await f.post('/connect/login', browser_token, { username: 'person@example.test', password: 'x' });
   assert.equal(failure.status, 401); assert.ok(!(await failure.text()).includes('PRIVATE_PASSWORD'));
-  for (let i = 0; i < 4; i++) await f.post('/connect/login', browser_token, { username: 'x', password: 'x' });
-  assert.equal((await f.post('/connect/login', browser_token, { username: 'x', password: 'x' })).status, 429);
+  for (let i = 0; i < 4; i++) await f.post('/connect/login', browser_token, { username: 'person@example.test', password: 'x' });
+  assert.equal((await f.post('/connect/login', browser_token, { username: 'person@example.test', password: 'x' })).status, 429);
   const newer = await link(client);
   await f.users.revoke(f.alice.id);
   assert.equal((await f.post('/connect/exchange', newer)).status, 410);
@@ -1017,7 +1017,7 @@ test('connection-link sign-ins are charged to the network, and failures and succ
   const count = async (key: string) => (await f.pool.query('SELECT count FROM cinev_budgets WHERE key_hash=$1', [f.links.keyHash(key)])).rows[0]?.count ?? 0;
   // Each self-service connection has its own link budget; the network quota still applies.
   await f.pool.query("INSERT INTO cinev_budgets(key_hash,expires_at,count) VALUES($1,now()+interval '1 minute',20)", [f.links.keyHash('oauth:login-ip:127.0.0.1')]);
-  const limited = await f.post('/connect/login', await browser(), { username: 'x', password: 'x' });
+  const limited = await f.post('/connect/login', await browser(), { username: 'person@example.test', password: 'x' });
   assert.equal(limited.status, 429); assert.equal(calls, 0); assert.match(await limited.text(), /desde tu red/);
   await f.pool.query('DELETE FROM cinev_budgets');
   // Malformed requests never reach admission.
@@ -1881,7 +1881,11 @@ test('localized connection APIs still exchange, log in, cancel and reject reused
   assert.deepEqual(await reused.json(), { error: 'Link expired or already used.', error_key: 'usedLink' });
   const invalid = await f.post('/connect/login?lang=en', browser_token, { username: '', password: '' });
   assert.equal(invalid.status, 400);
-  assert.equal((await invalid.json() as { error: string }).error, 'Check your email and password.');
+  assert.deepEqual(await invalid.json(), { error: 'Enter a valid email, like name@example.com.', error_key: 'email' });
+  const control = await f.post('/connect/login?lang=en', browser_token, { username: 'person@example.test', password: 'line\nbreak' });
+  assert.deepEqual(await control.json(), { error: 'Enter your password as you use it at the cinema: up to 256 characters, with no line breaks or invisible characters.', error_key: 'password' });
+  const markup = await f.post('/connect/login', browser_token, { username: '<script>alert(1)</script>@example.com', password: 'SYNTHETIC_PASSWORD' });
+  assert.deepEqual(await markup.json(), { error: 'Escribe un correo válido, como nombre@ejemplo.com.', error_key: 'email' });
   const login = await f.post('/connect/login?lang=en', browser_token, { username: 'person@example.test', password: 'SYNTHETIC_PASSWORD' });
   assert.equal(login.status, 200);
   const second = await f.client(f.bob.token);
@@ -1906,7 +1910,7 @@ test('OAuth consent preserves authorization fields across language links, errors
   assert.equal(retry.status, 400);
   const retryPage = load(await retry.text());
   assert.equal(retryPage('html').attr('lang'), 'en');
-  assert.match(retryPage('[role="alert"]').text(), /Check your email and password/);
+  assert.match(retryPage('[role="alert"]').text(), /Enter a valid email/);
   body.set('decision', 'approve');
   const approve = await fetch(new URL(action, f.origin), { method: 'POST', redirect: 'manual', headers: { Origin: f.origin, Cookie: cookie }, body });
   assert.equal(approve.status, 303);
