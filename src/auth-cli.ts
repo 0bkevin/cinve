@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { AuthProvider, SessionStore } from './auth/sessions.js';
 import { login } from './auth/login.js';
+import { checkCredentials } from './auth/credentials.js';
 import { readCredentials } from './auth/credentials-prompt.js';
 
 async function main() {
@@ -17,7 +18,11 @@ async function main() {
   if (command === 'logout') { await store.remove(provider); console.log(`Local ${provider} session removed. The remote token may remain valid until it expires.`); return; }
   let { username, password } = await readCredentials();
   try {
-    const result = await login(provider, username, password, store);
+    const credentials = checkCredentials(username, password);
+    if (!credentials.ok) throw new Error(credentials.problem === 'email'
+      ? 'Enter a valid email, like name@example.com.'
+      : 'Enter your password as you use it at the cinema: up to 256 characters, with no line breaks or invisible characters.');
+    const result = await login(provider, credentials.username, credentials.password, store);
     console.log(`The ${provider} session was saved locally. MCP can use it without restarting.`);
     if (result.profile_update_requested) console.log('Cinex requests a profile update on its website. Some operations may be limited.');
   } finally { password = ''; }

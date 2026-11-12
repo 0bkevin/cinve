@@ -162,6 +162,8 @@ const en = {
     attempts: "Too many attempts. Ask for a new link later.",
     invalidRequest: "Invalid request.",
     credentials: "Check your email and password.",
+    email: "Enter a valid email, like name@example.com.",
+    password: "Enter your password as you use it at the cinema: up to 256 characters, with no line breaks or invisible characters.",
     consentCredentials: "Check your email and password.",
     busyLink: "Connection in use or expired. Ask for a new link.",
     accountLimit: "Too many attempts for this account. Wait 15 minutes or check your details on the cinema website.",

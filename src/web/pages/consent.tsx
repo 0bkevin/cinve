@@ -21,8 +21,8 @@ export function authorizationPage(o: Consent, locale: Locale = 'es', path = '/oa
     {o.cinemaLogin && <form class="card" method="post" action={action}><section class="stack">{hidden}
       {o.error && <Alert variant="destructive" icon={icons.circleAlert()} role="alert"><p>{o.error}</p></Alert>}
       <div class="field"><label for="provider">{c.cinema}</label><div class="select-wrap"><select class="select" id="provider" name="provider">{option('cinex', 'Cinex')}{option('cinesunidos', 'Cines Unidos')}{option('supercines', 'Supercines')}</select>{icons.chevronDown()}</div></div>
-      <div class="field"><label for="username">{c.email}</label><input id="username" name="username" type="email" autocomplete="username" maxlength="320" required value={o.username ?? ''} autofocus={!o.error} /></div>
-      <div class="field"><label for="password">{c.password}</label><input id="password" name="password" type="password" autocomplete="current-password" maxlength="4096" required autofocus={Boolean(o.error)} /></div>
+      <div class="field"><label for="username">{c.email}</label><input id="username" name="username" type="email" autocomplete="username" maxlength="254" required value={o.username ?? ''} autofocus={!o.error} /></div>
+      <div class="field"><label for="password">{c.password}</label><input id="password" name="password" type="password" autocomplete="current-password" maxlength="256" required autofocus={Boolean(o.error)} /></div>
       <p class="fine">{icons.lock()} {c.safeLogin} {o.app} {c.appCannotSee}</p>
     </section><footer><button class="btn full" type="submit" data-size="lg" name="decision" value="connect">{c.connect}</button></footer></form>}
     <form method="post" action={action} class="consent-actions">{hidden}

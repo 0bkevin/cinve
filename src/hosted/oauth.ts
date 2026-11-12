@@ -1,6 +1,7 @@
 import { authorizationPage, authorizationErrorPage } from '../public-web.js';
 import { pageLocale } from '../web/http.js';
-import { webError } from '../web/errors.js';
+import { credentialMessage, webError } from '../web/errors.js';
+import { checkCredentials } from '../auth/credentials.js';
 import type { Locale } from '../web/locale.js';
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -437,7 +438,9 @@ export class HostedOAuth {
                 { error: webError(error, locale).error, provider: provider.success ? provider.data : undefined, username: username.slice(0, 320) }, locale, path + url.search);
               return true;
             };
-            if (!provider.success || !username || username.length > 320 || !password || password.length > 4096) return again(400, 'Revisa el correo y la contraseña.');
+            if (!provider.success) return again(400, 'Revisa el correo y la contraseña.');
+            const credentials = checkCredentials(username, password);
+            if (!credentials.ok) return again(400, credentialMessage(credentials.problem));
             // One sign-in at a time per request. A second submit (a double
             // click, or a resubmit while the first is still signing in) waits
             // for the first: if it succeeds, this response delivers a fresh

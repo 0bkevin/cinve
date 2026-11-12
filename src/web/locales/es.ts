@@ -207,6 +207,8 @@ const es = {
     attempts: "Demasiados intentos. Pide un enlace nuevo más tarde.",
     invalidRequest: "Solicitud no válida.",
     credentials: "Revisa correo y contraseña.",
+    email: "Escribe un correo válido, como nombre@ejemplo.com.",
+    password: "Escribe tu contraseña tal como la usas en el cine: hasta 256 caracteres, sin saltos de línea ni caracteres invisibles.",
     consentCredentials: "Revisa el correo y la contraseña.",
     busyLink: "Conexión en uso o vencida. Pide un enlace nuevo.",
     accountLimit: "Demasiados intentos para esta cuenta. Espera 15 minutos o comprueba tus datos en la web del cine.",

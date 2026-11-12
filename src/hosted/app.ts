@@ -21,6 +21,7 @@ import { HttpClient } from '../http/client.js';
 import { HostedHttpClient } from './http-client.js';
 import { SessionStore } from '../auth/sessions.js';
 import { login } from '../auth/login.js';
+import { checkCredentials } from '../auth/credentials.js';
 import type { AuthSession, AuthProviderId } from '../auth/sessions.js';
 import { beforeFirst, isObj } from '../core.js';
 import type { Operation, Query } from '../core.js';
@@ -30,7 +31,7 @@ import type { SignInSubject } from './connection-links.js';
 import { EncryptedSessionStore, HostedUsers, digest } from './store.js';
 import { loginPage } from '../auth-web.js';
 import { pageLocale, redirectNegotiatedEnglish } from '../web/http.js';
-import { webError } from '../web/errors.js';
+import { credentialMessage, webError } from '../web/errors.js';
 
 class AnonymousSessions extends SessionStore {
   override async read(): Promise<AuthSession | undefined> { return undefined; }
@@ -322,12 +323,14 @@ export async function createHostedApp(options: {
         const parsed = await body(req, 16384);
         if (!isObj(parsed)) throw new HttpError(400, 'Solicitud no válida.');
         data = parsed;
-        if (Object.keys(data).some(k => !['username', 'password'].includes(k)) || typeof data.username !== 'string' || !data.username.trim() || data.username.length > 320 || typeof data.password !== 'string' || !data.password || data.password.length > 4096) throw new HttpError(400, 'Revisa correo y contraseña.');
+        if (Object.keys(data).some(k => !['username', 'password'].includes(k))) throw new HttpError(400, 'Revisa correo y contraseña.');
+        const credentials = checkCredentials(data.username, data.password);
+        if (!credentials.ok) throw new HttpError(400, credentialMessage(credentials.problem));
         // Claim first: a duplicate submit that only finds the link busy uses no sign-in attempt.
         if (!await links.claim(token)) throw new HttpError(429, 'Conexión en uso o vencida. Pide un enlace nuevo.');
         claimed = true;
         // Proof of ownership: the Cinve connection this account was connected through before.
-        const subject: SignInSubject = { network: ip, provider: connection.provider, username: data.username, proofs: [`principal:${connection.user}`] };
+        const subject: SignInSubject = { network: ip, provider: connection.provider, username: credentials.username, proofs: [`principal:${connection.user}`] };
         const refusal = await links.admitSignIn(subject);
         if (refusal) { refund = true; throw new HttpError(429, signInRefusalMessage[refusal]); }
         let stagedSession: AuthSession | undefined;
@@ -337,7 +340,7 @@ export async function createHostedApp(options: {
         let profile = false;
         const started = Date.now();
         try {
-          const result = await (options.authenticate ?? login)(connection.provider, data.username.trim(), data.password, staged);
+          const result = await (options.authenticate ?? login)(connection.provider, credentials.username, credentials.password, staged);
           profile = result.profile_update_requested;
         } catch (error) {
           // Nothing was tested: the link keeps its attempt too.
