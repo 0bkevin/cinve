@@ -45,6 +45,12 @@ export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions)
       let data: unknown;
       try { data = JSON.parse(await c.authenticated('cinesunidos', url)); }
       catch (e) { if (e instanceof DataError) throw e; throw new DataError('error', 'Cines Unidos no devolvió un mapa de asientos en JSON válido.'); }
+      // A function it no longer sells online (already started, or sales closed) answers only
+      // {"maxSeatsPerTransaction": 0}: no map to read, not a change in its format (seen 2026-11-11).
+      const body = object(data);
+      if (body.seats === undefined && Number(body.maxSeatsPerTransaction) === 0) {
+        throw new DataError('unavailable', 'Cines Unidos no vende en línea esta función (puede haber comenzado o cerrado su venta) y no envió el mapa de asientos. Elige otra función con get_showtimes.');
+      }
       result.seats = parseCinesUnidosSeats(data);
       // Area descriptions read "SALA 8 - FULL"; only a room number shared by every area names the room.
       const rooms = new Set(rows(object(object(data).seats).areas, 'seats.areas').map(a => text(a.description).match(/^SALA\s+(\d{1,3})\b/i)?.[1]));

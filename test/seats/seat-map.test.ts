@@ -166,3 +166,15 @@ test('a Cines Unidos seat answer that is not JSON names the provider response', 
   const r = await new CinemaService(new HttpClient(async () => new Response('<html></html>'), 15000, sessions)).seats({ provider: 'cinesunidos', cinema_id: '1002', session_id: 's1' });
   assert.equal(r.status, 'error'); assert.match(r.warnings.join(' '), /Cines Unidos no devolvió un mapa de asientos en JSON válido/);
 });
+
+test('a Cines Unidos function no longer on sale online is reported as unavailable, not as a format change', async () => {
+  // cinesunidos.com answered this for functions that had started or closed sales (2026-11-11).
+  const sessions = new class extends EmptySessionStore { override async headers() { return { Authorization: 'Bearer synthetic' }; } };
+  const service = new CinemaService(new HttpClient(async () => Response.json({ maxSeatsPerTransaction: 0 }), 15000, sessions));
+  const r = await service.seats({ provider: 'cinesunidos', cinema_id: '1005', session_id: 's1' });
+  assert.equal(r.status, 'unavailable'); assert.equal(r.total, 0);
+  assert.match(r.warnings.join(' '), /no vende en línea esta función/); assert.doesNotMatch(r.warnings.join(' '), /estructura/);
+  // A body that is truly different still says so.
+  const odd = await new CinemaService(new HttpClient(async () => Response.json({ maxSeatsPerTransaction: 4 }), 15000, sessions)).seats({ provider: 'cinesunidos', cinema_id: '1005', session_id: 's1' });
+  assert.equal(odd.status, 'error');
+});
