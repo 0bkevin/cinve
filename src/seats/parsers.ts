@@ -140,7 +140,7 @@ export function parseCinexSeats(html: string, q: Query): SeatData[] {
   // in the SAME response so parallel reads cannot return another function's map.
   const back = $('#btnasientosatras').attr('href');
   const url = back ? new URL(back, 'https://www.cinex.com.ve/') : undefined;
-  if (!url || url.origin !== 'https://www.cinex.com.ve' || url.pathname !== '/boletosdev.php' ||
+  if (!url || url.origin !== 'https://www.cinex.com.ve' || !['/boletos.php', '/boletosdev.php'].includes(url.pathname) ||
       url.searchParams.getAll('cinemaid').length !== 1 || url.searchParams.getAll('sessionid').length !== 1 ||
       url.searchParams.get('cinemaid') !== q.cinema_id || url.searchParams.get('sessionid') !== q.session_id) {
     throw new DataError('unavailable', 'El mapa Cinex no corresponde a la sede y función solicitadas; repite la consulta.');

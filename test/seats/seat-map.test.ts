@@ -60,7 +60,8 @@ test('Cinex seat workflow uses only authenticated GETs and rejects an interleave
   const http = new HttpClient(async (url, init) => {
     urls.push(String(url)); assert.ok(!init?.method || init.method === 'GET');
     assert.equal(new Headers(init?.headers).get('Cookie'), 'synthetic');
-    return new Response(String(url).endsWith('checklogin.php') ? 'on' : String(url).endsWith('asientosdev.php') ? body : '<form id="frmboletos"></form>');
+    const path = new URL(String(url)).pathname;
+    return new Response(path === '/checklogin.php' ? 'on' : path === '/asientos.php' ? body : '<form id="frmboletos"></form>');
   }, 15000, sessions);
   const q = { provider: 'cinex' as const, cinema_id: 'SBC', session_id: 's1' };
   const partial = await new CinemaService(http).seats(q);
@@ -68,12 +69,16 @@ test('Cinex seat workflow uses only authenticated GETs and rejects an interleave
   assert.equal(partial.occupied, 1); assert.equal(partial.unknown, 1);
   assert.equal(partial.total, 3); assert.equal(partial.availability_complete, false);
   assert.match(partial.warnings.join(' '), /cero libres confirmados no significa agotado/);
-  assert.equal(urls.length, 3);
+  // Session check, the function selected on Cinex's regular checkout page, then its seat page.
+  assert.deepEqual(urls.map(u => new URL(u).pathname), ['/checklogin.php', '/boletos.php', '/asientos.php']);
   body = cinexMap.replace('sessionid=s1', 'sessionid=other');
   const result = await new CinemaService(http).seats(q);
   assert.equal(result.status, 'unavailable'); assert.equal(result.ascii, '');
   assert.equal(result.total, 0); assert.equal(result.availability_complete, false);
   assert.doesNotThrow(() => assertPrivateRead('cinex', 'https://www.cinex.com.ve/asientosdev.php'));
+  assert.doesNotThrow(() => assertPrivateRead('cinex', 'https://www.cinex.com.ve/asientos.php'));
+  assert.throws(() => assertPrivateRead('cinex', 'https://www.cinex.com.ve/asientos_datadevx.php'));
+  assert.throws(() => assertPrivateRead('cinex', 'https://www.cinex.com.ve/boletos_data.php'));
   assert.throws(() => assertPrivateRead('cinex', 'https://www.cinex.com.ve/asientosdev.php?extra=1'));
 });
 
@@ -145,7 +150,7 @@ test('parallel Cinex seat and price reads for different functions do not switch 
     inFlight--;
     if (u.pathname === '/checklogin.php') return new Response('on');
     if (u.pathname === '/boletosdev.php' || u.pathname === '/boletos.php') { selected = defined(u.searchParams.get('sessionid')); return new Response('<form id="frmboletos"></form>'); }
-    if (u.pathname === '/asientosdev.php') return new Response(cinexMap.replace('sessionid=s1', `sessionid=${selected}`));
+    if (u.pathname === '/asientos.php') return new Response(cinexMap.replace('sessionid=s1', `sessionid=${selected}`));
     return new Response('', { status: 404 });
   }, 15000, sessions);
   const service = new CinemaService(http);
@@ -177,4 +182,20 @@ test('a Cines Unidos function no longer on sale online is reported as unavailabl
   // A body that is truly different still says so.
   const odd = await new CinemaService(new HttpClient(async () => Response.json({ maxSeatsPerTransaction: 4 }), 15000, sessions)).seats({ provider: 'cinesunidos', cinema_id: '1005', session_id: 's1' });
   assert.equal(odd.status, 'error');
+});
+
+test('Cinex: the regular seat page is read first, and the newer one only when it draws no grid', async () => {
+  // 2026-11-11: asientos.php drew every room's map once the function was selected; asientosdev.php only VIP rooms.
+  const sessions = new class extends EmptySessionStore { override async headers() { return { Cookie: 'synthetic' }; } };
+  const empty = '<a id="btnasientosatras" href="boletos.php?cinemaid=SBC&sessionid=s1">Atras</a><div id="mapcontent"><div class="row centermap"></div></div>';
+  for (const [regular, newer, expected] of [[cinexMap, empty, ['/checklogin.php', '/boletos.php', '/asientos.php']], [empty, cinexMap, ['/checklogin.php', '/boletos.php', '/asientos.php', '/asientosdev.php']]] as const) {
+    const paths: string[] = [];
+    const http = new HttpClient(async url => {
+      const path = new URL(String(url)).pathname; paths.push(path);
+      return new Response(path === '/checklogin.php' ? 'on' : path === '/asientos.php' ? regular.replace('boletosdev.php', 'boletos.php') : path === '/asientosdev.php' ? newer : '<form id="frmboletos"></form>');
+    }, 15000, sessions);
+    const r = await new CinemaService(http).seats({ provider: 'cinex', cinema_id: 'SBC', session_id: 's1' });
+    assert.equal(r.status, 'available'); assert.equal(r.total, 3);
+    assert.deepEqual(paths, expected);
+  }
 });

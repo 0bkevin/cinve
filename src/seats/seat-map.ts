@@ -59,9 +59,16 @@ export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions)
     } else if (q.provider === 'cinex') {
       if (!await c.cinexSessionActive()) throw new DataError('auth_required', 'La sesión Cinex expiró; conecta de nuevo tu cuenta.');
       // Cinex keeps the chosen function in its PHP session: select and read it as one step.
+      // Checked in a browser on 2026-11-11: its regular checkout (boletos.php, then
+      // asientos.php) draws the map of every room as soon as the function is selected,
+      // without choosing tickets; the newer asientosdev.php drew only some rooms (VIPs)
+      // and stayed empty for the rest even after tickets were chosen. boletos.php
+      // redirects VIP functions to boletosdev.php, which the client follows. If
+      // asientos.php ever comes back without a grid, asientosdev.php is read as before.
       const html = await c.exclusive('cinex', async () => {
-        await c.authenticated('cinex', `https://www.cinex.com.ve/boletosdev.php?${new URLSearchParams({ cinemaid: result.cinema_id, sessionid: result.session_id })}`);
-        return c.authenticated('cinex', 'https://www.cinex.com.ve/asientosdev.php');
+        await c.authenticated('cinex', `https://www.cinex.com.ve/boletos.php?${new URLSearchParams({ cinemaid: result.cinema_id, sessionid: result.session_id })}`);
+        const page = await c.authenticated('cinex', 'https://www.cinex.com.ve/asientos.php');
+        return /class=["']rowletter["']/.test(page) ? page : c.authenticated('cinex', 'https://www.cinex.com.ve/asientosdev.php');
       });
       const page = parseCinexShowing(html);
       try {
@@ -70,11 +77,9 @@ export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions)
         if (Object.keys(shifts).length) result.layout = { ...result.layout, row_shift: shifts };
       }
       catch (e) {
-        // Seen 2026-11-05: for many functions Cinex sends the grid only after tickets are
-        // chosen (boletos_datadev.php, which starts a timed order). Cinve never does that,
-        // since it would hold tickets; Cinex's own counter is still on the page.
+        // Neither seat page drew a grid; Cinex's own counter is still on the page.
         if (e instanceof EmptyCinexMap && page.available !== undefined) {
-          throw new DataError('unavailable', `Cinex informa ${page.available} asientos disponibles en esta función, pero no envió el mapa: su web solo lo muestra después de elegir boletos, y Cinve no los elige porque eso los retiene. Consulta el mapa en cinex.com.ve.`);
+          throw new DataError('unavailable', `Cinex informa ${page.available} asientos disponibles en esta función, pero su web no publicó el mapa de asientos. Consulta el mapa en cinex.com.ve.`);
         }
         throw e;
       }

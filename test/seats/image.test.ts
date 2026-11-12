@@ -103,7 +103,7 @@ test('the seat result names the function from the same provider response, and ch
   assert.deepEqual(parseCinexShowing('<div>otra página</div>'), { showing: undefined, available: undefined });
   const sessions = new class extends EmptySessionStore { override async headers() { return { Cookie: 'synthetic', Authorization: 'Bearer synthetic' }; } };
   let info = cinexInfo(1);
-  const cinex = new CinemaService(new HttpClient(async url => new Response(String(url).endsWith('checklogin.php') ? 'on' : String(url).endsWith('asientosdev.php') ? info + cinexMap : ''), 15000, sessions));
+  const cinex = new CinemaService(new HttpClient(async url => new Response(String(url).endsWith('checklogin.php') ? 'on' : /\/asientos(dev)?\.php$/.test(String(url)) ? info + cinexMap : ''), 15000, sessions));
   const q = { provider: 'cinex' as const, cinema_id: 'SBC', session_id: 's1' };
   const matched = await cinex.seats(q);
   assert.equal(matched.showing?.movie, 'LAS ALTAGRACIAS EN NAVIDAD'); assert.doesNotMatch(matched.warnings.join(' '), /difiere/);
@@ -244,12 +244,12 @@ test('an empty Cinex grid reports Cinex\'s own count instead of "no seats"', asy
   // As cinex.com.ve sent it on 2026-11-05 for functions whose grid it builds only after tickets are chosen.
   const empty = `${cinexInfo(145)}<a id="btnasientosatras" href="boletosdev.php?cinemaid=SBC&sessionid=s1">Atras</a><div style="display: none;">17;~10;</div><div id="mapcontent"><div class="row centermap"></div></div>`;
   const sessions = new class extends EmptySessionStore { override async headers() { return { Cookie: 'synthetic' }; } };
-  const r = await new CinemaService(new HttpClient(async url => new Response(String(url).endsWith('checklogin.php') ? 'on' : String(url).endsWith('asientosdev.php') ? empty : ''), 15000, sessions)).seats({ provider: 'cinex', cinema_id: 'SBC', session_id: 's1' });
+  const r = await new CinemaService(new HttpClient(async url => new Response(String(url).endsWith('checklogin.php') ? 'on' : /\/asientos(dev)?\.php$/.test(String(url)) ? empty : ''), 15000, sessions)).seats({ provider: 'cinex', cinema_id: 'SBC', session_id: 's1' });
   assert.equal(r.status, 'unavailable'); assert.equal(r.total, 0);
-  assert.match(r.warnings.join(' '), /Cinex informa 145 asientos disponibles en esta función, pero no envió el mapa/);
+  assert.match(r.warnings.join(' '), /Cinex informa 145 asientos disponibles en esta función, pero su web no publicó el mapa/);
   // Another function's empty page is still rejected by the identity guard first.
   const other = empty.replace('sessionid=s1', 'sessionid=s2');
-  const wrong = await new CinemaService(new HttpClient(async url => new Response(String(url).endsWith('checklogin.php') ? 'on' : String(url).endsWith('asientosdev.php') ? other : ''), 15000, sessions)).seats({ provider: 'cinex', cinema_id: 'SBC', session_id: 's1' });
+  const wrong = await new CinemaService(new HttpClient(async url => new Response(String(url).endsWith('checklogin.php') ? 'on' : /\/asientos(dev)?\.php$/.test(String(url)) ? other : ''), 15000, sessions)).seats({ provider: 'cinex', cinema_id: 'SBC', session_id: 's1' });
   assert.match(wrong.warnings.join(' '), /no corresponde a la sede y función/);
 });
 
