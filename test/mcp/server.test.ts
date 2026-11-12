@@ -186,7 +186,7 @@ test('server instructions fit client limits in every mode and lead with the core
       assert.ok(text.indexOf(rule) >= 0 && text.indexOf(rule) < 1500, `${mode}: ${rule}`);
     assert.ok(text.includes('Ensure you reply to the user in the language they use in their prompt.'), `${mode}: reply-language rule`);
     // A title in English, a neighbourhood or a time range must still find the showtimes.
-    for (const rule of ['look up its Latin American title on the web and search again', 'For a neighbourhood', 'For a time range', 'queried_at is UTC and Caracas is UTC-4'])
+    for (const rule of ['look up its Latin American title on the web and search again', 'call list_cinemas with near for every chain', 'For a time range', 'queried_at is UTC and Caracas is UTC-4'])
       assert.ok(text.includes(rule), `${mode}: ${rule}`);
   }
 });

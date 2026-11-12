@@ -34,12 +34,23 @@ repeat with `next_offset` until it is `null`.
 Only use IDs returned by Cinve, and don't mix them across cinemas. Venues with
 `code_status=unverified` can't be queried.
 
+## Venues near a place
+
+`list_cinemas` returns each venue's `area` (Chacao; Las Mercedes, Baruta).
+With `near`, a neighbourhood or town (`Chacao`, `Naguanagua`, `Lechería`) or
+`lat,lng`, it lists venues nearest first with `distance_km`, a straight line,
+not a travel distance; Cines Unidos then uses the city nearest to the place
+when `city` is missing. An unknown place is reported, not guessed. Locations
+live in `src/locations.ts`, looked up in OpenStreetMap (© OpenStreetMap
+contributors, ODbL); a venue without an entry is listed last, without
+`distance_km`.
+
 ## Arguments by cinema
 
 | Cinema       | What it requires                                                                                   |
 | ------------ | -------------------------------------------------------------------------------------------------- |
 | Cinex        | `get_showtimes` with `city` reads the whole city; with `cinema_id`, one venue; with `movie_id`, every venue for that movie. `list_movies` is the general catalog, with no date or venue. |
-| Cines Unidos | `list_cinemas`, `list_movies` and `get_showtimes` require `city`; add `cinema_id` for one venue.   |
+| Cines Unidos | `list_movies` and `get_showtimes` require `city`, and `list_cinemas` `city` or `near`; add `cinema_id` for one venue. |
 | Cinepic      | Two venues: `123300` (Candelaria) and `123301` (VVIP Lido). Everything except cities and venues requires `cinema_id`. |
 | Supercines   | `get_showtimes` requires `cinema_id`, `city` or `movie_id`. Prices and seats require `movie_id` and, if not today, the same `date` used in `get_showtimes`. |
 | Gran Cine    | `get_showtimes` with no venue or city reads all its screens.                                       |

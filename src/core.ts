@@ -29,6 +29,8 @@ const Item = z.object({
   code_status: z.enum(['verified', 'unverified']).optional().describe('Code confirmed by the current official data; unverified does not imply a closure.'),
   directory_status: z.enum(['listed', 'not_listed']).optional().describe('Presence in the directory received in this query; not_listed does not imply a closure.'),
   city: z.string().optional(), address: z.string().optional(),
+  area: z.string().optional().describe('Neighbourhood and municipality or town of the venue (Chacao; Las Mercedes, Baruta), from Cinve\'s venue locations; absent for a venue Cinve has not located.'),
+  distance_km: z.number().nonnegative().optional().describe('Straight-line distance in km from the place given in near; not a travel distance.'),
   date: z.string().optional(), time: z.string().optional(), starts_at: z.string().optional(),
   format: z.string().optional(),
   language: z.string().optional().describe('Version: es or en (dubbed) and subtitulada at Cinex and Cines Unidos (which also marks it in the title, (Esp) or (Sub)); subtitulada or no_subtitulada at Cinepic. Absent when not confirmed.'),
@@ -55,7 +57,7 @@ const operationItemSchemas = {
   cities: Item.pick({ kind: true, id: true, name: true }).extend({
     kind: z.literal('city'),
   }),
-  cinemas: Item.pick({ kind: true, id: true, cinema_id: true, code_status: true, directory_status: true, name: true, city: true, address: true, url: true }).extend({
+  cinemas: Item.pick({ kind: true, id: true, cinema_id: true, code_status: true, directory_status: true, name: true, city: true, address: true, area: true, distance_km: true, url: true }).extend({
     kind: z.literal('cinema'),
     id: Id.describe('Venue ID. directory-* identifies an entry without a queryable code; if code_status is present, use cinema_id only when it is verified.'),
   }),
@@ -137,6 +139,7 @@ export function outputSchema<Op extends Operation>(op: Op) {
 export type Query = {
   provider: ProviderId; city?: string | undefined; cinema_id?: string | undefined; movie_id?: string | undefined; session_id?: string | undefined;
   date?: string | undefined; query?: string | undefined; offset?: number | undefined; limit?: number | undefined; refresh?: boolean | undefined;
+  near?: string | undefined;
 };
 export class DataError extends Error {
   constructor(public status: StatusId, message: string) { super(message); }

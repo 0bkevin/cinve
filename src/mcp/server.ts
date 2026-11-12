@@ -37,6 +37,7 @@ const schema = z.object({
   city: z.string().trim().min(1).max(80).optional().describe('City name as returned by list_cities for the same provider (e.g. Caracas); accents and case are ignored for Cines Unidos.'),
   cinema_id: cinemaId.optional(), movie_id: movieId.optional(), session_id: sessionId.optional(),
   date: DateInput.optional().describe('YYYY-MM-DD; defaults to today in America/Caracas for Cinepic/Cines Unidos movies and showtimes and for Cinex, Supercines and Gran Cine showtimes.'),
+  near: z.string().trim().min(1).max(120).optional().describe('Where the user is: a neighbourhood or town (Chacao, Las Mercedes, Naguanagua, Lechería) or "lat,lng". Sorts venues nearest first and adds distance_km; with it Cines Unidos needs no city.'),
   ...paging,
 }).strict();
 
@@ -57,13 +58,13 @@ function absentNulls(shape: object) {
 export function inputSchema(op: Operation): z.ZodType<Query> {
   // Keep each tool's arguments small and expose conditional requirements in validation.
   const base = op === 'cities' ? schema.pick({ provider: true, offset: true, limit: true, query: true, refresh: true })
-    : op === 'cinemas' ? schema.pick({ provider: true, city: true, offset: true, limit: true, query: true, refresh: true })
+    : op === 'cinemas' ? schema.pick({ provider: true, city: true, near: true, offset: true, limit: true, query: true, refresh: true })
     // Every provider needs these, so the published schema marks them required;
     // provider-specific requirements stay in the descriptions and validation.
     : op === 'prices' ? schema.pick({ provider: true, movie_id: true, offset: true, limit: true, refresh: true }).extend({ cinema_id: requiredCinemaId, session_id: requiredSessionId,
       date: DateInput.optional().describe('Supercines only: showtime date (YYYY-MM-DD), the same one used in get_showtimes; defaults to today in America/Caracas. Its prices vary by day.') })
     : op === 'concessions' ? schema.pick({ provider: true, query: true, offset: true, limit: true, refresh: true }).extend({ cinema_id: requiredCinemaId })
-    : schema.omit({ session_id: true });
+    : schema.omit({ session_id: true, near: true });
   return z.preprocess(absentNulls(base.shape), base.superRefine((q: Query, ctx) => {
     const need = (field: 'city' | 'cinema_id' | 'movie_id' | 'session_id') => {
       // Cinepic has two fixed venues: naming them saves the model a discovery call.
@@ -77,7 +78,7 @@ export function inputSchema(op: Operation): z.ZodType<Query> {
       if (op === 'prices') { need('movie_id'); need('session_id'); }
     }
     if (q.provider === 'cinesunidos') {
-      if (['cinemas', 'movies', 'showtimes'].includes(op)) need('city');
+      if (['movies', 'showtimes'].includes(op) || (op === 'cinemas' && !q.near)) need('city');
       if (['prices', 'concessions'].includes(op)) need('cinema_id');
       if (op === 'prices') need('session_id');
     }
@@ -234,7 +235,7 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
   });
   const tools: Array<[string, Operation, string]> = [
     ['list_cities', 'cities', 'Lists the provider\'s cities. Use their names when querying Cines Unidos.'],
-    ['list_cinemas', 'cinemas', 'Lists venues and IDs. Cines Unidos requires city; Supercines accepts an optional city; Cinepic verifies its configured venues Candelaria and VVIP Lido. Providers keep known venues without a verified code (code_status=unverified). Cinex accepts an optional city and includes known venues missing from the current directory (directory_status=not_listed); neither condition indicates a closure.'],
+    ['list_cinemas', 'cinemas', 'Lists venues and IDs, with each venue\'s area. For a user who names where they are, pass near: venues come nearest first with distance_km. Cines Unidos requires city or near; Supercines accepts an optional city; Cinepic verifies its configured venues Candelaria and VVIP Lido. Providers keep known venues without a verified code (code_status=unverified). Cinex accepts an optional city and includes known venues missing from the current directory (directory_status=not_listed); neither condition indicates a closure.'],
     ['list_movies', 'movies', 'Searches movies by name. Cinepic requires cinema_id (123300 Candelaria or 123301 VVIP Lido) and filters the day\'s showtimes; Cines Unidos requires city and allows cinema_id/date. Cinex returns the general catalog without date/venue: only provider, query and paging. Supercines returns its current listings (with presales), overall or for one venue with cinema_id, without a date. Gran Cine returns the titles with showtimes on the date, with optional cinema_id or city. IDs belong to the provider and, for Cinepic, to the venue.'],
     ['get_showtimes', 'showtimes', 'Gets showtimes for a date (today in Caracas by default). Cinepic requires cinema_id (123300 Candelaria or 123301 VVIP Lido); Cines Unidos requires city; Cinex accepts city for all its verified venues in the city in one call, cinema_id for one venue (with optional movie_id to filter), or only movie_id to read the movie\'s page across all venues; Supercines accepts cinema_id, city or movie_id; Gran Cine (arthouse cinema, includes the Paseo Las Mercedes theaters) accepts cinema_id, city or neither for all its theaters, without provider showtime IDs; use query to filter by title. The venue call resolves titles against the catalog and marks partial when it cannot confirm a movie_id. Returns the IDs needed for prices, screen/format when available and the website URL.'],
     ['get_ticket_prices', 'prices', 'Gets ticket prices (Gran Cine does not publish them). Cinepic requires cinema_id, movie_id and session_id from get_showtimes. Cines Unidos requires cinema_id, session_id and a connected account. Cinex requires cinema_id, session_id and a connected account. Supercines requires cinema_id, movie_id and session_id, and date if the showtime is not today; it does not require an account (if the user connected theirs, prices are read with it). Returns USD/VES when verifiable, Cinex breakdown in VES. Does not return final purchase totals.'],
