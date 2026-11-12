@@ -140,7 +140,7 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
     { ...config, annotations: { ...config.annotations, title: config.title } }, cb)) as typeof server.registerTool;
   registerTool('get_auth_status', {
     title: 'Authentication status',
-    description: 'Status of the Cinex, Cines Unidos and Supercines sessions and the next connection step. The Supercines account is optional: without it, prices are the public ones. Returns no personal data or secrets. configured does not guarantee that the provider has not revoked the session.',
+    description: 'Status of the Cinex, Cines Unidos and Supercines sessions and the next connection step. The Supercines account is optional for prices (without it they are the public ones) and needed for its seat maps. Returns no personal data or secrets. configured does not guarantee that the provider has not revoked the session.',
     inputSchema: z.object({}).strict(),
     outputSchema: AuthStatusResult,
     annotations: { ...annotations, openWorldHint: false },
@@ -166,7 +166,7 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
   if (accounts || publicHosted) {
     registerTool('connect_account', {
       title: 'Connect account',
-      description: 'In hosted mode, starts Cinve authorization automatically when needed. If the account is already connected, returns connected=true: repeat the original query without asking the user for anything. Otherwise, returns connected=false and a private, single-use link for the user to connect their Cinex, Cines Unidos or Supercines account (optional: Supercines shows public prices without an account; connect it only if the user asks). Present it only to the user in this conversation and do not share it with third parties: whoever uses it connects their account to this access. Do not open or fill in the form as an agent. Never ask for credentials in the chat. Expires in 10 minutes.',
+      description: 'In hosted mode, starts Cinve authorization automatically when needed. If the account is already connected, returns connected=true: repeat the original query without asking the user for anything. Otherwise, returns connected=false and a private, single-use link for the user to connect their Cinex, Cines Unidos or Supercines account (Supercines shows public prices without an account, but its seat maps need one: connect it when get_seats returns auth_required for Supercines or the user asks). Present it only to the user in this conversation and do not share it with third parties: whoever uses it connects their account to this access. Do not open or fill in the form as an agent. Never ask for credentials in the chat. Expires in 10 minutes.',
       inputSchema: z.object({ provider: AuthProvider }).strict(),
       outputSchema: z.object({ connected: z.boolean(), url: z.string().url().optional(), expires_at: z.string().optional() }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
