@@ -75,6 +75,35 @@ export const venueLocations: Readonly<Record<string, VenueLocation>> = {
   'cinepic:123300': { lat: 10.50482, lng: -66.90148, area: 'La Candelaria, Libertador', city: 'Caracas' },
   'cinepic:123301': { lat: 10.49107, lng: -66.8625, area: 'El Rosal, Chacao', city: 'Caracas' },
 };
+// A venue whose code a read could not verify keeps its place under the ID the
+// provider gives it then: Cinex directory-<page name>, Cinepic directory-cinepic-<code>.
+const fallbackIds: Readonly<Record<string, string>> = {
+  'cinex:directory-altoprado': 'cinex:31',
+  'cinex:directory-buenaventura': 'cinex:BVG',
+  'cinex:directory-cimaplaza': 'cinex:32',
+  'cinex:directory-costamall': 'cinex:39',
+  'cinex:directory-galeriaslosnaranjos': 'cinex:GLN',
+  'cinex:directory-galeriasmall': 'cinex:38',
+  'cinex:directory-lagomall': 'cinex:LMM',
+  'cinex:directory-losproceres': 'cinex:IPC',
+  'cinex:directory-marinaplaza': 'cinex:35',
+  'cinex:directory-multiplazaparaiso': 'cinex:MPP',
+  'cinex:directory-parquecerroverde': 'cinex:PCV',
+  'cinex:directory-parquecostazul': 'cinex:PCA',
+  'cinex:directory-paseoelhatillo': 'cinex:HAT',
+  'cinex:directory-plazamayor': 'cinex:30',
+  'cinex:directory-recreo': 'cinex:REC',
+  'cinex:directory-sambil': 'cinex:SBC',
+  'cinex:directory-sambilparaguana': 'cinex:SBP',
+  'cinex:directory-sanfrancisco': 'cinex:SFC',
+  'cinex:directory-sanignacio': 'cinex:CSI',
+  'cinex:directory-sotaventolaguaira': 'cinex:STV',
+  'cinex:directory-tolon': 'cinex:TLN',
+  'cinex:directory-valera': 'cinex:34',
+  'cinex:directory-virtudes': 'cinex:36',
+  'cinepic:directory-cinepic-123300': 'cinepic:123300',
+  'cinepic:directory-cinepic-123301': 'cinepic:123301',
+};
 export const knownPlaces: Readonly<Record<string, Point>> = {
   '23 de Enero': { lat: 10.51304, lng: -66.93059 },
   'Altagracia': { lat: 10.50521, lng: -66.91486 },
@@ -98,7 +127,7 @@ export const knownPlaces: Readonly<Record<string, Point>> = {
   'Caurimare': { lat: 10.47194, lng: -66.83876 },
   'Chacao': { lat: 10.49303, lng: -66.85454 },
   'Chacaíto': { lat: 10.49099, lng: -66.86835 },
-  'Chuao': { lat: 10.48433, lng: -66.85873 },
+  'Chuao': { lat: 10.48331, lng: -66.84677 },
   'Ciudad Bolívar': { lat: 8.10285, lng: -63.54696 },
   'Coche': { lat: 10.44782, lng: -66.92348 },
   'Colinas de Bello Monte': { lat: 10.48318, lng: -66.87921 },
@@ -118,12 +147,12 @@ export const knownPlaces: Readonly<Record<string, Point>> = {
   'La California': { lat: 10.482, lng: -66.81838 },
   'La Candelaria': { lat: 10.50722, lng: -66.90578 },
   'La Castellana': { lat: 10.49786, lng: -66.85181 },
-  'La Guaira': { lat: 10.58025, lng: -66.86035 },
+  'La Guaira': { lat: 10.60004, lng: -66.92964 },
   'La Lagunita': { lat: 10.42277, lng: -66.81042 },
   'La Trinidad': { lat: 10.435, lng: -66.86632 },
   'La Urbina': { lat: 10.48946, lng: -66.80336 },
   'La Vega': { lat: 10.47419, lng: -66.94742 },
-  'Las Acacias': { lat: 10.50124, lng: -66.87931 },
+  'Las Acacias': { lat: 10.48452, lng: -66.9011 },
   'Las Delicias': { lat: 10.29476, lng: -67.5624 },
   'Las Mercedes': { lat: 10.4821, lng: -66.86169 },
   'Lechería': { lat: 10.19105, lng: -64.68455 },
@@ -138,6 +167,8 @@ export const knownPlaces: Readonly<Record<string, Point>> = {
   'Maiquetía': { lat: 10.59661, lng: -66.95975 },
   'Maracaibo': { lat: 10.64981, lng: -71.64436 },
   'Maracay': { lat: 10.23751, lng: -67.58902 },
+  // The island and the peninsula are city names at Cinex and Cines Unidos: their main town stands for them.
+  'Margarita': { lat: 10.96358, lng: -63.84645 },
   'Maturín': { lat: 9.74228, lng: -63.18889 },
   'Mañongo': { lat: 10.23443, lng: -67.99775 },
   'Montalbán': { lat: 10.47263, lng: -66.95775 },
@@ -146,6 +177,7 @@ export const knownPlaces: Readonly<Record<string, Point>> = {
   'Palo Negro': { lat: 10.16303, lng: -67.55343 },
   'Palo Verde': { lat: 10.47883, lng: -66.79848 },
   'Pampatar': { lat: 10.99573, lng: -63.80508 },
+  'Paraguaná': { lat: 11.69317, lng: -70.19172 },
   'Parque Central': { lat: 10.49789, lng: -66.90209 },
   'Petare': { lat: 10.47871, lng: -66.80722 },
   'Plaza Venezuela': { lat: 10.49692, lng: -66.88574 },
@@ -172,30 +204,67 @@ export const knownPlaces: Readonly<Record<string, Point>> = {
   'Valera': { lat: 9.31482, lng: -70.60817 },
 };
 
-const placeKey = (text: string) => folded(text).replace(/[^a-z0-9]+/g, ' ').trim()
-  // "Urbanización Las Mercedes", "municipio Chacao", "cerca de Altamira".
-  .replace(/^(?:(?:cerca|near) (?:de |of )?)?(?:(?:urbanizacion|urb|sector|municipio|parroquia|zona) )?/, '');
+const words = (text: string) => folded(text).replace(/[^a-z0-9]+/g, ' ').trim();
+// "Urbanización Las Mercedes", "municipio Chacao", "cerca de Altamira", "Palos Grandes".
+const placeKey = (text: string) => words(text)
+  .replace(/^(?:(?:cerca|near) (?:del? |of )?)?(?:(?:urbanizacion|urb|sector|municipio|parroquia|zona) )?(?:(?:el|la|los|las) )?/, '');
 const places = new Map(Object.entries(knownPlaces).map(([name, point]) => [placeKey(name), { name, point }]));
-// "lat,lng" as a phone shares it, accepted only inside Venezuela's extent.
-const coordinates = /^\s*(-?\d{1,2}(?:\.\d+)?)\s*,\s*(-?\d{1,2}(?:\.\d+)?)\s*$/;
+// Full names, for a place at the end of a longer text ("Sambil Chacao", "estoy en Altamira").
+const fullNames = Object.keys(knownPlaces).map(name => [` ${words(name)}`, name] as const).sort((a, b) => b[0].length - a[0].length);
+// Words that only qualify the place before them: "Altamira Chacao", "Valencia, Carabobo, Venezuela".
+const qualifiers = new Set(['venezuela', 'distrito capital', 'libertador', 'chacao', 'baruta', 'sucre', 'el hatillo', 'caracas', 'miranda',
+  'la guaira', 'vargas', 'carabobo', 'aragua', 'zulia', 'lara', 'anzoategui', 'nueva esparta', 'margarita', 'isla de margarita', 'falcon', 'merida',
+  'bolivar', 'monagas', 'tachira', 'barinas', 'trujillo', 'portuguesa', 'yaracuy', 'guarico', 'cojedes', 'apure', 'delta amacuro', 'amazonas']);
+// A whole city: in "Caracas, Chacao" the neighbourhood is the place.
+const broad = new Set(['Caracas', ...Object.values(venueLocations).map(v => v.city)]);
+// "lat,lng" as a phone shares it ("10.49, -66.85" or "10.49 -66.85"), accepted only inside Venezuela's extent.
+const coordinates = /^\s*(-?\d{1,2}(?:\.\d+)?)\s*[,;\s]\s*(-?\d{1,2}(?:\.\d+)?)\s*$/;
 const inVenezuela = ({ lat, lng }: Point) => lat >= 0.5 && lat <= 12.5 && lng >= -73.5 && lng <= -59.5;
 
-/** A place name Cinve knows ("Chacao", "Las Mercedes, Caracas") or "lat,lng" inside Venezuela. */
-export function resolvePlace(text: string): { name: string; point: Point } | undefined {
+type Place = { name: string; point: Point };
+// A street or building named after a place is not in it: "Calle Chacao, El Recreo".
+const street = /(?:^| )(?:calle|avenida|av|avda|transversal|carrera|esquina|edificio|edif|residencias|hotel|bulevar|boulevard)$/;
+
+/** One comma-separated part: the place it names, trying it without trailing qualifiers first. */
+function placeIn(part: string): { place: Place; exact: boolean } | undefined {
+  const cores = [words(part)];
+  for (let core = cores[0]!; ;) {
+    const q = [...qualifiers].find(w => core.endsWith(` ${w}`));
+    if (!q) break;
+    core = core.slice(0, -q.length - 1);
+    cores.unshift(core);
+  }
+  for (const core of cores) {
+    const exact = places.get(placeKey(core));
+    if (exact) return { place: exact, exact: true };
+  }
+  for (const core of cores) {
+    const tail = fullNames.find(([key]) => ` ${core}`.endsWith(key) && !street.test(` ${core}`.slice(0, -key.length)));
+    if (tail) return { place: { name: tail[1], point: knownPlaces[tail[1]]! }, exact: false };
+  }
+  return undefined;
+}
+
+/** A place name Cinve knows ("Chacao", "Las Mercedes, Caracas", "Sambil Chacao") or "lat,lng" inside Venezuela. */
+export function resolvePlace(text: string): Place | undefined {
   const pair = coordinates.exec(text);
   if (pair) {
     const point = { lat: Number(pair[1]), lng: Number(pair[2]) };
     return inVenezuela(point) ? { name: `${point.lat},${point.lng}`, point } : undefined;
   }
-  for (const part of [text, ...text.split(',')]) {
-    const found = places.get(placeKey(part));
-    if (found) return found;
-  }
-  return undefined;
+  const found = text.split(/[,;]/).map(placeIn).filter(p => p !== undefined);
+  // A name said on its own beats one found at the end of a longer text.
+  const best = found.filter(f => f.exact).concat(found.filter(f => !f.exact)).map(f => f.place);
+  const city = best.find(p => broad.has(p.name));
+  const local = best.find(p => !broad.has(p.name));
+  // "La Candelaria, Valencia": the Caracas neighbourhood of that name is not in Valencia.
+  if (local && city && distanceKm(local.point, city.point) > 40) return city;
+  return local ?? city;
 }
 
 export function venueLocation(provider: ProviderId, id: string): VenueLocation | undefined {
-  return Object.hasOwn(venueLocations, `${provider}:${id}`) ? venueLocations[`${provider}:${id}`] : undefined;
+  const key = Object.hasOwn(fallbackIds, `${provider}:${id}`) ? fallbackIds[`${provider}:${id}`]! : `${provider}:${id}`;
+  return Object.hasOwn(venueLocations, key) ? venueLocations[key] : undefined;
 }
 
 /** Straight-line (great-circle) distance in km. */

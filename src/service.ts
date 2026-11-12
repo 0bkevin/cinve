@@ -86,13 +86,19 @@ function locateVenues(provider: ProviderId, items: DataItem[], place: { point: P
   });
   return (place ? located.sort((a, b) => a.km - b.km) : located).map(l => l.item);
 }
-/** What a reader of the returned venues must know about their distances. */
-function distanceWarnings(provider: ProviderId, page: DataItem[], place: { name: string }, warnings: string[]) {
+const farKm = 30;
+/** What a reader of the returned venues must know about their distances; nothing for an empty page. */
+function distanceWarnings(provider: ProviderId, page: DataItem[], nearest: number | undefined, place: { name: string }): string[] {
+  const warnings: string[] = [];
+  if (!page.length) return warnings;
   warnings.push(`distance_km is the straight line from ${place.name}, not the travel distance or time.`);
+  // A chain with no venue in the user's region still sorts one first: it is not "near".
+  if (nearest !== undefined && nearest > farKm) warnings.push(`No ${provider} venue is within ${farKm} km of ${place.name}: the nearest is ${nearest} km away.`);
   const rough = page.filter(i => venueLocation(provider, i.id)?.approximate).map(i => warningLabel(i.name, 60));
   if (rough.length) warnings.push(`Only the area of ${rough.join(', ')} is known, so its distance is approximate.`);
   const unknown = page.filter(i => i.distance_km === undefined).length;
   if (unknown) warnings.push(`${unknown} venues have no known location and are listed last, without distance_km.`);
+  return warnings;
 }
 
 export class CinemaService {
@@ -158,7 +164,8 @@ export class CinemaService {
       result.total = items.length;
       result.items = items.slice(offset, offset + limit);
       result.next_offset = offset + limit < items.length ? offset + limit : null;
-      if (place) distanceWarnings(q.provider, result.items, place, c.warnings);
+      // First, so that the provider's own warnings cannot crowd them out of the bounded list.
+      if (place) c.warnings.unshift(...distanceWarnings(q.provider, result.items, items[0]?.distance_km, place));
       result.status = items.length ? 'available' : 'empty';
     } catch (error) {
       result.items = []; result.total = 0; result.next_offset = null;

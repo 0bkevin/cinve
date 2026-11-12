@@ -31,6 +31,27 @@ test('a place is found by its name in any accent, case or common prefix, or as c
   assert.equal(resolvePlace('40.41,-3.70'), undefined);
   assert.equal(resolvePlace('Timbuktu'), undefined);
   assert.equal(resolvePlace('constructor'), undefined);
+  assert.deepEqual(resolvePlace('10.49 -66.85')?.point, { lat: 10.49, lng: -66.85 });
+  // Decimal commas are ambiguous with the separator: unknown, not misread.
+  assert.equal(resolvePlace('10,49, -66,85'), undefined);
+});
+
+test('a place is found in the ways people write it, preferring the neighbourhood to its city', () => {
+  const cases: Array<[string, string | undefined]> = [
+    ['Caracas, Chacao', 'Chacao'], ['Chacao Caracas', 'Chacao'], ['Chacao, Caracas, Venezuela', 'Chacao'], ['estoy en Chacao', 'Chacao'],
+    ['Sambil Chacao', 'Chacao'], ['Plaza Altamira', 'Altamira'], ['Altamira Chacao', 'Altamira'], ['Palos Grandes', 'Los Palos Grandes'],
+    ['Hatillo', 'El Hatillo'], ['Las Mercedes Baruta', 'Las Mercedes'], ['Valencia, Naguanagua', 'Naguanagua'], ['Valencia, Carabobo', 'Valencia'],
+    ['Isla de Margarita', 'Margarita'], ['Paraguaná', 'Paraguaná'], ['estoy en caracas', 'Caracas'], ['Petare, Sucre', 'Petare'],
+    // A longer name that only starts with a known place is not that place.
+    // A street or building named after a place is not in it, and a city named with a neighbourhood
+    // it does not contain is the place ("La Candelaria" is in Caracas).
+    ['Calle Chacao, El Recreo', 'El Recreo'], ['Edificio Altamira, Los Palos Grandes', 'Los Palos Grandes'], ['La Candelaria, Valencia', 'Valencia'],
+    ['Las Delicias, Maracaibo', 'Maracaibo'], ['Las Delicias, Maracay', 'Las Delicias'], ['La Candelaria, Caracas', 'La Candelaria'], ['Cabudare, Barquisimeto', 'Cabudare'],
+    ['San Francisco de Yare', undefined], ['San Diego de los Altos', undefined], ['Valle de la Pascua', undefined], ['Sucre', undefined],
+  ];
+  for (const [text, name] of cases) assert.equal(resolvePlace(text)?.name, name, text);
+  // Every known place resolves to itself, so no two names collide once accents and articles are dropped.
+  for (const name of Object.keys(knownPlaces)) assert.equal(resolvePlace(name)?.name, name);
 });
 
 test('distances are straight lines in km, and Cines Unidos gets the city nearest to the place', () => {
@@ -44,6 +65,10 @@ test('distances are straight lines in km, and Cines Unidos gets the city nearest
   assert.equal(nearestCity('cinesunidos', defined(resolvePlace('Naguanagua')).point), 'Valencia');
   assert.equal(nearestCity('cinesunidos', defined(resolvePlace('Lechería')).point), 'Puerto La Cruz');
   assert.equal(venueLocation('cinex', 'toString'), undefined);
+  // A venue listed without a verified code keeps its location.
+  assert.deepEqual(venueLocation('cinex', 'directory-lagomall'), venueLocation('cinex', 'LMM'));
+  assert.deepEqual(venueLocation('cinepic', 'directory-cinepic-123301'), venueLocation('cinepic', '123301'));
+  assert.ok(venueLocation('cinex', 'directory-lagomall'));
 });
 
 const cinesUnidos = () => {
@@ -93,4 +118,17 @@ test('list_cinemas accepts near instead of a Cines Unidos city; the other tools 
   assert.equal(inputSchema('cinemas').safeParse({ provider: 'cinesunidos' }).success, false);
   assert.equal(inputSchema('showtimes').safeParse({ provider: 'cinex', city: 'Caracas', near: 'Chacao' }).success, false);
   assert.equal(inputSchema('cinemas').safeParse({ provider: 'cinex', near: 'x'.repeat(121) }).success, false);
+});
+
+test('a place far from every venue of a chain is said so, and distance notes come before the provider\'s warnings', async () => {
+  const { s } = cinesUnidos();
+  const result = await s.query('cinemas', { provider: 'cinesunidos', city: 'Caracas', near: 'Mérida' });
+  assert.match(result.warnings.join(' '), /No cinesunidos venue is within 30 km of Mérida: the nearest is \d+(\.\d)? km away/);
+  assert.match(defined(result.warnings[0]), /straight line from Mérida/);
+  const near = await s.query('cinemas', { provider: 'cinesunidos', near: 'Chacao' });
+  assert.ok(!near.warnings.some(w => /within 30 km/.test(w)));
+  // An empty page carries no distance notes.
+  const none = await s.query('cinemas', { provider: 'cinesunidos', near: 'Chacao', query: 'no such venue' });
+  assert.equal(none.status, 'empty');
+  assert.ok(!none.warnings.some(w => /distance_km/.test(w)), none.warnings.join(' '));
 });
