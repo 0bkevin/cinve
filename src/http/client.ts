@@ -224,7 +224,7 @@ export class HttpClient {
    * fields, so different queries never share an entry. Callers must validate
    * the route and fields with assertPublicForm first (ReadContext does).
    */
-  async post(url: string, fields: Record<string, string>, ttl: Ttl = 120000, refresh = false): Promise<Page> {
+  async post(url: string, fields: Record<string, string>, ttl: Ttl = 120000, refresh = false, accept?: (body: string) => boolean): Promise<Page> {
     const parsed = new URL(url);
     if (parsed.protocol !== 'https:' || parsed.hostname !== 'supercines.com.ve' || parsed.port || parsed.username || parsed.password || parsed.hash || parsed.search) throw new DataError('error', 'Query origin not allowed.');
     const body = new URLSearchParams(Object.entries(fields).sort(([a], [b]) => a.localeCompare(b))).toString();
@@ -243,7 +243,9 @@ export class HttpClient {
     const startedAt = ++this.clock;
     let task!: Promise<Page>;
     task = this.readForm(url, key, body, parsed.origin, refresh).then(page => {
-      this.store(key, page, typeof ttl === 'function' ? ttl(page) : ttl, startedAt, task, false);
+      // As for GETs: a blank or unusable 200 (a maintenance page) is not kept; the provider's
+      // confirmed empty answer is.
+      if (page.empty || (page.body.trim() && (!accept || accept(page.body)))) this.store(key, page, typeof ttl === 'function' ? ttl(page) : ttl, startedAt, task, false);
       return page;
     }).finally(() => this.clearPending(task));
     this.pendingStartedAt.set(task, startedAt);

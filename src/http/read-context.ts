@@ -151,19 +151,19 @@ export class ReadContext {
     catch (e) { if (e instanceof DataError) throw e; throw new DataError('error', 'The provider did not return valid JSON.'); }
   }
   /** A public listing read sent as a form POST; see HttpClient.post. */
-  async form(url: string, fields: Record<string, string>, ttl?: Ttl): Promise<string> {
-    return (await this.formPage(url, fields, ttl)).body;
+  async form(url: string, fields: Record<string, string>, ttl?: Ttl, accept?: (body: string) => boolean): Promise<string> {
+    return (await this.formPage(url, fields, ttl, accept)).body;
   }
   /** Like form(), keeping the provider's confirmation that it has no data (empty). */
-  async formPage(url: string, fields: Record<string, string>, ttl?: Ttl): Promise<Page> {
+  async formPage(url: string, fields: Record<string, string>, ttl?: Ttl, accept?: (body: string) => boolean): Promise<Page> {
     assertPublicForm(url, fields);
     this.checkCanRead();
-    const page = await this.http.post(url, fields, ttl, this.refresh);
+    const page = await this.http.post(url, fields, ttl, this.refresh, accept);
     if (!this.sources.some(s => s.url === page.source.url)) this.sources.push(page.source);
     return page;
   }
   async formJson(url: string, fields: Record<string, string>, ttl?: Ttl): Promise<unknown> {
-    try { return JSON.parse(await this.form(url, fields, ttl)); }
+    try { return JSON.parse(await this.form(url, fields, ttl, isJson)); }
     catch (e) { if (e instanceof DataError) throw e; throw new DataError('error', 'The provider did not return valid JSON.'); }
   }
 }

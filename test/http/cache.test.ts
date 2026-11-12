@@ -109,3 +109,18 @@ test('one city read through the search API fits in the cache alongside another c
   const oldest = again.sources.reduce((a, b) => (b.fetched_at < a.fetched_at ? b : a)).fetched_at;
   assert.ok(again.warnings.some(w => w.includes('62 sources were queried') && w.includes(oldest)), again.warnings.join(' | '));
 });
+
+test('a Supercines form answer that is not the expected JSON is not cached either', async () => {
+  const SC = 'https://supercines.com.ve';
+  let posts = 0;
+  const http = new HttpClient(async (input, init) => {
+    const url = new URL(String(input));
+    if ((init?.method ?? 'GET') === 'GET' && url.pathname === '/cartelera') return new Response('<meta name="csrf-token" content="TOKEN1000000000000000000000000000000000000">', { headers: [['set-cookie', 'XSRF-TOKEN=g; path=/'], ['set-cookie', 'supercines_session=GUEST; path=/']] });
+    posts++;
+    return posts === 1 ? new Response('<html>Mantenimiento</html>') : Response.json([{ id: 7 }]);
+  });
+  await assert.rejects(new ReadContext(http).formJson(`${SC}/dame_empresas`, {}, 3600000), /valid JSON/);
+  assert.deepEqual(await new ReadContext(http).formJson(`${SC}/dame_empresas`, {}, 3600000), [{ id: 7 }]);
+  assert.deepEqual(await new ReadContext(http).formJson(`${SC}/dame_empresas`, {}, 3600000), [{ id: 7 }]);
+  assert.equal(posts, 2, 'the maintenance page was asked for again; the valid answer was kept');
+});
