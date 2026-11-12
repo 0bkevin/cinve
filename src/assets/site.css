@@ -507,16 +507,17 @@ button:disabled, .btn:disabled { cursor: not-allowed; }
 .lost-house { position: relative; margin: 0; container-type: inline-size; }
 /* The lit seats cast a soft amber glow on the house. */
 .lost-house::before {
-  content: ''; position: absolute; inset: 0 -10%; z-index: -1; pointer-events: none;
+  content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
   background: radial-gradient(50% 50% at 50% 60%, rgba(255, 189, 63, 0.08), transparent);
 }
 .lost-seats {
-  /* 15 seats, 12 gaps and two aisles fill the column; row letters hang on
-     both sides' worth of space so the seats stay centred. */
+  /* 15 seats, 12 gaps and two aisles fill the column, with room for the
+     row letters on both sides so the seats stay centred. The tilt pivots on
+     the front row, so it keeps this width and the rows behind it shrink. */
   --gap: clamp(3px, 1.3cqi, 9px); --aisle: calc(var(--gap) * 3.2); --label: 18px;
   --size: min(44px, calc((100cqi - var(--label) * 2 - var(--gap) * 12 - var(--aisle) * 2) / 15));
   display: grid; justify-items: center; gap: calc(var(--gap) * 1.3);
-  transform: perspective(1400px) rotateX(16deg); transform-origin: 50% 0;
+  transform: perspective(1400px) rotateX(16deg); transform-origin: 50% 100%;
 }
 .lost-screen {
   position: relative; height: 22px; margin: 0 6% 40px;
@@ -545,16 +546,30 @@ button:disabled, .btn:disabled { cursor: not-allowed; }
 /* Narrow screens: the house comes first, then the copy under it. */
 @media (max-width: 900px) {
   .lost { grid-template-columns: minmax(0, 1fr); align-content: center; gap: 40px; }
-  .lost-house { order: -1; width: 100%; max-width: 620px; justify-self: center; }
+  .lost h1 { font-size: clamp(44px, 7vw, 64px); }
+  .lost-house { order: -1; width: 100%; max-width: 720px; justify-self: center; }
 }
 @media (max-width: 640px) {
-  .lost { min-height: calc(100svh - 64px); padding: 24px 0 40px; gap: 32px; }
-  .lost-screen { margin-bottom: 32px; height: 16px; }
+  .lost { min-height: calc(100svh - 64px); padding: 12px 0 32px; gap: 28px; }
+  .lost-screen { margin-bottom: 28px; height: 16px; }
+  .lost-code { margin-bottom: 16px; }
+  .lost h1 { margin-bottom: 16px; font-size: clamp(36px, 11vw, 44px); }
   .lost-screen span { font-size: 10px; bottom: -20px; }
   .lost-seats { --label: 12px; }
   .lost .lead { font-size: 17px; }
   .lost-actions { margin-top: 28px; }
   .lost-actions .btn { width: 100%; }
+}
+/* Phones turned sideways: side by side again, so the copy and buttons stay
+   on the first screen instead of under the seats. */
+@media (max-width: 900px) and (orientation: landscape) and (max-height: 520px) {
+  .lost { grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: normal; gap: 24px 32px; padding: 12px 0 24px; }
+  .lost-house { order: 0; }
+  .lost h1 { font-size: clamp(28px, 5.4vw, 36px); margin-bottom: 12px; }
+  .lost-code { margin-bottom: 12px; }
+  .lost .lead { font-size: 15px; }
+  .lost-actions { margin-top: 20px; }
+  .lost-actions .btn[data-size=lg] { height: 44px; padding-inline: 18px; font-size: 15px; }
 }
 @media (prefers-reduced-motion: reduce) { .lost-row, .lost-row i[data-state=lit] { animation: none; } }
 
