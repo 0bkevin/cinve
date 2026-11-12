@@ -321,7 +321,7 @@ details.more[data-closing] > summary .chevron { transform: none; }
 .field-error { margin: 0; font-size: 14px; line-height: 1.45; color: var(--destructive); }
 .field-error[hidden] { display: none; }
 .password-field { position: relative; }
-.password-field input { padding-right: 56px; }
+.connect-form .password-field input { padding-right: 56px; }
 .password-field .reveal {
   position: absolute; top: 50%; right: 6px; transform: translateY(-50%);
   width: 40px; height: 40px; padding: 0; border-radius: 9px; color: var(--dust);
