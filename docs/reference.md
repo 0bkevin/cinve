@@ -41,7 +41,7 @@ Only use IDs returned by Cinve, and don't mix them across cinemas. Venues with
 | Cinex        | `get_showtimes` with `city` reads the whole city; with `cinema_id`, one venue; with `movie_id`, every venue for that movie. `list_movies` is the general catalog, with no date or venue. |
 | Cines Unidos | `list_cinemas`, `list_movies` and `get_showtimes` require `city`; add `cinema_id` for one venue.   |
 | Cinepic      | Two venues: `123300` (Candelaria) and `123301` (VVIP Lido). Everything except cities and venues requires `cinema_id`. |
-| Supercines   | `get_showtimes` requires `cinema_id`, `city` or `movie_id`. Prices require `movie_id` and, if not today, the same `date` used in `get_showtimes`. |
+| Supercines   | `get_showtimes` requires `cinema_id`, `city` or `movie_id`. Prices and seats require `movie_id` and, if not today, the same `date` used in `get_showtimes`. |
 | Gran Cine    | `get_showtimes` with no venue or city reads all its screens.                                       |
 
 ## Responses
@@ -59,7 +59,7 @@ Only use IDs returned by Cinve, and don't mix them across cinemas. Venues with
 | Cinex        | Yes    | Yes         | Yes   | Prices, concessions and seats      |
 | Cines Unidos | Yes    | Yes         | Yes   | Prices and seats                   |
 | Cinepic      | Yes    | Yes         | Yes   | No                                 |
-| Supercines   | Yes    | Yes         | No    | No (optional, for account fares)   |
+| Supercines   | Yes    | Yes         | Yes   | Seats (optional for account fares) |
 | Gran Cine    | No     | No          | No    | No                                 |
 
 All of them provide venues, movies and showtimes. Limitations:
@@ -79,8 +79,9 @@ All of them provide venues, movies and showtimes. Limitations:
 
 ## Seat maps
 
-`get_seats` requires `cinema_id` and `session_id`; Cinepic also requires
-`movie_id`. Cinex and Cines Unidos require a connected account.
+`get_seats` requires `cinema_id` and `session_id`; Cinepic and Supercines also
+require `movie_id`, and Supercines the same `date` used in `get_showtimes` when
+it is not today. Cinex, Cines Unidos and Supercines require a connected account.
 
 ```text
 O available  X occupied  - restricted/unavailable  ? unknown
@@ -103,6 +104,7 @@ cinema's website draws them:
 | Cinepic      | Top, next to row 1                          | Right to left in rooms marked `invertida`         |
 | Cines Unidos | Bottom                                      | Left to right                                    |
 | Cinex        | Bottom: its page draws the screen after row A | In page order; shorter rows are centred (`row_shift`) |
+| Supercines   | Bottom                                      | As its room plan (`direccionSala`)               |
 
 Wheelchair spaces carry `accessible: true` (Cines Unidos and Cinex mark them);
 they keep their status, restricted unless occupied, and the image draws them in
@@ -113,11 +115,12 @@ sell it; its website shows the others as unavailable. It also sells a quota per
 fare, often below the free seats; `get_ticket_prices` returns it as
 `tickets_available` and `get_seats` warns when it is lower.
 
-Cinex draws a regular room's map only on a session that has opened an order
-before. When neither of its seat pages draws one, Cinve opens an order of
-exactly one ticket, never picks a seat, reads the map and always resets the
-order in the same call (`resetpurchase.php`, the route Cinex uses when its
-countdown ends), one order at a time per account. The result's warnings say so. When no map is
+Some cinemas draw a map only inside an order. Cinex does so for regular rooms
+on a session that has never opened one, and Supercines always. In those cases
+Cinve opens an order of exactly one ticket, never picks a seat, reads the map
+and always cancels the order in the same call (Cinex `resetpurchase.php`,
+Supercines `/cancelaCompra`, the routes each site uses when its countdown ends),
+one order at a time per account. The result's warnings say so. When no map is
 published, Cinex's own "available seats" counter is reported instead.
 
 Besides the data, `get_seats` returns the map as a PNG image (up to 1200 px
@@ -159,5 +162,5 @@ Bricolage Grotesque fonts bundled in `src/assets` as static instances.
   and never reaches the provider; a timeout or a cut connection is the
   provider's.
 - Only allowed pages, APIs and forms are queried. Cinve never buys, pays,
-  selects a seat or changes accounts; the only order step is the one-ticket
-  Cinex seat-map order above, always reset.
+  selects a seat or changes accounts; the only order steps are the one-ticket
+  seat-map orders above, always cancelled.

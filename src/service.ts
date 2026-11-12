@@ -66,7 +66,7 @@ function boundedSources(sources: QueryResult['sources'], warnings: string[]): Qu
 export const capabilities = {
   cinepic: { seats: 'public_page_data_ascii', cities: 'public', cinemas: 'public', movies: 'public_api', showtimes: 'public_api', prices: 'page_data_ves_and_derived_usd', concessions: 'public_api_empty_in_samples' },
   cinesunidos: { seats: 'authenticated_api_ascii', cities: 'public_api', cinemas: 'page_data', movies: 'page_data', showtimes: 'page_data', prices: 'authenticated_api', concessions: 'public_api' },
-  supercines: { seats: 'not_supported', cities: 'public_form_api', cinemas: 'public_form_api', movies: 'public_api_billboard_by_cinema', showtimes: 'public_form_html_per_title', prices: 'public_form_html_ves_and_derived_usd_requires_movie_and_date_account_optional', concessions: 'public_form_html_ves' },
+  supercines: { seats: 'account_opens_and_cancels_a_one_ticket_purchase_without_picking_seats', cities: 'public_form_api', cinemas: 'public_form_api', movies: 'public_api_billboard_by_cinema', showtimes: 'public_form_html_per_title', prices: 'public_form_html_ves_and_derived_usd_requires_movie_and_date_account_optional', concessions: 'public_form_html_ves' },
   grancine: { seats: 'not_published', cities: 'html_directory_with_known_cities', cinemas: 'html', movies: 'html_titles_with_functions', showtimes: 'html_per_venue_and_date_no_upstream_ids', prices: 'not_published', concessions: 'not_published' },
   cinex: { seats: 'authenticated_html_ascii', cities: 'public_api', cinemas: 'html', movies: 'html_general_catalog', showtimes: 'html_requires_cinema_or_movie', prices: 'authenticated_html_requires_session', concessions: 'authenticated_html' },
 };

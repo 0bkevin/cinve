@@ -32,7 +32,8 @@ src/
     cinex/           adapter, public-pages (HTML parsers), venues (discovery), account-pages
     cinesunidos/     adapter (+ search-API fallback), directory, prices
     cinepic/         adapter, sites (the two venues and their purchase page)
-    supercines/      adapter: public form reads (anonymous form token), fares, concessions
+    supercines/      adapter: public form reads (anonymous form token), fares, concessions,
+                     and the seat page read inside a one-ticket purchase
     grancine/        adapter: HTML venue pages, no upstream IDs
     fanout.ts        bounded parallel reads with a deadline, shared by the adapters
     parsing.ts       bounded Next.js Flight reader and payload checks
@@ -102,8 +103,10 @@ npm run dev                   # stdio server from source
   seat map a cinema shows only inside an order may be read by opening an order
   of exactly one ticket, which the same call always resets. On Cinex that is
   `boletos_data.php` (only when a regular room's seat page has no grid; see
-  `seats/seat-map.ts`) reset with `resetpurchase.php`. Never call Cinex
-  `boletos_datadev.php` or `asientos_datadevx.php`. A new provider URL must be
+  `seats/seat-map.ts`) reset with `resetpurchase.php`; on Supercines,
+  `/bookSeat` closed with `/cancelaCompra` (`supercinesSeatPage` in
+  `providers/supercines/adapter.ts`). Never call Cinex `boletos_datadev.php` or
+  `asientos_datadevx.php`, or Supercines `seatSelected`. A new provider URL must be
   added on purpose to `http/allow-list.ts`.
 - Seats are never cached: `getSeatMap` always reads fresh.
 - Never commit credentials, cookies, tokens, session files

@@ -157,6 +157,70 @@ export function cinexSeatOrderFields(ticketPage: string): Record<string, string>
 /** The right function's page arrived with an empty grid. */
 export class EmptyCinexMap extends DataError {}
 
+/**
+ * Supercines' seat page (2026-11-11) builds its grid in makeSala.js from
+ * construyeNormal(enabled, layout, width, height, taken, own, tickets):
+ * layout is "A:2,1,0,...|B:..." with one code per position 1..width of each
+ * row: 0 is an aisle, 1 a seat that takes the next number, 2 a numbered place
+ * with no seat. Rows run from the last letter at the top down to A, with the
+ * screen below; with direccionSala "RL" position 1 is drawn on the right.
+ * makeSala.js reads exactly `width` codes per row: extra codes are ignored
+ * (Unicentro sends 11 for a 10-wide room) and a missing one hides its place
+ * but still takes a number; a row whose letter is outside the grid is not drawn.
+ * Seats are named letter + number ("A8"), as in asientosVendidos (sold),
+ * restringidosGlobales (reserved for special tickets) and asientosUsuario.
+ * Coordinates here are as drawn: row 0 at the top, column 0 on the left.
+ */
+export function parseSupercinesSeats(html: string, expected: { cinemaId: string; date: string; time: string; movie?: string | undefined }): SeatData[] {
+  const call = html.match(/construyeNormal\(\s*'([A-Z0-9,]*)'\s*,\s*'([A-Z0-9:,|]*)'\s*,\s*'(\d{1,3})'\s*,\s*'(\d{1,3})'\s*,\s*'([A-Z0-9,]*)'\s*,\s*'([A-Z0-9,]*)'/);
+  const direction = html.match(/var direccionSala = '([A-Z]{2})';/)?.[1];
+  if (!call || (direction !== 'RL' && direction !== 'LR')) throw new DataError('error', 'Unrecognized Supercines seat page (the page structure changed).');
+  // The page names its function only by venue, date and time: all three must be the requested ones.
+  const where = html.match(/"&idEmpresa=(\d{1,12})"[\s\S]{0,300}?"&fecha=(\d{4}-\d{2}-\d{2})"/);
+  const clockText = html.match(/<h4 class="mb-0">\s*(\d{1,2}):(\d{2})\s*([AP])\.?\s*M/i);
+  const shown = clockText ? `${String(Number(group(clockText, 1)) % 12 + (group(clockText, 3).toUpperCase() === 'P' ? 12 : 0)).padStart(2, '0')}:${group(clockText, 2)}` : undefined;
+  // Two films can start at one venue at the same time: the page's film title must be the requested one.
+  // Compared without accents, punctuation or tags in parentheses such as "(3D)" or "(SUB)": "CARS" is not "CARS 2".
+  const plain = (value: string) => value.replace(/\([^)]*\)/g, ' ').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, '');
+  const title = plain(html.match(/<h3 class="mb-0">([^<]*)<\/h3>/)?.[1] ?? ''), wanted = plain(expected.movie ?? '');
+  const sameFilm = !wanted || title === wanted;
+  if (!where || where[1] !== expected.cinemaId || where[2] !== expected.date || shown !== expected.time || !sameFilm) {
+    throw new DataError('unavailable', 'The Supercines seat page does not match the requested venue, date and time; repeat the query.');
+  }
+  const list = (value: string | undefined) => new Set((value ?? '').split(',').map(s => s.trim()).filter(Boolean));
+  const layout = group(call, 2), width = Number(group(call, 3)), height = Number(group(call, 4));
+  // Sold, special and own seats come only from these declarations: if one is missing the page changed, and
+  // reading on would show sold seats as free, so the map is refused instead.
+  const declared = (name: string) => html.match(new RegExp(`\\b(?:var|let|const)\\s+${name}\\s*=\\s*(['"])([A-Z0-9,\\s]*)\\1`))?.[2];
+  const soldList = declared('asientosVendidos'), restrictedList = declared('restringidosGlobales'), ownDeclared = declared('asientosUsuario');
+  if (soldList === undefined || restrictedList === undefined || ownDeclared === undefined) throw new DataError('error', 'Unrecognized Supercines seat page (the page structure changed).');
+  const sold = list(soldList), taken = list(call[5]), restricted = list(restrictedList);
+  const own = new Set([...list(call[6]), ...list(ownDeclared)]), enabled = list(call[1]);
+  if (!width || !height || height > 26) throw new DataError('error', 'Unrecognized Supercines room size.');
+  const seats: SeatData[] = [];
+  for (const row of layout.split('|')) {
+    const letter = beforeFirst(row, ':'), codes = row.includes(':') ? row.slice(letter.length + 1) : undefined;
+    const index = /^[A-Z]$/.test(letter) && codes !== undefined ? letter.charCodeAt(0) - 65 : -1;
+    if (index < 0 || codes === undefined) throw new DataError('error', 'Unrecognized Supercines room layout.');
+    if (index >= height) continue;
+    const given = codes.split(','), cells = Array.from({ length: width }, (_, i) => given[i] ?? '2');
+    let number = 0;
+    cells.forEach((code, i) => {
+      if (code === '0' || code === '') return;
+      if (code !== '1' && code !== '2') throw new DataError('error', 'Unrecognized Supercines seat code.');
+      number++;
+      if (code === '2') return;
+      const label = `${letter}${number}`, position = i + 1;
+      const status = own.has(label) ? 'unavailable' : sold.has(label) || taken.has(label) ? 'occupied'
+        : restricted.has(label) || (enabled.size > 0 && !enabled.has(label)) ? 'unavailable' : 'available';
+      seats.push({ id: `${letter}${position}`, label, row: letter, area: 'Sala', row_index: height - 1 - index,
+        column_index: direction === 'RL' ? width - position : position - 1, status,
+        provider_status: status === 'occupied' ? 'vendido' : status === 'unavailable' ? 'restringido' : 'libre' });
+    });
+  }
+  return validateSeats(seats);
+}
+
 export function parseCinexSeats(html: string, q: Query): SeatData[] {
   const $ = load(html);
   // Cinex stores the chosen function in its PHP session. Check the back link

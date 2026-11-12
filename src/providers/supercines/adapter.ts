@@ -331,6 +331,48 @@ export function parseSupercinesConcessions(html: string, cinemaId: string, c: Re
   return items;
 }
 
+/**
+ * Supercines draws a function's seat map only inside a purchase: its booking
+ * form submits a ticket count to /bookSeat, which answers with the seat page
+ * and starts a countdown (about 10 minutes). Cinve opens that purchase with
+ * one ticket of the first type listed, never picks a seat, reads the page and
+ * always closes the purchase with /cancelaCompra, the route the site itself
+ * uses when the countdown ends. It needs the user's account, as the website
+ * does, and runs one purchase at a time per account.
+ */
+export async function supercinesSeatPage(q: Query, c: ReadContext): Promise<{ html: string; date: string; time: string; cancelled: boolean; movie: string | undefined; venue: string | undefined }> {
+  const cinemaId = requireArg(q, 'cinema_id'), sessionId = requireArg(q, 'session_id'), movieId = requireArg(q, 'movie_id');
+  const date = q.date ?? today();
+  if (isPastDate(date)) throw new DataError('unavailable', 'That date has passed: Supercines only sells showtimes from today onward.');
+  if (!await c.hasSession('supercines')) throw new DataError('auth_required', 'Supercines shows its seat map only to a signed-in account: connect your Supercines account.');
+  // Confirm the function first, as for fares, so a mismatched ID never opens another function's purchase.
+  const page = await schedule(c, movieId, date);
+  const functions = page === undefined ? [] : parseSupercinesShowtimes(page, { id: movieId, name: `Movie ${movieId}` }, date, { partial: false, warnings: [] });
+  const fn = functions.find(s => s.id === sessionId && s.cinema_id === cinemaId);
+  if (!fn?.time) throw new DataError('unavailable', 'The showtime does not appear in the Supercines schedule for that venue, movie and date; call get_showtimes (and pass date if it is not today).');
+  const time = fn.time;
+  const { threeD } = parseSupercinesBooking(await c.get(`${SC}/booking/${movieId}`, 600000));
+  // The film's name as Supercines lists it, to check the seat page against (it names the film, not its ID).
+  const movie = (await movies(c)).find(m => m.id === movieId)?.name;
+  return c.exclusive('supercines', async () => {
+    const fares = load(await c.authenticatedForm('supercines', `${SC}/listBoletos`, { idFuncion: sessionId, fecha: date, unico: movieId, tresD: threeD, idEmpresa: cinemaId }));
+    const types = fares('input[name^="quantityBoleto["]').map((_, el) => fares(el).attr('name')?.match(/^quantityBoleto\[(\d{1,12})\]$/)?.[1]).get();
+    if (!types.length) throw new DataError('unavailable', 'Supercines sells no tickets online for this showtime, so its website shows no seat map.');
+    const fields: Array<[string, string]> = [['id', movieId], ['cartelera', sessionId], ['flagForm', '1']];
+    const show = fares('#espectaculo').attr('value');
+    if (show && scId.test(show)) fields.push(['espectaculo', show]);
+    types.forEach((type, i) => fields.push([`quantityBoleto[${type}]`, i === 0 ? '1' : '0'], ['idBoleto[]', type], ['promoCombinada[]', '']));
+    fields.push(['cortesia_boleto', ''], ['quantityBoletoCortesia[]', '0']);
+    let html = '', cancelled = false;
+    try { html = await c.authenticatedForm('supercines', `${SC}/bookSeat`, fields); }
+    finally {
+      // Always close the purchase, even when opening it failed half way or the client cancelled the call.
+      cancelled = await c.closeAuthenticated('supercines', `${SC}/cancelaCompra`);
+    }
+    return { html, date, time, cancelled, movie, venue: fn.cinema_name };
+  });
+}
+
 export async function supercines(op: Operation, q: Query, c: ReadContext): Promise<DataItem[]> {
   if (op === 'cities') {
     const cities = [...new Set((await venues(c)).map(v => v.city))];

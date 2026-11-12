@@ -189,10 +189,10 @@ test('Supercines concessions keep category and price, and skip products without 
   assert.equal(unknown.status, 'unavailable');
 });
 
-test('Supercines seat maps are reported as not implemented', async () => {
+test('Supercines seat maps need the user\'s account and read nothing without it', async () => {
   const { service, calls } = provider();
-  const result = await service.seats({ provider: 'supercines', cinema_id: '7', session_id: '100' });
-  assert.equal(result.status, 'unavailable');
+  const result = await service.seats({ provider: 'supercines', cinema_id: '7', session_id: '100', movie_id: '3991' });
+  assert.equal(result.status, 'auth_required');
   assert.equal(calls.length, 0);
 });
 

@@ -208,6 +208,8 @@ export function createServer(service = new CinemaService(), accounts?: AccountTo
       if ((q.provider === 'cinepic' || q.provider === 'supercines') && !q.movie_id) ctx.addIssue({ code: 'custom', path: ['movie_id'], message: `${q.provider === 'cinepic' ? 'Cinepic' : 'Supercines'} requires movie_id from get_showtimes.` });
       if (q.provider !== 'supercines' && q.date) ctx.addIssue({ code: 'custom', path: ['date'], message: 'date for seats applies only to Supercines; the session_id already identifies the showtime.' });
     })),
+    // Kept read-only like every lookup: an order opened to read a map (Supercines, some Cinex rooms) is
+    // cancelled within the same call and picks no seat; the description and each result's warnings say so.
     outputSchema: SeatResult, annotations,
   }, async ({ include_seats, image = 'png', ...args }, ctx) => {
     const data = await service.seats(args, callOptions(ctx, receivedAt));

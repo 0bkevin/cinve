@@ -55,6 +55,7 @@ export function seatLayout(provider: string, cinepicData?: unknown): Layout {
     const seats = object(cinepicData).butacas, first = Array.isArray(seats) ? object(seats[0]) : {};
     return { screen: 'top', column_order: text(first.invertida) === '1' ? 'descending' : 'ascending' };
   }
-  if (provider === 'cinesunidos' || provider === 'cinex') return { screen: 'bottom', column_order: 'ascending' };
+  // Supercines' coordinates are already as its page draws them (see parseSupercinesSeats).
+  if (provider === 'cinesunidos' || provider === 'cinex' || provider === 'supercines') return { screen: 'bottom', column_order: 'ascending' };
   return { screen: 'unverified', column_order: 'ascending' };
 }

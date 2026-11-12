@@ -5,9 +5,10 @@ import { HttpClient } from '../http/client.js';
 import { ReadContext } from '../http/read-context.js';
 import type { CallOptions } from '../http/read-context.js';
 import { cinepicTicketsLeft, cinepicVenueName, cpBuy } from '../providers/cinepic/sites.js';
+import { supercinesSeatPage } from '../providers/supercines/adapter.js';
 import { findField, object, rows } from '../providers/parsing.js';
 import { SeatResult, seatLayout } from './schema.js';
-import { cinepicBookableTypes, cinexRowShifts, cinexSeatOrderFields, clean, EmptyCinexMap, parseCinepicSeats, parseCinesUnidosSeats, parseCinexSeats, parseCinexShowing, showing } from './parsers.js';
+import { cinepicBookableTypes, cinexRowShifts, cinexSeatOrderFields, clean, EmptyCinexMap, parseCinepicSeats, parseCinesUnidosSeats, parseCinexSeats, parseCinexShowing, parseSupercinesSeats, showing } from './parsers.js';
 import { renderSeats } from './ascii.js';
 
 export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions): Promise<z.infer<typeof SeatResult>> {
@@ -118,6 +119,13 @@ export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions)
       const mapped = result.seats.filter(s => s.status === 'available').length;
       if (page.available !== undefined && page.available !== mapped) c.warnings.push(`Cinex\'s available-seat counter (${page.available}) differs from the map (${mapped} free); each seat\'s state on the map is kept.`);
       c.warnings.push(ordered ? 'Special categories may require a specific fare.' : 'Cinex: map read without selecting tickets or seats. Special categories may require a specific fare.');
+    } else if (q.provider === 'supercines') {
+      const page = await supercinesSeatPage(q, c);
+      if (!page.cancelled) c.warnings.push('Supercines did not confirm that the purchase Cinve opened to read the map was cancelled; it expires on its own when its countdown (about 10 minutes) ends. No seat was chosen.');
+      result.seats = parseSupercinesSeats(page.html, { cinemaId: result.cinema_id, date: page.date, time: page.time, movie: page.movie });
+      result.showing = showing({ movie: clean(page.movie, 200), cinema_name: clean(page.venue, 200), date: page.date, time: page.time });
+      c.warnings.push('Supercines shows its seat map only inside a purchase: Cinve opened one with a single ticket, chose no seat, read the map and cancelled it right away. Nothing was reserved or paid.');
+      if (result.seats.some(s => s.provider_status === 'restringido')) c.warnings.push('Seats marked restricted are reserved for special tickets on Supercines\' website.');
     } else {
       throw new DataError('unavailable', 'Seat lookup not implemented for this provider.');
     }
