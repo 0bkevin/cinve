@@ -1,6 +1,8 @@
 // Parsers for Cinex's public HTML: the billboard (cartelera.html), a film's
 // synopsis page and a venue's calendar page, each read without an account.
+import { createHash } from 'node:crypto';
 import { load } from 'cheerio';
+import type { CheerioAPI } from 'cheerio';
 import { DataError, folded, group, Id, number } from '../../core.js';
 import type { DataItem } from '../../core.js';
 import { ReadContext } from '../../http/read-context.js';
@@ -118,13 +120,47 @@ export function parseCinexCinemaShowtimes(html: string, movies: DataItem[], cine
       if (previous === undefined) identities.set(key, identity); else if (previous !== identity) contradictory.add(key);
     });
   });
+  const tabDates = cinexTabDates($);
+  let boxOffice = 0;
   $('.sessionslist').each((_, block) => {
     blocks++;
     const title = decodeLabel($(block).find('h5.title').first().text());
     // "Censura: <b>B</b>", the venue's age rating for this film.
     const rating = decodeLabel($(block).find('.movieinforow3 b').first().text()).slice(0, 20) || undefined;
     const sessionNodes = $(block).find('[onclick*="checkLogin("]');
-    nodes += sessionNodes.length;
+    // Venues that sell only at the box office (most outside Caracas, seen 2026-11-12)
+    // list their functions without checkLogin, session ID or epoch; only the
+    // date tab of the block's page dates them.
+    const boxNodes = $(block).find('.cinemasessionpos').filter((_, e) => !($(e).attr('onclick') ?? '').includes('checkLogin(') && /solo\s+por\s+taquilla/i.test($(e).attr('title') ?? ''));
+    nodes += sessionNodes.length + boxNodes.length;
+    if (boxNodes.length) {
+      const page = /^pagedate(\d+)$/.exec($(block).closest('[id^="pagedate"]').attr('id') ?? '')?.[1];
+      const pageDate = page === undefined ? undefined : tabDates.get(Number(page));
+      if (!pageDate) {
+        c.partial = true;
+        providerWarning(c, 'cinex-box-office-undated', 'Cinex listed box-office-only showtimes whose date could not be confirmed; they were omitted.');
+      } else if (pageDate === date) {
+        const matches = title ? (byTitle.get(cinexMovieTitle(title)) ?? []) : [];
+        const movie = matches.length === 1 ? matches[0] : undefined;
+        if (!movie) {
+          c.partial = true;
+          providerWarning(c, 'cinex-box-office-unknown-title', () => `Cinex listed a box-office-only showtime whose title is not in its catalog (${warningLabel(title || 'untitled movie')}); it was omitted because its movie_id cannot be confirmed.`);
+        } else boxNodes.each((_, e) => {
+          const readable = $(e).clone(); readable.find('br').replaceWith('\n');
+          const text = readable.text();
+          const time = cinexClock(text);
+          if (!time) { c.partial = true; providerWarning(c, 'cinex-box-office-malformed', () => `Cinex omitted a box-office-only showtime of ${warningLabel(title)} without a readable time.`); return; }
+          const details = cinexSessionDetails(text, $(e).find('img.icoIdioma').attr('src'));
+          // Cinex publishes no ID for these functions. This one identifies the listing
+          // (venue, date, time, room, film) so repeated reads agree; it does not exist
+          // upstream and cannot be used for prices or seats.
+          const id = `${cinexBoxOfficePrefix}${createHash('sha256').update(JSON.stringify([cinemaId, date, time, details.screen ?? null, movie.id])).digest('hex').slice(0, 20)}`;
+          boxOffice++;
+          items.set(`${cinemaId}:${id}`, { kind: 'showtime', id, name: movie.name, cinema_id: cinemaId, cinema_name: cinemaName, movie_id: movie.id,
+            date, time, starts_at: `${date}T${time}:00-04:00`, rating, ...details, url });
+        });
+      }
+    }
     if (!sessionNodes.length) return;
     const validEpoch = (alt: string | undefined) => {
       const epoch = number(alt);
@@ -183,6 +219,49 @@ export function parseCinexCinemaShowtimes(html: string, movies: DataItem[], cine
   });
   if (!blocks) throw new DataError('error', 'Unrecognized Cinex showtime structure.');
   if (!nodes) providerWarning(c, 'cinex-cinema-no-sessions', 'Cinex returned no showtimes for the requested date.');
+  if (boxOffice) providerWarning(c, 'cinex-box-office', cinexBoxOfficeWarning);
   providerWarningSummary(c);
   return [...items.values()];
+}
+
+/** Showtime IDs Cinve computes for functions Cinex sells only at the box office. */
+export const cinexBoxOfficePrefix = 'taquilla-';
+const cinexBoxOfficeWarning = `Some Cinex venues sell these showtimes only at the box office (taquilla), not online: Cinex publishes no session for them, so their id (${cinexBoxOfficePrefix}...) is computed by Cinve and cannot be used for prices or seats. Confirm times with the venue.`;
+export const cinexBoxOfficeError = () => new DataError('unavailable', 'This Cinex showtime is sold only at the venue\'s box office: Cinex publishes no online prices or seat map for it.');
+
+const spanishMonths = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+/**
+ * The date of each page of a venue's calendar, from its tab ("Jueves 12
+ * Noviembre") and the page's first date (#fecha, YYYY-MM-DD) for the year.
+ * The tabs skip days without functions, so a page index is not a day offset.
+ * Checked on 2026-11-12 against the epochs of 608 online functions: all agree.
+ */
+function cinexTabDates($: CheerioAPI): Map<number, string> {
+  const dates = new Map<number, string>();
+  const first = /^(\d{4})-(\d{2})-\d{2}$/.exec($('#fecha').first().text().trim());
+  if (!first) return dates;
+  const year = Number(first[1]), month = Number(first[2]);
+  $('[id^="divdate"]').each((_, tab) => {
+    const index = /^divdate(\d+)$/.exec($(tab).attr('id') ?? '')?.[1];
+    const label = folded($(tab).text()).replace(/\s+/g, ' ').trim().match(/(\d{1,2}) ([a-z]+)$/);
+    const m = label ? spanishMonths.indexOf(label[2] ?? '') + 1 : 0;
+    if (index === undefined || !label || !m) return;
+    // A calendar that starts in December continues into January of the next year.
+    const y = m < month ? year + 1 : year, d = Number(label[1]);
+    const iso = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    if (new Date(`${iso}T12:00:00Z`).toISOString().slice(0, 10) === iso) dates.set(Number(index), iso);
+  });
+  return dates;
+}
+
+/** "04:35 pm" on its own line, as 24-hour HH:MM. */
+function cinexClock(text: string): string | undefined {
+  for (const line of text.split('\n')) {
+    const m = line.replace(/\s+/g, ' ').trim().match(/^(\d{1,2}):(\d{2}) ?(am|pm)$/i);
+    if (!m) continue;
+    const h = Number(m[1]), min = Number(m[2]);
+    if (h < 1 || h > 12 || min > 59) return undefined;
+    return `${String((h % 12) + (/pm/i.test(m[3] ?? '') ? 12 : 0)).padStart(2, '0')}:${m[2]}`;
+  }
+  return undefined;
 }

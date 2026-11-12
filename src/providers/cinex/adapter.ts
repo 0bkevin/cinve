@@ -6,7 +6,7 @@ import { checkedShowtime, decodeLabel, object, rows } from '../parsing.js';
 import { warningLabel } from '../diagnostics.js';
 import { catalogTtl, hourTtl } from '../read-policy.js';
 import { parseCinexPrices, parseCinexConcessions } from './account-pages.js';
-import { CX, parseCinexCinemaShowtimes, parseCinexMovies, parseCinexShowtimes } from './public-pages.js';
+import { CX, cinexBoxOfficeError, cinexBoxOfficePrefix, parseCinexCinemaShowtimes, parseCinexMovies, parseCinexShowtimes } from './public-pages.js';
 
 const cxSource = (method: string, id?: string) => `${CX}/assets/php/datasource.php?${new URLSearchParams({ method, ...(id ? { cinemaid: id } : {}) })}`;
 export async function cinex(op: Operation, q: Query, c: ReadContext, catalog = new CinexCinemaCatalog()): Promise<DataItem[]> {
@@ -18,6 +18,7 @@ export async function cinex(op: Operation, q: Query, c: ReadContext, catalog = n
   if (op === 'prices') {
     // Cinex publishes ticket prices only on the authenticated function page.
     const sessionId = requireArg(q, 'session_id');
+    if (sessionId.startsWith(cinexBoxOfficePrefix)) throw cinexBoxOfficeError();
     if (!await c.cinexSessionActive()) throw new DataError('auth_required', 'The Cinex session expired. Run npm run login -- cinex in a local terminal.');
     const url = `${CX}/boletos.php?${new URLSearchParams({ sessionid: sessionId, cinemaid: requireArg(q, 'cinema_id') })}`;
     c.warnings.push('VES amount for the showtime, with the ticket and other charges itemized; not a final purchase total.');
@@ -47,6 +48,8 @@ export async function cinex(op: Operation, q: Query, c: ReadContext, catalog = n
       if (error instanceof DataError && error.status === 'unavailable') throw new DataError('unavailable', 'Cinex has no page for that movie_id; get a current ID with list_movies.');
       throw error;
     }
+    // Synopsis pages list only the functions sold online (seen 2026-11-12).
+    c.warnings.push('The Cinex movie page lists only showtimes sold online; venues that sell only at the box office (most outside Caracas) appear only with city or cinema_id.');
     try { return parseCinexShowtimes(html, mid, date, c); }
     catch (error) {
       if (error instanceof DataError && error.status === 'unavailable') throw new DataError('unavailable', 'The Cinex page for this movie lists no showtimes. Call get_showtimes with the cinema_id of each venue (list_cinemas), which reads the venue\'s schedule.');

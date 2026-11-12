@@ -158,3 +158,52 @@ test('Cinex showtimes carry the age rating the venue and synopsis pages show', (
   const synopsis = parseCinexShowtimes(`<h1>CLAYFACE</h1><ul><li><strong>Director: </strong>James Watkins</li><li><strong>Censura: </strong>C</li></ul>${session}`, 'clayface', '2026-11-04', context());
   assert.equal(nth(synopsis, 0).rating, 'C');
 });
+
+// Markup as served on 2026-11-12 by cinex-plazamayor.html, a venue that sells
+// only at the box office: no checkLogin, epoch or session ID, and date tabs
+// that skip days, so page 1 is not the day after page 0.
+const boxOfficeSession = (room: string, time: string) => `<div style='display: inline-block;margin: 5px;' onclick='javascript:void(0);' title='Función venta solo por taquilla' alt='Función venta solo por taquilla' class='cinemasessionpos'> <button type='button' class='btnprog indicadorfuncionagotada cursornoclick'><img src='assets/images/xsub.png' class='icoIdioma'><br>${room}<br>${time}</button> </div>`;
+const boxOfficePage = (first = '2026-12-31') => `<div id='fecha' name='fecha' style='display:none;'>${first}</div>
+  <div id='divdate0' class='carousel-cell'><div class='fecha1'>Jueves <br/> 31 <br/> Diciembre</div></div>
+  <div id='divdate1' class='carousel-cell'><div class='fecha1'>Sábado <br/> 2 <br/> Enero</div></div>
+  <div id='pagedate0'><div class='container sessionslist'><h5 class='title'>EBENEZER</h5><div class='movieinforow3'>Censura: <b>A</b><br></div>${boxOfficeSession('02', '04:35 pm')}${boxOfficeSession('02', '12:10 am')}</div></div>
+  <div id='pagedate1'><div class='container sessionslist'><h5 class='title'>EBENEZER</h5>${boxOfficeSession('03', '07:00 pm')}</div></div>`;
+const ebenezer = [{ kind: 'movie' as const, id: 'ebenezer', name: 'EBENEZER' }];
+
+test('Cinex box-office-only functions are listed with the date of their tab and a computed id', () => {
+  const c = context();
+  const items = parseCinexCinemaShowtimes(boxOfficePage(), ebenezer, '30', '2026-12-31', c, 'https://www.cinex.com.ve/cinex-plazamayor.html', 'PLAZA MAYOR');
+  assert.deepEqual(items.map(i => [i.date, i.time, i.starts_at, i.screen, i.language, i.rating, i.movie_id]).sort(), [
+    ['2026-12-31', '00:10', '2026-12-31T00:10:00-04:00', '02', 'subtitulada', 'A', 'ebenezer'],
+    ['2026-12-31', '16:35', '2026-12-31T16:35:00-04:00', '02', 'subtitulada', 'A', 'ebenezer'],
+  ]);
+  assert.ok(items.every(i => /^taquilla-[0-9a-f]{20}$/.test(i.id)));
+  // The same listing gets the same id on every read.
+  assert.deepEqual(parseCinexCinemaShowtimes(boxOfficePage(), ebenezer, '30', '2026-12-31', context(), 'https://www.cinex.com.ve/cinex-plazamayor.html').map(i => i.id).sort(), items.map(i => i.id).sort());
+  assert.equal(c.partial, false);
+  assert.ok(c.warnings.some(w => /box office/.test(w) && /cannot be used for prices or seats/.test(w)), c.warnings.join(' | '));
+  assert.ok(!c.warnings.some(w => /no showtimes/.test(w)));
+  // The second tab is 2 January of the next year, not 1 January.
+  assert.deepEqual(parseCinexCinemaShowtimes(boxOfficePage(), ebenezer, '30', '2027-01-01', context(), 'https://www.cinex.com.ve/cinex-plazamayor.html'), []);
+  assert.deepEqual(parseCinexCinemaShowtimes(boxOfficePage(), ebenezer, '30', '2027-01-02', context(), 'https://www.cinex.com.ve/cinex-plazamayor.html').map(i => [i.date, i.time, i.screen]), [['2027-01-02', '19:00', '03']]);
+});
+
+test('Cinex box-office functions without a confirmed date are omitted as partial, not dated by guess', () => {
+  const c = context();
+  const undated = boxOfficePage().replace(/<div id='fecha'[^]*?<\/div>/, '');
+  assert.deepEqual(parseCinexCinemaShowtimes(undated, ebenezer, '30', '2026-12-31', c, 'https://www.cinex.com.ve/cinex-plazamayor.html'), []);
+  assert.equal(c.partial, true);
+  assert.ok(c.warnings.some(w => /date could not be confirmed/.test(w)));
+});
+
+test('Cinex prices and seats for a box-office function say so without reading the site or asking for a login', async () => {
+  const { cinex } = await import('../../src/providers/cinex/adapter.js');
+  const { getSeatMap } = await import('../../src/seats/seat-map.js');
+  let fetched = 0;
+  const http = new HttpClient(async () => { fetched++; return new Response('unexpected'); }, 15000, new EmptySessionStore());
+  await assert.rejects(cinex('prices', { provider: 'cinex', cinema_id: '30', session_id: 'taquilla-0123456789abcdef0123' }, new ReadContext(http)), /only at the venue's box office/);
+  const seats = await getSeatMap(http, { provider: 'cinex', cinema_id: '30', session_id: 'taquilla-0123456789abcdef0123' });
+  assert.equal(seats.status, 'unavailable');
+  assert.ok(seats.warnings.some(w => /only at the venue's box office/.test(w)), seats.warnings.join(' | '));
+  assert.equal(fetched, 0);
+});

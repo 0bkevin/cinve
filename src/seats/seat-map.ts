@@ -6,6 +6,7 @@ import { ReadContext } from '../http/read-context.js';
 import type { CallOptions } from '../http/read-context.js';
 import { cinepicTicketsLeft, cinepicVenueName, cpBuy } from '../providers/cinepic/sites.js';
 import { supercinesSeatPage } from '../providers/supercines/adapter.js';
+import { cinexBoxOfficeError, cinexBoxOfficePrefix } from '../providers/cinex/public-pages.js';
 import { findField, object, rows } from '../providers/parsing.js';
 import { SeatResult, seatLayout } from './schema.js';
 import { cinepicBookableTypes, cinexRowShifts, cinexSeatOrderFields, clean, EmptyCinexMap, parseCinepicSeats, parseCinesUnidosSeats, parseCinesUnidosShowing, parseCinexSeats, parseCinexShowing, parseSupercinesSeats, showing } from './parsers.js';
@@ -63,6 +64,7 @@ export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions)
       result.showing = showing({ ...named, screen: rooms.size === 1 && [...rooms][0] ? `Sala ${[...rooms][0]}` : named?.screen });
       c.warnings.push('Special states are shown as restricted; check their conditions on the cinema\'s website.');
     } else if (q.provider === 'cinex') {
+      if (result.session_id.startsWith(cinexBoxOfficePrefix)) throw cinexBoxOfficeError();
       if (!await c.cinexSessionActive()) throw new DataError('auth_required', 'The Cinex session expired; connect your account again.');
       // Cinex keeps the chosen function in its PHP session: select and read it as one step.
       // Checked in a browser on 2026-11-11: selecting the function on boletos.php is enough
