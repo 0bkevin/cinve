@@ -10,7 +10,8 @@ export type SeatStatus = typeof seatStatuses[number];
 export type MapSeat = { label: string; row: string; area: string; row_index: number; column_index: number; status: SeatStatus; accessible?: boolean | undefined };
 /** What a seat is drawn as: its status, or a wheelchair seat that is not taken. */
 type SeatKind = SeatStatus | 'accessible';
-const kindOf = (s: Pick<MapSeat, 'status' | 'accessible'>): SeatKind => s.accessible && s.status !== 'occupied' ? 'accessible' : s.status;
+/** Only a wheelchair seat that is free or restricted is drawn blue; a taken or unknown one keeps its own look. */
+const kindOf = (s: Pick<MapSeat, 'status' | 'accessible'>): SeatKind => s.accessible && (s.status === 'available' || s.status === 'unavailable') ? 'accessible' : s.status;
 /** The provider-verified orientation from SeatResult.layout. */
 /** row_shift: rows the provider centers because they are shorter, in seats (may be half a seat). */
 export type MapLayout = { screen: 'top' | 'bottom' | 'unverified'; column_order: 'ascending' | 'descending'; row_shift?: Record<string, number> | undefined };

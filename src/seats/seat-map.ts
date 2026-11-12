@@ -48,7 +48,7 @@ export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions)
       // A function it no longer sells online (already started, or sales closed) answers only
       // {"maxSeatsPerTransaction": 0}: no map to read, not a change in its format (seen 2026-11-11).
       const body = object(data);
-      if (body.seats === undefined && Number(body.maxSeatsPerTransaction) === 0) {
+      if (body.seats === undefined && (body.maxSeatsPerTransaction === 0 || body.maxSeatsPerTransaction === '0')) {
         throw new DataError('unavailable', 'Cines Unidos no vende en línea esta función (puede haber comenzado o cerrado su venta) y no envió el mapa de asientos. Elige otra función con get_showtimes.');
       }
       result.seats = parseCinesUnidosSeats(data);
@@ -71,7 +71,8 @@ export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions)
         const ticket = await c.authenticated('cinex', `https://www.cinex.com.ve/boletos.php?${new URLSearchParams({ cinemaid: result.cinema_id, sessionid: result.session_id })}`);
         const pages = /boletos_datadev\.php/.test(ticket) ? ['asientosdev.php', 'asientos.php'] : ['asientos.php', 'asientosdev.php'];
         const first = await c.authenticated('cinex', `https://www.cinex.com.ve/${pages[0]}`);
-        return /class=["']rowletter["']/.test(first) ? first : c.authenticated('cinex', `https://www.cinex.com.ve/${pages[1]}`);
+        // Any class list or quoting the parser's .rowletter selector would accept counts as a grid.
+        return /class\s*=\s*["']?[^"'>]*\browletter\b/i.test(first) ? first : c.authenticated('cinex', `https://www.cinex.com.ve/${pages[1]}`);
       });
       const page = parseCinexShowing(html);
       try {
@@ -102,6 +103,8 @@ export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions)
     result.total = seats.length;
     result.availability_complete = result.unknown === 0 && result.total > 0;
     if (result.unknown) c.warnings.push(`Mapa parcialmente interpretado por Cinve: ${result.unknown} asientos con estado desconocido (?). Los ${result.available} libres son únicamente los confirmados; cero libres confirmados no significa agotado.`);
+    // Checked here, so a layout the schema refuses fails this lookup with a status instead of throwing.
+    result.layout = SeatResult.shape.layout.parse(result.layout);
     result.ascii = renderSeats(seats, result.layout);
     result.status = 'available';
     c.warnings.push('Lectura sin reserva, sin caché local. La disponibilidad puede cambiar; confirma en la web antes de comprar.');
@@ -109,6 +112,7 @@ export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions)
     result.status = e instanceof DataError ? e.status : 'error';
     result.seats = []; result.showing = undefined; result.available = 0; result.occupied = 0; result.unavailable = 0;
     result.unknown = 0; result.total = 0; result.availability_complete = false; result.ascii = '';
+    result.layout = seatLayout(q.provider);
     c.warnings.push(e instanceof DataError ? e.message : 'No se pudo interpretar un mapa de asientos verificable.');
   }
   result.sources = c.sources; result.warnings = c.warnings;

@@ -494,3 +494,11 @@ test('wheelchair seats are flagged by Cines Unidos and Cinex, and drawn blue wit
   const at = svg.match(/<title>M:2: [^<]*<\/title><rect x="([\d.]+)" y="([\d.]+)"/);
   assert.equal(png.at(Math.round((Number(nth(at ?? [], 1)) + 2) * scale), Math.round((Number(nth(at ?? [], 2)) + 2) * scale)), '#2f6bd8');
 });
+
+test('an unknown wheelchair seat keeps its unknown look; free and restricted ones are blue', () => {
+  const s = (c: number, status: 'available' | 'unavailable' | 'unknown' | 'occupied') => ({ label: `A:${c + 1}`, row: 'A', area: '1', row_index: 0, column_index: c, status, accessible: true });
+  const svg = renderSeatMapSvg([s(0, 'available'), s(1, 'unavailable'), s(2, 'unknown'), s(3, 'occupied')], seatLayout('cinesunidos'), header);
+  assert.match(svg, /<title>A:1: silla de ruedas/); assert.match(svg, /<title>A:2: silla de ruedas/);
+  assert.match(svg, /<title>A:3: desconocido/); assert.match(svg, /<title>A:4: ocupado/);
+  assert.match(svg, />Silla de ruedas \(2\)</); assert.match(svg, />Desconocido \(1\)</);
+});

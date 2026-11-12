@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { renderSeats } from '../../src/seats/ascii.js';
-import { parseCinepicSeats, parseCinesUnidosSeats, parseCinexSeats } from '../../src/seats/parsers.js';
+import { cinexRowShifts, parseCinepicSeats, parseCinesUnidosSeats, parseCinexSeats } from '../../src/seats/parsers.js';
 import { seatLayout } from '../../src/seats/schema.js';
 import { CinemaService } from '../../src/service.js';
 import { HttpClient } from '../../src/http/client.js';
@@ -225,4 +225,26 @@ test("Cinex VIP functions are read from the seat page their own checkout leads t
   const r = await new CinemaService(http).seats({ provider: "cinex", cinema_id: "SBC", session_id: "s1" });
   assert.equal(r.status, "available"); assert.equal(r.total, 3);
   assert.deepEqual(paths, ["/checklogin.php", "/boletos.php", "/asientosdev.php"]);
+});
+
+test('final review: odd Cinex rows, looser grid markup and odd Cines Unidos bodies never throw or mislead', async () => {
+  const sessions = new class extends EmptySessionStore { override async headers() { return { Cookie: 'synthetic', Authorization: 'Bearer synthetic' }; } };
+  const seat = (id: string) => `<div class='seat' alt='0' id='${id}' onclick=javascript:decideAsientoNew('${id}','0','0','1','0000000001','1','N'); title='Asiento ${id}'></div>`;
+  const page = (rows: string, rowClass = `class='rowletter'`) => `<a id="btnasientosatras" href="boletos.php?cinemaid=SBC&sessionid=s1">Atras</a><div id="mapcontent"><div class="row centermap">${rows.replaceAll(`class='rowletter'`, rowClass)}</div></div>`;
+  // A row of 250 blank cells next to a seat row: no shift beyond the schema, and a seatless row does not shift anything.
+  const wide = page(`<div class='row centermap'><div class='rowletter'>Z</div>${"<div class='blankspace'></div>".repeat(250)}</div><div class='row centermap'><div class='rowletter'>A</div>${seat('A1')}${seat('A2')}</div>`);
+  assert.deepEqual(cinexRowShifts(wide), {});
+  const read = async (html: string) => new CinemaService(new HttpClient(async url => new Response(new URL(String(url)).pathname === '/checklogin.php' ? 'on' : new URL(String(url)).pathname === '/asientos.php' ? html : '<form id="frmboletos"></form>'), 15000, sessions)).seats({ provider: 'cinex', cinema_id: 'SBC', session_id: 's1' });
+  assert.equal((await read(wide)).status, 'available');
+  // Shifts the schema would refuse are dropped instead of failing the whole call.
+  const huge = page(`<div class='row centermap'><div class='rowletter'>B</div>${seat('B1')}${"<div class='blankspace'></div>".repeat(250)}</div><div class='row centermap'><div class='rowletter'>A</div>${seat('A1')}</div>`);
+  assert.deepEqual(cinexRowShifts(huge), {});
+  assert.equal((await read(huge)).status, 'available');
+  // A grid whose row letters carry extra classes is still the grid (the newer page is not read instead).
+  const extra = await read(page(`<div class='row centermap'><div class='rowletter'>A</div>${seat('A1')}</div>`, `class="rowletter big"`));
+  assert.equal(extra.status, 'available'); assert.equal(extra.total, 1);
+  // Cines Unidos: only a real zero means "not on sale online"; a null counter without areas is still an error.
+  const cu = async (body: unknown) => new CinemaService(new HttpClient(async () => Response.json(body), 15000, sessions)).seats({ provider: 'cinesunidos', cinema_id: '1005', session_id: 's1' });
+  assert.equal((await cu({ maxSeatsPerTransaction: '0' })).status, 'unavailable');
+  for (const body of [{ maxSeatsPerTransaction: null }, { maxSeatsPerTransaction: '' }, {}]) assert.equal((await cu(body)).status, 'error', JSON.stringify(body));
 });

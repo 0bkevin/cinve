@@ -125,11 +125,14 @@ export function parseCinesUnidosSeats(data: unknown): SeatData[] {
  */
 export function cinexRowShifts(html: string): Record<string, number> {
   const $ = load(html), widths = new Map<string, number>();
+  // Only rows that hold seats are drawn by Cinve; a row of blank cells alone does not move anything.
   $('#mapcontent .row').filter((_, r) => $(r).children('.rowletter').length === 1).each((_, r) => {
-    widths.set($(r).children('.rowletter').text().trim(), $(r).children().not('.rowletter').length);
+    const cells = $(r).children().not('.rowletter');
+    if (cells.filter((_, el) => !$(el).hasClass('blankspace')).length) widths.set($(r).children('.rowletter').text().trim(), cells.length);
   });
   const widest = Math.max(0, ...widths.values()), shifts: Record<string, number> = {};
-  for (const [row, width] of widths) if (width < widest) shifts[row] = (widest - width) / 2;
+  // A shift beyond 100 seats or a row name beyond 40 characters is no room Cinex draws: keep the seats unshifted.
+  for (const [row, width] of widths) if (width < widest && row.length <= 40 && (widest - width) / 2 <= 100) shifts[row] = (widest - width) / 2;
   return shifts;
 }
 
