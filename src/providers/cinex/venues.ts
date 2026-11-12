@@ -124,7 +124,9 @@ export class CinexCinemaCatalog {
       const match = rows?.find(r => r.siglas.toUpperCase() === candidate && normalizedName(r.name) === normalizedName(venueName));
       if (!match || !Id.safeParse(match.siglas).success) return undefined;
       // "C.C. Plaza Mayor. Prolongación Paseo Colón. Lecherías, Edo. Anzoátegui."
-      const address = typeof match.desc === 'string' ? decodeLabel(match.desc).replace(/\s+/g, ' ').trim().slice(0, 300) : '';
+      // desc is text, but may carry markup or entities ("Nivel C1<br>Chacao", "&amp;").
+      const address = typeof match.desc === 'string'
+        ? load(decodeLabel(match.desc.slice(0, 2000)).replace(/<br\s*\/?>/gi, ' '), null, false).root().text().replace(/\s+/g, ' ').trim().slice(0, 300) : '';
       return { code: match.siglas, ...(address ? { address } : {}) };
     } catch (error) { if (error instanceof CallStopped) throw error; return undefined; }
   }
