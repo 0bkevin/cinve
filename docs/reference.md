@@ -40,7 +40,11 @@ Only use IDs returned by Cinve, and don't mix them across cinemas. Venues with
 With `near`, a neighbourhood or town (`Chacao`, `Naguanagua`, `Lechería`) or
 `lat,lng`, it lists venues nearest first with `distance_km`, a straight line,
 not a travel distance; Cines Unidos then uses the city nearest to the place
-when `city` is missing. An unknown place is reported, not guessed. Locations
+when `city` is missing. The place may come with its city or as part of a
+longer name (`Altamira, Chacao`, `Sambil Chacao`); a city wins over a
+neighbourhood of the same name elsewhere (`La Candelaria, Valencia` is
+Valencia). A chain with no venue within 30 km says so. An unknown place is
+reported, not guessed. Locations
 live in `src/locations.ts`, looked up in OpenStreetMap (© OpenStreetMap
 contributors, ODbL); a venue without an entry is listed last, without
 `distance_km`.

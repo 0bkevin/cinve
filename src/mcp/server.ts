@@ -78,7 +78,8 @@ export function inputSchema(op: Operation): z.ZodType<Query> {
       if (op === 'prices') { need('movie_id'); need('session_id'); }
     }
     if (q.provider === 'cinesunidos') {
-      if (['movies', 'showtimes'].includes(op) || (op === 'cinemas' && !q.near)) need('city');
+      if (['movies', 'showtimes'].includes(op)) need('city');
+      if (op === 'cinemas' && !q.city && !q.near) ctx.addIssue({ code: 'custom', path: ['city'], message: 'city or near is required for cinesunidos/cinemas.' });
       if (['prices', 'concessions'].includes(op)) need('cinema_id');
       if (op === 'prices') need('session_id');
     }

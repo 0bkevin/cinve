@@ -115,7 +115,9 @@ test('an unknown place is said so instead of sorting by a guessed position', asy
 
 test('list_cinemas accepts near instead of a Cines Unidos city; the other tools do not take near', () => {
   assert.ok(inputSchema('cinemas').safeParse({ provider: 'cinesunidos', near: 'Chacao' }).success);
-  assert.equal(inputSchema('cinemas').safeParse({ provider: 'cinesunidos' }).success, false);
+  const missing = inputSchema('cinemas').safeParse({ provider: 'cinesunidos' });
+  assert.equal(missing.success, false);
+  assert.match(JSON.stringify(missing.error?.issues), /city or near is required for cinesunidos\/cinemas/);
   assert.equal(inputSchema('showtimes').safeParse({ provider: 'cinex', city: 'Caracas', near: 'Chacao' }).success, false);
   assert.equal(inputSchema('cinemas').safeParse({ provider: 'cinex', near: 'x'.repeat(121) }).success, false);
 });
