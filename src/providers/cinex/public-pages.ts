@@ -241,6 +241,7 @@ const spanishMonths = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'j
  * The tabs skip days without functions, so a page index is not a day offset.
  * Checked on 2026-11-12 against the epochs of 608 online functions: all agree.
  */
+const spanishWeekdays = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
 function cinexTabDates($: CheerioAPI): Map<number, string> {
   const dates = new Map<number, string>();
   const first = /^(\d{4})-(\d{2})-(\d{2})\b/.exec($('#fecha').first().text().trim());
@@ -248,20 +249,32 @@ function cinexTabDates($: CheerioAPI): Map<number, string> {
   const fecha = `${first[1]}-${first[2]}-${first[3]}`, year = Number(first[1]), month = Number(first[2]);
   const start = Date.parse(`${fecha}T12:00:00Z`);
   if (Number.isNaN(start)) return dates;
+  const real = (y: number, m: number, d: number) => {
+    const iso = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`, at = Date.parse(`${iso}T12:00:00Z`);
+    return !Number.isNaN(at) && new Date(at).toISOString().slice(0, 10) === iso ? { iso, at } : undefined;
+  };
   $('[id^="divdate"]').each((_, tab) => {
     const index = /^divdate(\d+)$/.exec($(tab).attr('id') ?? '')?.[1];
     // "Jueves 12 Noviembre", also "12 Nov", "12 Setiembre" or "12 Noviembre 2026".
-    const label = folded($(tab).text()).replace(/\s+/g, ' ').trim().match(/(\d{1,2}) ([a-z]+)\.?(?: (\d{4}))?$/);
-    const name = label?.[2] ?? '';
+    const label = folded($(tab).text()).replace(/\s+/g, ' ').trim().match(/(?:([a-z]+) )?(\d{1,2}) ([a-z]+)\.?(?: (\d{4}))?$/);
+    const name = label?.[3] ?? '';
     const m = name.length >= 3 ? spanishMonths.findIndex(full => full.startsWith(name) || (name === 'setiembre' && full === 'septiembre')) + 1 : 0;
     if (index === undefined || !label || !m) return;
-    // A calendar that starts in December continues into January of the next year.
-    const y = label[3] ? Number(label[3]) : m < month ? year + 1 : year, d = Number(label[1]);
-    const iso = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-    const at = Date.parse(`${iso}T12:00:00Z`);
-    // A real date, on or after the first one and within the weeks a calendar shows.
-    if (Number.isNaN(at) || new Date(at).toISOString().slice(0, 10) !== iso || at < start || at - start > 60 * 86400000) return;
-    dates.set(Number(index), iso);
+    const d = Number(label[2]), weekday = spanishWeekdays.indexOf(label[1] ?? '');
+    let date: { iso: string; at: number } | undefined;
+    if (label[4]) date = real(Number(label[4]), m, d);
+    else if (weekday >= 0) {
+      // The weekday fixes the year: only one of three consecutive years puts the
+      // date on it. A tab Cinex left from an earlier year ("Miercoles 29 Octubre"
+      // on a November 2026 page, seen 2026-11-12) gets its own, past date.
+      const fits = [year - 1, year, year + 1].map(y => real(y, m, d)).filter(r => r && new Date(r.at).getUTCDay() === weekday);
+      date = fits.length === 1 ? fits[0] : undefined;
+    } else {
+      // A calendar that starts in December continues into January of the next year.
+      const guess = real(m < month ? year + 1 : year, m, d);
+      date = guess && guess.at >= start && guess.at - start <= 60 * 86400000 ? guess : undefined;
+    }
+    if (date) dates.set(Number(index), date.iso);
   });
   // The first tab is the page's first date; if they disagree, no tab is trusted.
   if (dates.has(0) ? dates.get(0) !== fecha : $('#divdate0').length > 0) dates.clear();

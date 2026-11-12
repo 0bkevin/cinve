@@ -214,9 +214,18 @@ test('Cinex tab dates accept the spellings Cinex may use and refuse a calendar t
     assert.equal(dated(page, '2027-01-02').items.length, 1, page.slice(0, 400));
     assert.equal(dated(page, '2026-12-31').items.length, 2);
   }
-  const september = boxOfficePage('2026-09-30').replace('31 <br/> Diciembre', '30 <br/> Setiembre').replace('2 <br/> Enero', '2 <br/> Octubre');
+  const september = boxOfficePage('2026-09-30').replace('Jueves <br/> 31 <br/> Diciembre', 'Miercoles <br/> 30 <br/> Setiembre').replace('Sábado <br/> 2 <br/> Enero', 'Viernes <br/> 2 <br/> Octubre');
   assert.deepEqual(dated(september, '2026-10-02').items.map(i => i.date), ['2026-10-02']);
-  // A first tab that is not #fecha, or a tab before it, dates nothing: partial, not a guessed day.
+  // A tab Cinex left from an earlier year takes the year its weekday names, so it
+  // is neither offered as next year's date nor makes the page partial.
+  const stale = boxOfficePage().replace("<div id='pagedate1'>", `<div id='divdate2' class='carousel-cell'><div class='fecha1'>Miercoles <br/> 29 <br/> Octubre</div></div><div id='pagedate2'><div class='container sessionslist'><h5 class='title'>EBENEZER</h5>${boxOfficeSession('04', '05:00 pm')}</div></div><div id='pagedate1'>`);
+  for (const date of ['2026-12-31', '2027-10-29']) {
+    const { c } = dated(stale, date);
+    assert.equal(c.partial, false, date);
+  }
+  assert.equal(dated(stale, '2027-10-29').items.length, 0);
+  assert.equal(dated(stale, '2025-10-29').items.length, 1);
+  // A first tab that is not #fecha, or a weekday that fits no year, dates nothing: partial, not a guessed day.
   for (const page of [boxOfficePage('2026-12-30'), boxOfficePage().replace('2 <br/> Enero', '30 <br/> Diciembre')]) {
     const { items, c } = dated(page, page.includes('2026-12-30') ? '2026-12-31' : '2026-12-30');
     assert.deepEqual(items, []);
