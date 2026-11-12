@@ -173,7 +173,7 @@ const es = {
     original: 'Los siguientes bloques muestran las instrucciones originales del MCP en inglés, sin traducir. Tu asistente responde en el idioma de tu mensaje.',
     guide: 'Tu asistente sigue la', guideLink: 'guía de instalación (en inglés)', source: 'El código de estas instrucciones es público en',
   },
-  notFound: { title: 'Página no encontrada', heading: 'Esta función no está en cartelera.', lead: 'La página que buscas no existe o cambió de lugar.', home: 'Volver al inicio', start: 'Cómo empezar' },
+  notFound: { title: 'Página no encontrada', code: 'Error 404', seatMap: 'Mapa de una sala con los asientos encendidos formando el número 404.', heading: 'No encontramos esta página.', lead: 'Puede que el enlace esté mal escrito o que la página se haya movido.', home: 'Volver al inicio', start: 'Cómo empezar' },
   consent: {
     title: 'Conectar tu asistente', heading: 'Conecta Cinve a', cinemaLead: 'Inicia sesión con tu cuenta del cine para consultar precios desde tu asistente. Después vuelves al chat y listo.',
     appLead: 'Autoriza a {app} para conectar tus cuentas de cine y consultar precios con ellas.', publisher: 'Aplicación publicada por', publisherContinue: 'Continúa solo si reconoces ese sitio.', destination: 'Destino:',

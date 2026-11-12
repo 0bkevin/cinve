@@ -492,19 +492,86 @@ button:disabled, .btn:disabled { cursor: not-allowed; }
 /* Specific enough to beat Basecoat's dark-mode ghost hover rule. */
 .manual .snippet .btn[data-variant=ghost][data-copied] { color: var(--amber); }
 
-/* 404: an empty row of seats, numbered like the hero's rows. */
-.lost-row { display: flex; align-items: center; gap: 10px; margin-bottom: 36px; }
-.lost-label { margin-right: 6px; font: 800 22px/1 var(--font-display); letter-spacing: -0.02em; color: var(--amber); }
-.lost-row i { width: 30px; aspect-ratio: 1 / 0.86; border-radius: var(--seat-shape); box-shadow: inset 0 0 0 1.5px rgba(184, 167, 161, 0.45); animation: row-in .5s ease-out backwards; }
-.lost-row i:nth-of-type(2) { animation-delay: .05s; } .lost-row i:nth-of-type(3) { animation-delay: .1s; } .lost-row i:nth-of-type(4) { animation-delay: .15s; }
-.lost-row i:nth-of-type(5) { animation-delay: .2s; } .lost-row i:nth-of-type(6) { animation-delay: .25s; } .lost-row i:nth-of-type(7) { animation-delay: .3s; } .lost-row i:nth-of-type(8) { animation-delay: .35s; }
-.lost-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }
+/* 404: the page fills the first screen. "404" is spelled in lit seats on a
+   full house, under the same lit screen as the hero. */
+.lost {
+  min-height: calc(100svh - 72px); padding: clamp(32px, 7vh, 88px) 0;
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 56px clamp(40px, 6vw, 96px); align-items: center;
+}
+.lost-code { display: inline-flex; align-items: center; gap: 10px; margin: 0 0 22px; font: 600 13px/1 var(--font-sans); letter-spacing: .14em; text-transform: uppercase; color: var(--amber); }
+.lost-code::before { content: ''; width: 14px; aspect-ratio: 1 / 0.86; border-radius: var(--seat-shape); background: var(--amber); box-shadow: 0 0 12px rgba(255, 189, 63, 0.55); }
+.lost h1 { margin: 0 0 24px; font-size: clamp(44px, 5vw, 76px); line-height: .9; letter-spacing: -0.04em; font-weight: 800; }
+.lost .lead { margin: 0; max-width: 36ch; color: var(--dust); }
+.lost-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 36px; }
+
+.lost-house { position: relative; margin: 0; container-type: inline-size; }
+/* The lit seats cast a soft amber glow on the house. */
+.lost-house::before {
+  content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: radial-gradient(50% 50% at 50% 60%, rgba(255, 189, 63, 0.08), transparent);
+}
+.lost-seats {
+  /* 15 seats, 12 gaps and two aisles fill the column, with room for the
+     row letters on both sides so the seats stay centred. The tilt pivots on
+     the front row, so it keeps this width and the rows behind it shrink. */
+  --gap: clamp(3px, 1.3cqi, 9px); --aisle: calc(var(--gap) * 3.2); --label: 18px;
+  --size: min(44px, calc((100cqi - var(--label) * 2 - var(--gap) * 12 - var(--aisle) * 2) / 15));
+  display: grid; justify-items: center; gap: calc(var(--gap) * 1.3);
+  transform: perspective(1400px) rotateX(16deg); transform-origin: 50% 100%;
+}
+.lost-screen {
+  position: relative; height: 22px; margin: 0 6% 40px;
+  border-bottom: 2px solid rgba(246, 238, 228, 0.85); border-radius: 0 0 50% 50% / 0 0 100% 100%;
+  box-shadow: 0 12px 32px -10px rgba(246, 238, 228, 0.5);
+}
+.lost-screen span { position: absolute; left: 50%; bottom: -24px; translate: -50% 0; font: 600 11px/1 var(--font-sans); letter-spacing: .32em; text-transform: uppercase; color: var(--dust); }
+.lost-row { --r: 0; display: flex; align-items: center; gap: var(--gap); animation: row-in .5s calc(var(--r) * 50ms) ease-out both; }
+.lost-row b { width: var(--label); margin-left: calc(var(--label) * -1 - var(--gap)); font: 600 clamp(9px, 2.2cqi, 13px)/1 var(--font-sans); color: var(--dust); text-align: center; opacity: .7; }
+.lost-row i {
+  --b: 0; width: var(--size); aspect-ratio: 1 / 0.86; border-radius: var(--seat-shape);
+  background: var(--taken); box-shadow: inset 0 -0.24em 0 rgba(0, 0, 0, 0.3);
+}
+.lost-row i:nth-child(n+7) { --b: 1; } .lost-row i:nth-child(n+12) { --b: 2; }
+.lost-row i:nth-child(7), .lost-row i:nth-child(12) { margin-left: calc(var(--aisle) - var(--gap)); }
+/* The digits light up one after another, top row first. */
+.lost-row i[data-state=lit] {
+  background: var(--amber); box-shadow: 0 0 18px rgba(255, 189, 63, 0.5), inset 0 -0.24em 0 rgba(120, 70, 0, 0.35);
+  animation: lost-light .45s calc(450ms + var(--b) * 260ms + var(--r) * 45ms) ease-out both;
+}
+.lost-row:nth-child(2) { --r: 1; } .lost-row:nth-child(3) { --r: 2; } .lost-row:nth-child(4) { --r: 3; }
+.lost-row:nth-child(5) { --r: 4; } .lost-row:nth-child(6) { --r: 5; } .lost-row:nth-child(7) { --r: 6; }
+.lost-row:nth-child(8) { --r: 7; } .lost-row:nth-child(9) { --r: 8; }
+@keyframes lost-light { from { background: var(--taken); box-shadow: none; scale: 1; } 60% { scale: 1.15; } }
+
+/* Narrow screens: the house comes first, then the copy under it. */
+@media (max-width: 900px) {
+  .lost { grid-template-columns: minmax(0, 1fr); align-content: center; gap: 40px; }
+  .lost h1 { font-size: clamp(44px, 7vw, 64px); }
+  .lost-house { order: -1; width: 100%; max-width: 720px; justify-self: center; }
+}
 @media (max-width: 640px) {
-  .lost-row { gap: 6px; }
-  .lost-row i { width: 24px; }
+  .lost { min-height: calc(100svh - 64px); padding: 12px 0 32px; gap: 28px; }
+  .lost-screen { margin-bottom: 28px; height: 16px; }
+  .lost-code { margin-bottom: 16px; }
+  .lost h1 { margin-bottom: 16px; font-size: clamp(36px, 11vw, 44px); }
+  .lost-screen span { font-size: 10px; bottom: -20px; }
+  .lost-seats { --label: 12px; }
+  .lost .lead { font-size: 17px; }
+  .lost-actions { margin-top: 28px; }
   .lost-actions .btn { width: 100%; }
 }
-@media (prefers-reduced-motion: reduce) { .lost-row i { animation: none; } }
+/* Phones turned sideways: side by side again, so the copy and buttons stay
+   on the first screen instead of under the seats. */
+@media (max-width: 900px) and (orientation: landscape) and (max-height: 520px) {
+  .lost { grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: normal; gap: 24px 32px; padding: 12px 0 24px; }
+  .lost-house { order: 0; }
+  .lost h1 { font-size: clamp(28px, 5.4vw, 36px); margin-bottom: 12px; }
+  .lost-code { margin-bottom: 12px; }
+  .lost .lead { font-size: 15px; }
+  .lost-actions { margin-top: 20px; }
+  .lost-actions .btn[data-size=lg] { height: 44px; padding-inline: 18px; font-size: 15px; }
+}
+@media (prefers-reduced-motion: reduce) { .lost-row, .lost-row i[data-state=lit] { animation: none; } }
 
 /* "Qué puedes preguntar": the four examples beside a sample conversation. */
 .ask-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 460px); gap: 40px 64px; align-items: center; }
