@@ -88,7 +88,9 @@ test('hosted MCP authenticates every request; account links are one-use and sess
   const scriptUrl = connectHtml.match(/<script type="module" src="(\/assets\/js\/connect\.js\?v=[0-9a-f]{10})">/)![1]!;
   const script = await fetch(f.origin + scriptUrl);
   assert.match(script.headers.get('content-type')!, /text\/javascript/); assert.match(await script.text(), /\/connect\/exchange/);
-  assert.equal((await f.post('/connect/exchange', invitation, {}, { Origin: 'https://evil.test' })).status, 403);
+  const forgedOrigin = await f.post('/connect/exchange', invitation, {}, { Origin: 'https://evil.test' });
+  // The connect page translates errors by key; an untranslated message would fall back to 'generic'.
+  assert.equal(forgedOrigin.status, 403); assert.deepEqual(await forgedOrigin.json(), { error: 'Origen no permitido.', error_key: 'origin' });
   const exchanged = await f.post('/connect/exchange', invitation);
   const { browser_token, app } = await exchanged.json() as { browser_token: string; app: unknown };
   assert.equal(exchanged.status, 200); assert.equal(app, null, 'operator-issued access has no assistant app');

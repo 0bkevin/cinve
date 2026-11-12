@@ -170,7 +170,7 @@ export async function createHostedApp(options: {
       route = requestUrl.pathname;
       if (servePublicAsset(req, res) || serveInstall(req, res, origin) || serveDiscovery(req, res, origin)) return;
       if (req.method === 'GET' && req.url === '/health') { send(200, { status: 'ok' }); return; }
-      if (req.headers.host !== publicUrl.host) throw new HttpError(403, req.url === '/mcp' ? 'Origin not allowed.' : 'Origin not allowed.');
+      if (req.headers.host !== publicUrl.host) throw new HttpError(403, req.url === '/mcp' ? 'Origin not allowed.' : 'Origen no permitido.');
       // Static pages cost no database work, so they are served before any
       // limit: a user behind a shared address can always open the link page.
       const pagePath = req.url?.split('?')[0];
@@ -197,7 +197,7 @@ export async function createHostedApp(options: {
         ? localTokenRequests.hit(credential) && localSignedRequests.hit(ip) && (!block || localSignedBlockRequests.hit(block))
         : localRequests.hit(ip) && (!block || localBlockRequests.hit(block)))) {
         const excludedWebError = pagePath === '/connect' || pagePath?.startsWith('/connect/') || pagePath?.startsWith('/oauth/');
-        throw new HttpError(429, excludedWebError ? 'Too many requests. Try again later.' : 'Too many requests. Try again later.');
+        throw new HttpError(429, excludedWebError ? 'Demasiadas consultas. Inténtalo más tarde.' : 'Too many requests. Try again later.');
       }
       if (await oauth.handle(req, res, ip, {
         // OAuth routes skip the general filter above and apply these after
@@ -221,7 +221,7 @@ export async function createHostedApp(options: {
         res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, MCP-Protocol-Version, Mcp-Method, Mcp-Name');
         res.setHeader('Access-Control-Expose-Headers', 'WWW-Authenticate');
         if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
-      } else if (req.headers.origin && req.headers.origin !== origin) throw new HttpError(403, 'Origin not allowed.');
+      } else if (req.headers.origin && req.headers.origin !== origin) throw new HttpError(403, 'Origen no permitido.');
       if (req.method === 'GET' && req.url === '/internal/cleanup') {
         if (!options.cleanupSecret || !timingSafeEqual(Buffer.from(digest(req.headers.authorization ?? '')), Buffer.from(digest(`Bearer ${options.cleanupSecret}`)))) throw new HttpError(401, 'Access is required.');
         await links.cleanup(); send(200, { cleaned: true }); return;
@@ -294,7 +294,7 @@ export async function createHostedApp(options: {
         return;
       }
       if (!req.url?.startsWith('/connect/') || req.method !== 'POST') throw new HttpError(404, 'Ruta no disponible.');
-      if (req.headers.origin !== origin || (req.headers['sec-fetch-site'] && req.headers['sec-fetch-site'] !== 'same-origin')) throw new HttpError(403, 'Origin not allowed.');
+      if (req.headers.origin !== origin || (req.headers['sec-fetch-site'] && req.headers['sec-fetch-site'] !== 'same-origin')) throw new HttpError(403, 'Origen no permitido.');
       const token = req.headers['x-cinev-connection'];
       const format = typeof token === 'string' ? links.linkFormat(token, route === '/connect/exchange' ? 'invitation' : 'browser') : undefined;
       if (typeof token !== 'string' || !format || (format === 'legacy' && Date.now() >= (await oauth.legacy()).link)) throw new HttpError(403, 'Enlace no válido.');
