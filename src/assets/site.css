@@ -683,3 +683,10 @@ button:disabled, .btn:disabled { cursor: not-allowed; }
 @media (prefers-reduced-motion: reduce) {
   .demo-thinking i, .demo[data-stage] * { animation: none !important; }
 }
+
+/* The narrowest phones: the brand, the start link and the language menu stay
+   on one line in both languages instead of wrapping under each other. */
+@media (max-width: 360px) {
+  .site-nav { flex-wrap: nowrap; gap: 12px; font-size: 14px; }
+  .site-header .brand { font-size: 26px; }
+}
