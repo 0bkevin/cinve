@@ -16,9 +16,8 @@ asientos publicada por distintos cines venezolanos.
 > reciben pagos, comisiones, contraprestaciones ni beneficios económicos de los
 > cines o proveedores consultados.
 
-Cinve solo consulta y organiza información. No compra entradas, no reserva
-asientos y no interviene en pagos o transacciones. La disponibilidad puede
-cambiar antes de completar una compra.
+Cinve consulta y organiza información. La disponibilidad puede cambiar antes
+de completar una compra.
 
 ## Qué puedes consultar
 
@@ -170,7 +169,7 @@ abierto.
 
 Las consultas se limitan a información publicada por los proveedores o a datos
 que el propio usuario autoriza a consultar mediante su sesión. Cinve no elude
-pagos, no realiza compras, no modifica cuentas y no reserva asientos. Cada
+pagos y no modifica cuentas. Cada
 persona sigue siendo responsable de respetar las condiciones aplicables y de
 confirmar directamente con el cine cualquier precio, disponibilidad o compra.
 
