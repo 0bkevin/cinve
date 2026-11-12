@@ -162,7 +162,7 @@ test('Cinex showtimes carry the age rating the venue and synopsis pages show', (
 // Markup as served on 2026-11-12 by cinex-plazamayor.html, a venue that sells
 // only at the box office: no checkLogin, epoch or session ID, and date tabs
 // that skip days, so page 1 is not the day after page 0.
-const boxOfficeSession = (room: string, time: string) => `<div style='display: inline-block;margin: 5px;' onclick='javascript:void(0);' title='Función venta solo por taquilla' alt='Función venta solo por taquilla' class='cinemasessionpos'> <button type='button' class='btnprog indicadorfuncionagotada cursornoclick'><img src='assets/images/xsub.png' class='icoIdioma'><br>${room}<br>${time}</button> </div>`;
+const boxOfficeSession = (room: string, time: string, icon = 'xsub') => `<div style='display: inline-block;margin: 5px;' onclick='javascript:void(0);' title='Función venta solo por taquilla' alt='Función venta solo por taquilla' class='cinemasessionpos'> <button type='button' class='btnprog indicadorfuncionagotada cursornoclick'><img src='assets/images/${icon}.png' class='icoIdioma'>${room ? `<br>${room}` : ''}<br>${time}</button> </div>`;
 const boxOfficePage = (first = '2026-12-31') => `<div id='fecha' name='fecha' style='display:none;'>${first}</div>
   <div id='divdate0' class='carousel-cell'><div class='fecha1'>Jueves <br/> 31 <br/> Diciembre</div></div>
   <div id='divdate1' class='carousel-cell'><div class='fecha1'>Sábado <br/> 2 <br/> Enero</div></div>
@@ -174,7 +174,8 @@ test('Cinex box-office-only functions are listed with the date of their tab and 
   const c = context();
   const items = parseCinexCinemaShowtimes(boxOfficePage(), ebenezer, '30', '2026-12-31', c, 'https://www.cinex.com.ve/cinex-plazamayor.html', 'PLAZA MAYOR');
   assert.deepEqual(items.map(i => [i.date, i.time, i.starts_at, i.screen, i.language, i.rating, i.movie_id]).sort(), [
-    ['2026-12-31', '00:10', '2026-12-31T00:10:00-04:00', '02', 'subtitulada', 'A', 'ebenezer'],
+    // After midnight the tab's business date may be the previous calendar day: no starts_at.
+    ['2026-12-31', '00:10', undefined, '02', 'subtitulada', 'A', 'ebenezer'],
     ['2026-12-31', '16:35', '2026-12-31T16:35:00-04:00', '02', 'subtitulada', 'A', 'ebenezer'],
   ]);
   assert.ok(items.every(i => /^taquilla-[0-9a-f]{20}$/.test(i.id)));
@@ -183,6 +184,11 @@ test('Cinex box-office-only functions are listed with the date of their tab and 
   assert.equal(c.partial, false);
   assert.ok(c.warnings.some(w => /box office/.test(w) && /cannot be used for prices or seats/.test(w)), c.warnings.join(' | '));
   assert.ok(!c.warnings.some(w => /no showtimes/.test(w)));
+  assert.ok(c.warnings.some(w => /after-midnight ones starts_at is omitted/.test(w)), c.warnings.join(' | '));
+  // A dubbed and a subtitled function at the same time, without a room, are two showtimes.
+  const twin = boxOfficePage().replace(boxOfficeSession('02', '12:10 am'), `${boxOfficeSession('', '07:00 pm', 'xes')}${boxOfficeSession('', '07:00 pm')}`);
+  assert.deepEqual(parseCinexCinemaShowtimes(twin, ebenezer, '30', '2026-12-31', context(), 'https://www.cinex.com.ve/cinex-plazamayor.html')
+    .filter(i => i.time === '19:00').map(i => i.language).sort(), ['es', 'subtitulada']);
   // The second tab is 2 January of the next year, not 1 January.
   assert.deepEqual(parseCinexCinemaShowtimes(boxOfficePage(), ebenezer, '30', '2027-01-01', context(), 'https://www.cinex.com.ve/cinex-plazamayor.html'), []);
   assert.deepEqual(parseCinexCinemaShowtimes(boxOfficePage(), ebenezer, '30', '2027-01-02', context(), 'https://www.cinex.com.ve/cinex-plazamayor.html').map(i => [i.date, i.time, i.screen]), [['2027-01-02', '19:00', '03']]);
@@ -194,6 +200,28 @@ test('Cinex box-office functions without a confirmed date are omitted as partial
   assert.deepEqual(parseCinexCinemaShowtimes(undated, ebenezer, '30', '2026-12-31', c, 'https://www.cinex.com.ve/cinex-plazamayor.html'), []);
   assert.equal(c.partial, true);
   assert.ok(c.warnings.some(w => /date could not be confirmed/.test(w)));
+});
+
+test('Cinex tab dates accept the spellings Cinex may use and refuse a calendar that contradicts its first date', () => {
+  const url = 'https://www.cinex.com.ve/cinex-plazamayor.html';
+  const dated = (page: string, date: string) => { const c = context(); return { items: parseCinexCinemaShowtimes(page, ebenezer, '30', date, c, url), c }; };
+  const variants = [
+    boxOfficePage().replace('>2026-12-31<', '>2026-12-31 00:00:00<'),
+    boxOfficePage().replace('Diciembre', 'Dic').replace('Enero', 'Ene.'),
+    boxOfficePage().replace('Diciembre', 'Diciembre 2026').replace('Enero', 'Enero 2027'),
+  ];
+  for (const page of variants) {
+    assert.equal(dated(page, '2027-01-02').items.length, 1, page.slice(0, 400));
+    assert.equal(dated(page, '2026-12-31').items.length, 2);
+  }
+  const september = boxOfficePage('2026-09-30').replace('31 <br/> Diciembre', '30 <br/> Setiembre').replace('2 <br/> Enero', '2 <br/> Octubre');
+  assert.deepEqual(dated(september, '2026-10-02').items.map(i => i.date), ['2026-10-02']);
+  // A first tab that is not #fecha, or a tab before it, dates nothing: partial, not a guessed day.
+  for (const page of [boxOfficePage('2026-12-30'), boxOfficePage().replace('2 <br/> Enero', '30 <br/> Diciembre')]) {
+    const { items, c } = dated(page, page.includes('2026-12-30') ? '2026-12-31' : '2026-12-30');
+    assert.deepEqual(items, []);
+    assert.equal(c.partial, true);
+  }
 });
 
 test('Cinex prices and seats for a box-office function say so without reading the site or asking for a login', async () => {

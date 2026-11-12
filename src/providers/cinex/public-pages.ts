@@ -154,10 +154,15 @@ export function parseCinexCinemaShowtimes(html: string, movies: DataItem[], cine
           // Cinex publishes no ID for these functions. This one identifies the listing
           // (venue, date, time, room, film) so repeated reads agree; it does not exist
           // upstream and cannot be used for prices or seats.
-          const id = `${cinexBoxOfficePrefix}${createHash('sha256').update(JSON.stringify([cinemaId, date, time, details.screen ?? null, movie.id])).digest('hex').slice(0, 20)}`;
+          // Version and format are part of it: a dubbed and a subtitled function can share a time.
+          const id = `${cinexBoxOfficePrefix}${createHash('sha256').update(JSON.stringify([cinemaId, date, time, details.screen ?? null, movie.id, details.language ?? null, details.format ?? null])).digest('hex').slice(0, 20)}`;
           boxOffice++;
+          // The tab is a business date: a function at 00:10 may be the next calendar
+          // day. Online sessions carry an epoch; these do not, so keep the time only.
+          const overnight = Number(time.slice(0, 2)) < 5;
+          if (overnight) providerWarning(c, 'cinex-box-office-overnight', 'Cinex groups box-office-only showtimes by business date; for after-midnight ones starts_at is omitted because the calendar date is not confirmed.');
           items.set(`${cinemaId}:${id}`, { kind: 'showtime', id, name: movie.name, cinema_id: cinemaId, cinema_name: cinemaName, movie_id: movie.id,
-            date, time, starts_at: `${date}T${time}:00-04:00`, rating, ...details, url });
+            date, time, ...(overnight ? {} : { starts_at: `${date}T${time}:00-04:00` }), rating, ...details, url });
         });
       }
     }
@@ -238,19 +243,28 @@ const spanishMonths = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'j
  */
 function cinexTabDates($: CheerioAPI): Map<number, string> {
   const dates = new Map<number, string>();
-  const first = /^(\d{4})-(\d{2})-\d{2}$/.exec($('#fecha').first().text().trim());
+  const first = /^(\d{4})-(\d{2})-(\d{2})\b/.exec($('#fecha').first().text().trim());
   if (!first) return dates;
-  const year = Number(first[1]), month = Number(first[2]);
+  const fecha = `${first[1]}-${first[2]}-${first[3]}`, year = Number(first[1]), month = Number(first[2]);
+  const start = Date.parse(`${fecha}T12:00:00Z`);
+  if (Number.isNaN(start)) return dates;
   $('[id^="divdate"]').each((_, tab) => {
     const index = /^divdate(\d+)$/.exec($(tab).attr('id') ?? '')?.[1];
-    const label = folded($(tab).text()).replace(/\s+/g, ' ').trim().match(/(\d{1,2}) ([a-z]+)$/);
-    const m = label ? spanishMonths.indexOf(label[2] ?? '') + 1 : 0;
+    // "Jueves 12 Noviembre", also "12 Nov", "12 Setiembre" or "12 Noviembre 2026".
+    const label = folded($(tab).text()).replace(/\s+/g, ' ').trim().match(/(\d{1,2}) ([a-z]+)\.?(?: (\d{4}))?$/);
+    const name = label?.[2] ?? '';
+    const m = name.length >= 3 ? spanishMonths.findIndex(full => full.startsWith(name) || (name === 'setiembre' && full === 'septiembre')) + 1 : 0;
     if (index === undefined || !label || !m) return;
     // A calendar that starts in December continues into January of the next year.
-    const y = m < month ? year + 1 : year, d = Number(label[1]);
+    const y = label[3] ? Number(label[3]) : m < month ? year + 1 : year, d = Number(label[1]);
     const iso = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-    if (new Date(`${iso}T12:00:00Z`).toISOString().slice(0, 10) === iso) dates.set(Number(index), iso);
+    const at = Date.parse(`${iso}T12:00:00Z`);
+    // A real date, on or after the first one and within the weeks a calendar shows.
+    if (Number.isNaN(at) || new Date(at).toISOString().slice(0, 10) !== iso || at < start || at - start > 60 * 86400000) return;
+    dates.set(Number(index), iso);
   });
+  // The first tab is the page's first date; if they disagree, no tab is trusted.
+  if (dates.has(0) ? dates.get(0) !== fecha : $('#divdate0').length > 0) dates.clear();
   return dates;
 }
 
