@@ -475,3 +475,22 @@ test('Cinex: a shorter row is centered as cinex.com.ve centers it (Parque Cerro 
   assert.equal(hx('A1') - hx('B1'), 15, 'half a 30-unit cell');
   assert.deepEqual(cinexRowShifts(html(row('G', g) + row('F', g.map(c => c.replaceAll('G', 'F'))))), {}, 'equal rows need no shift');
 });
+
+test('wheelchair seats are flagged by Cines Unidos and Cinex, and drawn blue with a wheelchair, unless taken', async () => {
+  // cinesunidos.com draws status 3 blue with a wheelchair icon; cinex.com.ve marks them class "wheelchair" (2026-11-11).
+  const cu = parseCinesUnidosSeats({ seats: { areas: [{ number: 1, areaCategoryCode: 'x', rows: [{ rowIndexZeroBased: 0, physicalName: 'M', seats: [0, 3, 2].map((status, c) => ({ id: String(c + 1), status, position: { areaNumber: 1, rowIndex: 0, columnIndex: c } })) }] }] } });
+  assert.deepEqual(cu.map(s => [s.label, s.status, s.accessible ?? false]), [['M:1', 'available', false], ['M:2', 'unavailable', true], ['M:3', 'occupied', false]]);
+  const cinex = parseCinexSeats(`<a id="btnasientosatras" href="boletos.php?cinemaid=IPC&sessionid=s1">Atras</a><div id="mapcontent"><div class="row centermap"><div class="rowletter">I</div><div class="seat wheelchair" alt="3" id="I3" onclick="javascript:decideAsientoNew('I3','0','0','1','0000000001','1','N');" title="Asiento I3"></div></div></div>`, { provider: 'cinex', cinema_id: 'IPC', session_id: 's1' });
+  assert.deepEqual(cinex.map(s => [s.label, s.status, s.accessible]), [['I3', 'unavailable', true]]);
+  // A taken wheelchair seat is drawn as taken.
+  const seats = [...cu, { ...nth(cu, 0), label: 'M:4', column_index: 3, status: 'occupied' as const, accessible: true }];
+  const svg = renderSeatMapSvg(seats, seatLayout('cinesunidos'), header);
+  assert.match(svg, /<title>M:2: silla de ruedas<\/title><rect [^>]*fill="#2f6bd8"\/><g transform="translate\([^)]*\)" fill="none" stroke="#f6eee4"/);
+  assert.match(svg, /<title>M:4: ocupado<\/title>/);
+  assert.match(svg, />Silla de ruedas \(1\)</); assert.match(svg, />Ocupado \(2\)</); assert.doesNotMatch(svg, /No disponible \(/);
+  // Wheelchair seats are not free seats: the headline counts only status=available.
+  assert.match(svg, /text-anchor="end">1<\/text><text[^>]*>libres de 4</);
+  const png = decodePng(await renderSeatMapPng(svg)), scale = png.width / Number(capture(svg, /width="(\d+)"/));
+  const at = svg.match(/<title>M:2: [^<]*<\/title><rect x="([\d.]+)" y="([\d.]+)"/);
+  assert.equal(png.at(Math.round((Number(nth(at ?? [], 1)) + 2) * scale), Math.round((Number(nth(at ?? [], 2)) + 2) * scale)), '#2f6bd8');
+});

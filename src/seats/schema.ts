@@ -14,6 +14,7 @@ export const Seat = z.object({
   row_index: coordinate, column_index: coordinate,
   status: z.enum(['available', 'occupied', 'unavailable', 'unknown']),
   provider_status: z.string().max(40), category: z.string().max(100).optional(),
+  accessible: z.boolean().optional().describe('true: asiento para silla de ruedas según la web del cine. Su status no cambia (restringido salvo que esté ocupado).'),
 });
 export type SeatData = z.infer<typeof Seat>;
 /** The function as the seat page names it; every field is optional. */

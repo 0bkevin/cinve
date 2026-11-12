@@ -6,7 +6,11 @@ import { initWasm, Resvg } from '@resvg/resvg-wasm';
 /** Every seat state, in legend order. */
 const seatStatuses = ['available', 'occupied', 'unavailable', 'unknown'] as const;
 export type SeatStatus = typeof seatStatuses[number];
-export type MapSeat = { label: string; row: string; area: string; row_index: number; column_index: number; status: SeatStatus };
+/** accessible: a wheelchair seat, drawn blue with a wheelchair icon unless it is taken. */
+export type MapSeat = { label: string; row: string; area: string; row_index: number; column_index: number; status: SeatStatus; accessible?: boolean | undefined };
+/** What a seat is drawn as: its status, or a wheelchair seat that is not taken. */
+type SeatKind = SeatStatus | 'accessible';
+const kindOf = (s: Pick<MapSeat, 'status' | 'accessible'>): SeatKind => s.accessible && s.status !== 'occupied' ? 'accessible' : s.status;
 /** The provider-verified orientation from SeatResult.layout. */
 /** row_shift: rows the provider centers because they are shorter, in seats (may be half a seat). */
 export type MapLayout = { screen: 'top' | 'bottom' | 'unverified'; column_order: 'ascending' | 'descending'; row_shift?: Record<string, number> | undefined };
@@ -23,12 +27,18 @@ const ink = {
   night: '#120a0e', rim: '#2a1820', line: '#33212a', cream: '#f6eee4', dust: '#b8a7a1', faint: '#8c7d7a', amber: '#ffbd3f',
 } as const;
 /** Free and taken seats are flat solid fills; restricted and unknown ones are outlines (dashed when restricted). */
-const palette: Record<SeatStatus, { fill: string; stroke?: string; dash?: boolean; text: string; name: string }> = {
+const palette: Record<SeatKind, { fill: string; stroke?: string; dash?: boolean; text: string; name: string }> = {
   available: { fill: '#a92037', text: ink.cream, name: 'Libre' },
   occupied: { fill: '#2e1b23', text: '#7d6670', name: 'Ocupado' },
   unavailable: { fill: '#1b1016', stroke: '#6b4a5a', dash: true, text: '#8a7480', name: 'No disponible' },
   unknown: { fill: ink.night, stroke: ink.dust, text: ink.cream, name: 'Desconocido' },
+  // Blue, as the cinemas draw them; the seat shows a wheelchair instead of its number (its title keeps the label).
+  accessible: { fill: '#2f6bd8', text: ink.cream, name: 'Silla de ruedas' },
 };
+const kinds: SeatKind[] = ['available', 'occupied', 'accessible', 'unavailable', 'unknown'];
+/** A wheelchair icon centred in a seat box, in the seat's text colour. */
+const wheelchair = (x: number, y: number, colour: string) => `<g transform="translate(${round(x + SEAT / 2 - 6)} ${round(y + SEAT_H / 2 - 7)})" fill="none" stroke="${colour}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">`
+  + `<circle cx="6.2" cy="1.9" r="1.5" fill="${colour}" stroke="none"/><path d="M6 4.4v4h4.2l1.4 3.8"/><path d="M4.4 6.2a3.9 3.9 0 1 0 5.3 4.7"/></g>`;
 /** Row pitch and seat box: seats keep the site's 1 : 0.86 proportion. */
 const CELL = 30, SEAT = 26, SEAT_H = 22, LABEL = 30, MAX_LABEL = 96, PAD = 28;
 const fonts = { text: "'Instrument Sans', system-ui, sans-serif", display: "'Bricolage Grotesque', 'Instrument Sans', system-ui, sans-serif" };
@@ -96,6 +106,9 @@ export function renderSeatMapSvg(seats: MapSeat[], layout: MapLayout, header: Ma
   const left = (width - gridWidth) / 2, right = width - PAD;
   const counts: Record<SeatStatus, number> = { available: 0, occupied: 0, unavailable: 0, unknown: 0 };
   for (const s of seats) counts[s.status]++;
+  // The legend counts what is drawn: a wheelchair seat that is not taken has its own entry.
+  const drawn: Record<SeatKind, number> = { available: 0, occupied: 0, unavailable: 0, unknown: 0, accessible: 0 };
+  for (const s of seats) drawn[kindOf(s)]++;
   const out: string[] = [];
   let y = PAD;
   const fit = (value: string, size: number, room: number, face: Face = 'text') => {
@@ -148,10 +161,10 @@ export function renderSeatMapSvg(seats: MapSeat[], layout: MapLayout, header: Ma
       }
       for (const s of rowSeats) {
         const col = place(s) - minCol, shown = layout.column_order === 'descending' ? cols - 1 - col : col;
-        const x = left + shown * CELL + (CELL - SEAT) / 2, c = palette[s.status], number = seatNumber(s);
+        const kind = kindOf(s), x = left + shown * CELL + (CELL - SEAT) / 2, c = palette[kind], number = seatNumber(s);
         const size = numberSize, fitted = numbers.get(number) ?? number;
-        out.push(`<g><title>${escape(`${s.label}: ${c.name.toLowerCase()}`)}</title><rect x="${x}" y="${cy}" width="${SEAT}" height="${SEAT_H}" rx="4" ${seatPaint(s.status, 1)}/>`
-          + `<text x="${x + SEAT / 2}" y="${round(cy + SEAT_H / 2 + size / 2.8 - 1)}" font-size="${size}" fill="${c.text}">${escape(fitted)}</text></g>`);
+        out.push(`<g><title>${escape(`${s.label}: ${c.name.toLowerCase()}`)}</title><rect x="${x}" y="${cy}" width="${SEAT}" height="${SEAT_H}" rx="4" ${seatPaint(kind, 1)}/>`
+          + (kind === 'accessible' ? wheelchair(x, cy, c.text) : `<text x="${x + SEAT / 2}" y="${round(cy + SEAT_H / 2 + size / 2.8 - 1)}" font-size="${size}" fill="${c.text}">${escape(fitted)}</text>`) + '</g>');
       }
     }
     out.push('</g>');
@@ -160,10 +173,10 @@ export function renderSeatMapSvg(seats: MapSeat[], layout: MapLayout, header: Ma
   if (layout.screen === 'bottom') { screen(y, 'bottom'); y += 46; }
   y += 8;
   // The legend wraps instead of running off a narrow map.
-  const legend = seatStatuses.filter(k => k === 'available' || k === 'occupied' || counts[k] > 0);
+  const legend = kinds.filter(k => k === 'available' || k === 'occupied' || drawn[k] > 0);
   let lx = PAD;
   for (const k of legend) {
-    const label = `${palette[k].name} (${counts[k]})`, item = 24 + textWidth(label, 12.5);
+    const label = `${palette[k].name} (${drawn[k]})`, item = 24 + textWidth(label, 12.5);
     if (lx > PAD && lx + item > right) { lx = PAD; y += 24; }
     out.push(`<rect x="${lx}" y="${y + 1}" width="17" height="14.5" rx="3" ${seatPaint(k, 1.25)}/>`);
     out.push(`<text x="${lx + 24}" y="${y + 12.5}" font-size="12.5" fill="${ink.dust}">${escape(label)}</text>`);
@@ -187,7 +200,7 @@ export function renderSeatMapSvg(seats: MapSeat[], layout: MapLayout, header: Ma
 }
 
 /** A seat's paint: a solid fill, plus an outline (dashed when restricted) for the states drawn as outlines. */
-function seatPaint(status: SeatStatus, strokeWidth: number) {
+function seatPaint(status: SeatKind, strokeWidth: number) {
   const c = palette[status];
   return `fill="${c.fill}"${c.stroke ? ` stroke="${c.stroke}" stroke-width="${strokeWidth}"${c.dash ? ' stroke-dasharray="3 2"' : ''}` : ''}`;
 }

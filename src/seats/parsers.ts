@@ -110,6 +110,8 @@ export function parseCinesUnidosSeats(data: unknown): SeatData[] {
         // Accessibility (3), selected (4), blocked/broken (5/6) are not free.
         status: ['0', '7'].includes(status) ? 'available' : ['1', '2'].includes(status) ? 'occupied' : ['3', '4', '5', '6'].includes(status) ? 'unavailable' : 'unknown',
         provider_status: status, category: text(a.areaCategoryCode),
+        // cinesunidos.com draws status 3 in blue with a wheelchair icon (2026-11-11).
+        ...(status === '3' ? { accessible: true } : {}),
       } satisfies SeatData;
     }))));
 }
@@ -170,7 +172,7 @@ export function parseCinexSeats(html: string, q: Query): SeatData[] {
       const available = call && seat.attr('alt') === '0' && classes.length === 1 && classes.every(c => freeClasses.has(c));
       result.push({ id, label: id, row, area: 'Sala', row_index: rowIndex, column_index: columnIndex,
         status: occupied ? 'occupied' : restricted ? 'unavailable' : available ? 'available' : 'unknown',
-        provider_status: seat.attr('alt') ?? 'unknown', category: call?.[5] });
+        provider_status: seat.attr('alt') ?? 'unknown', category: call?.[5], ...(classes.some(c => /wheelchair/.test(c)) ? { accessible: true } : {}) });
     });
   });
   if (result.length !== $('#mapcontent [id], #mapcontent [class$="-occupied"], #mapcontent .occupied:not([id])').length) throw new DataError('error', 'El mapa Cinex contiene asientos fuera de filas reconocidas.');
