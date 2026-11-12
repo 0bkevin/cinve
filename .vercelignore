@@ -6,3 +6,10 @@ dist
 test
 docs
 coverage
+# Not needed to build or run the hosted server (build:hosted reads only
+# package*.json, tsconfig*.json, server.ts, src/ and migrations/).
+.github
+scripts
+*.md
+mcp.example.json
+tsconfig.check.json

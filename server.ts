@@ -1,7 +1,7 @@
-import { serveInstall } from './src/install.js';
+import { serveInstall } from './src/web/install.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { createHostedApp } from './src/hosted.js';
-import { databasePool } from './src/hosted-store.js';
+import { createHostedApp } from './src/hosted/app.js';
+import { databasePool } from './src/hosted/store.js';
 const apps = new Map<string, ReturnType<typeof createHostedApp>>();
 export default async function handler(req: IncomingMessage, res: ServerResponse) {
   const configuredOrigin = process.env.CINEV_PUBLIC_URL || 'https://cinve.kevinbravo.com';
@@ -12,8 +12,8 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     let app = apps.get(publicOrigin);
     if (!app) {
       const { CINEV_PUBLIC_URL, CINEV_ENCRYPTION_KEY } = process.env;
-      if (!CINEV_PUBLIC_URL || !/^[a-f0-9]{64}$/.test(CINEV_ENCRYPTION_KEY ?? '')) throw new Error('Missing configuration');
-      app = createHostedApp({ publicUrl: publicOrigin, pool: databasePool(), key: Buffer.from(CINEV_ENCRYPTION_KEY!, 'hex'),
+      if (!CINEV_PUBLIC_URL || CINEV_ENCRYPTION_KEY === undefined || !/^[a-f0-9]{64}$/.test(CINEV_ENCRYPTION_KEY)) throw new Error('Missing configuration');
+      app = createHostedApp({ publicUrl: publicOrigin, pool: databasePool(), key: Buffer.from(CINEV_ENCRYPTION_KEY, 'hex'),
         trustedVercelProxy: true, cleanupSecret: process.env.CRON_SECRET });
       apps.set(publicOrigin, app);
     }

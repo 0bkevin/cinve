@@ -1,13 +1,16 @@
-import { getSeatMap } from './seats.js';
-import { CinexCinemaCatalog } from './cinex-cinemas.js';
+import { getSeatMap } from './seats/seat-map.js';
+import { CinexCinemaCatalog } from './providers/cinex/venues.js';
 import { DataError, folded, operationItemSchema, PublicUrl, Result, today, Id } from './core.js';
 import type { DataItem, Operation, Query, QueryResult } from './core.js';
-import { HttpClient, ReadContext } from './http.js';
-import type { CallOptions } from './http.js';
-import { cinepic, cinesunidos, cinex } from './providers.js';
-import { supercines } from './supercines.js';
-import { grancine } from './grancine.js';
-import { AuthProvider } from './auth.js';
+import { HttpClient } from './http/client.js';
+import { ReadContext } from './http/read-context.js';
+import type { CallOptions } from './http/read-context.js';
+import { cinex } from './providers/cinex/adapter.js';
+import { cinesunidos } from './providers/cinesunidos/adapter.js';
+import { cinepic } from './providers/cinepic/adapter.js';
+import { supercines } from './providers/supercines/adapter.js';
+import { grancine } from './providers/grancine/adapter.js';
+import { AuthProvider } from './auth/sessions.js';
 
 const resultWarningLimit = 64;
 const resultWarningCharacters = 8192;
@@ -32,8 +35,10 @@ function boundedWarnings(warnings: string[]): string[] {
   }
   if (omitted) {
     const aggregate = `${omitted} repeated or excess warnings were omitted; check partial and the source data.`;
-    while (output.length && (output.length >= resultWarningLimit || characters + aggregate.length > resultWarningCharacters)) {
-      characters -= output.pop()!.length;
+    while (output.length >= resultWarningLimit || characters + aggregate.length > resultWarningCharacters) {
+      const dropped = output.pop();
+      if (dropped === undefined) break;
+      characters -= dropped.length;
       omitted++;
     }
     output.push(aggregate);
@@ -52,8 +57,8 @@ const resultSourceLimit = 10;
 function boundedSources(sources: QueryResult['sources'], warnings: string[]): QueryResult['sources'] {
   if (sources.length <= resultSourceLimit) return sources;
   const oldest = sources.reduce((a, b) => (Date.parse(b.fetched_at) < Date.parse(a.fetched_at) ? b : a));
-  const kept = sources.slice(0, resultSourceLimit - 1);
-  kept.push(kept.includes(oldest) ? sources[resultSourceLimit - 1] : oldest);
+  const kept = sources.slice(0, resultSourceLimit);
+  if (!kept.includes(oldest)) kept[kept.length - 1] = oldest;
   warnings.push(`${sources.length} sources were queried; ${kept.length} are listed, including the oldest (${oldest.fetched_at}).`);
   return kept;
 }
@@ -61,7 +66,7 @@ function boundedSources(sources: QueryResult['sources'], warnings: string[]): Qu
 export const capabilities = {
   cinepic: { seats: 'public_page_data_ascii', cities: 'public', cinemas: 'public', movies: 'public_api', showtimes: 'public_api', prices: 'page_data_ves_and_derived_usd', concessions: 'public_api_empty_in_samples' },
   cinesunidos: { seats: 'authenticated_api_ascii', cities: 'public_api', cinemas: 'page_data', movies: 'page_data', showtimes: 'page_data', prices: 'authenticated_api', concessions: 'public_api' },
-  supercines: { seats: 'not_supported', cities: 'public_form_api', cinemas: 'public_form_api', movies: 'public_api_billboard_by_cinema', showtimes: 'public_form_html_per_title', prices: 'public_form_html_ves_and_derived_usd_requires_movie_and_date_account_optional', concessions: 'public_form_html_ves' },
+  supercines: { seats: 'account_opens_and_cancels_a_one_ticket_purchase_without_picking_seats', cities: 'public_form_api', cinemas: 'public_form_api', movies: 'public_api_billboard_by_cinema', showtimes: 'public_form_html_per_title', prices: 'public_form_html_ves_and_derived_usd_requires_movie_and_date_account_optional', concessions: 'public_form_html_ves' },
   grancine: { seats: 'not_published', cities: 'html_directory_with_known_cities', cinemas: 'html', movies: 'html_titles_with_functions', showtimes: 'html_per_venue_and_date_no_upstream_ids', prices: 'not_published', concessions: 'not_published' },
   cinex: { seats: 'authenticated_html_ascii', cities: 'public_api', cinemas: 'html', movies: 'html_general_catalog', showtimes: 'html_requires_cinema_or_movie', prices: 'authenticated_html_requires_session', concessions: 'authenticated_html' },
 };
@@ -93,7 +98,7 @@ export class CinemaService {
           }
         }
         // Validate inside the guarded path, before filtering/pagination can hide a bad record.
-        const item = operationItemSchema(op).parse(candidate) as DataItem;
+        const item: DataItem = operationItemSchema(op).parse(candidate);
         if (['movie', 'showtime', 'cinema'].includes(item.kind)) Id.parse(item.id);
         const key = `${item.kind}:${item.cinema_id ?? ''}:${item.id}`;
         if (item.kind === 'showtime') {

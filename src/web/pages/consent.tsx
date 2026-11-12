@@ -4,7 +4,7 @@ import { Alert, LinkButton, icons } from '../ui.js';
 import { catalog } from '../content.js';
 import { localeUrl, type Locale } from '../locale.js';
 
-export type Consent = { app: string; destination: string; id: string; csrf: string; publisher?: string; recognized: boolean; cinemaLogin: boolean; error?: string; provider?: string; username?: string };
+export type Consent = { app: string; destination: string; id: string; csrf: string; publisher?: string | undefined; recognized: boolean; cinemaLogin: boolean; error?: string | undefined; provider?: string | undefined; username?: string | undefined };
 const fillApp = (text: string, app: string) => text.replace('{app}', app);
 
 export function authorizationPage(o: Consent, locale: Locale = 'es', path = '/oauth/authorize') {

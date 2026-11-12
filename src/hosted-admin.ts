@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { migrationSql } from './migrations.js';
-import { HostedUsers, databasePool, transaction } from './hosted-store.js';
-import { ConnectionLinks } from './hosted-links.js';
+import { migrationSql } from './hosted/migrations.js';
+import { HostedUsers, databasePool, transaction } from './hosted/store.js';
+import { ConnectionLinks } from './hosted/connection-links.js';
 async function main() {
   const [command, id, ...extra] = process.argv.slice(2);
   if (extra.length) throw new Error('Invalid arguments.');

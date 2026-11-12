@@ -6,7 +6,7 @@ import type { Locale } from './locale.js';
 import { canonicalUrl, localeUrl } from './locale.js';
 
 /** Search and social metadata, only for indexable public pages. */
-function SocialMeta({ canonical, title, description, locale, path }: { canonical?: string; title: string; description: string; locale: Locale; path: string }) {
+function SocialMeta({ canonical, title, description, locale, path }: { canonical?: string | undefined; title: string; description: string; locale: Locale; path: string }) {
   const copy = catalog(locale).landing;
   const imagePath = locale === 'en' ? '/og-en.png' : '/og.png';
   const image = canonical ? new URL(assetUrl(imagePath), canonical).href : undefined;

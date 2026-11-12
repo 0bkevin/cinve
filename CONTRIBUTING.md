@@ -18,6 +18,11 @@ npm run build
 
 `npm run smoke` queries the real cinemas; it's optional.
 
+[`AGENTS.md`](AGENTS.md) maps where each part of the code lives and the rules
+every change must follow. `test/` mirrors `src/`: for example,
+`test/http/client.test.ts` tests `src/http/client.ts`, and
+`test/providers/cinex-venues.test.ts` tests `src/providers/cinex/venues.ts`.
+
 ## Pull requests
 
 - One problem per pull request, with tests if behavior changes.

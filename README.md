@@ -9,8 +9,7 @@ Cines Unidos, Cinepic, Supercines and Gran Cine** in Venezuela.
 [Website](https://cinve.kevinbravo.com) ·
 [Report an issue](https://github.com/0bkevin/cinve/issues/new/choose)
 
-> An independent, non-profit project, not affiliated with any cinema. It does not
-> buy tickets or reserve seats.
+> An independent, non-profit project, not affiliated with any cinema.
 
 ## Usage
 

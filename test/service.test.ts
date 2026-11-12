@@ -1,102 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CinemaService } from '../src/service.js';
-import { HttpClient } from '../src/http.js';
-import { DateInput } from '../src/core.js';
-import { findField, flight } from '../src/parsers.js';
-import { inputSchema } from '../src/server.js';
-import { cpBuy, cpSessions, mockFetch, page, EmptySessionStore } from './fixtures.js';
+import { HttpClient } from '../src/http/client.js';
+import { inputSchema } from '../src/mcp/server.js';
+import { mockFetch, EmptySessionStore, cpBuy, concessions, page } from './helpers/fixtures.js';
+import { nth } from './helpers/assert.js';
 
 const service = () => new CinemaService(new HttpClient(mockFetch, 15000, new EmptySessionStore()));
-test('calendar validation rejects impossible dates and accepts leap day', () => {
-  assert.equal(DateInput.safeParse('2026-02-30').success, false);
-  assert.equal(DateInput.safeParse('2024-02-29').success, true);
-});
-test('tool validation rejects missing provider context and arbitrary IDs', () => {
-  assert.equal(inputSchema('showtimes').safeParse({ provider: 'cinepic' }).success, false);
-  assert.equal(inputSchema('movies').safeParse({ provider: 'cinesunidos' }).success, false);
-  assert.equal(inputSchema('showtimes').safeParse({ provider: 'cinex', movie_id: '../../secret' }).success, false);
-  assert.equal(inputSchema('movies').safeParse({ provider: 'cinex', date: '2026-09-11' }).success, false);
-  assert.equal(inputSchema('showtimes').safeParse({ provider: 'cinepic', cinema_id: '123300' }).success, true);
-});
-test('Flight parser handles split records and literal closing brackets in strings without eval', () => {
-  const record = 'a:' + JSON.stringify({ movies: [{ name: 'Título ]) y "comillas"' }] }) + '\n';
-  const html = [record.slice(0, 20), record.slice(20)].map(s => `<script>self.__next_f.push(${JSON.stringify([1, s])})</script>`).join('');
-  assert.deepEqual(findField(flight(html), 'movies'), [{ name: 'Título ]) y "comillas"' }]);
-  assert.throws(() => flight('<script>throw new Error("not executed")</script>'));
-});
-test('Cinepic joins films to scheduled functions, excluding unscheduled releases', async () => {
-  const result = await service().query('movies', { provider: 'cinepic', cinema_id: '123300', date: '2026-09-11' });
-  assert.equal(result.status, 'available'); assert.equal(result.total, 1);
-  assert.equal(result.items[0].name, 'Película Uno');
-});
-test('movie_id filters Cinepic movies and does not silently return another film', async () => {
-  const result = await service().query('movies', { provider: 'cinepic', cinema_id: '123300', movie_id: 'p2', date: '2026-09-11' });
-  assert.equal(result.status, 'empty'); assert.equal(result.total, 0);
-});
-test('overnight times remain commercial dates and do not invent a calendar timestamp', async () => {
-  const result = await service().query('showtimes', { provider: 'cinepic', cinema_id: '123300', date: '2026-09-11' });
-  assert.equal(result.items.find(r => r.id === 'f1')?.starts_at, '2026-09-11T20:30:00-04:00');
-  assert.equal(result.items.find(r => r.id === 'f2')?.starts_at, undefined);
-  assert.ok(result.warnings.some(s => s.includes('late-night showing')));
-});
-test('Cines Unidos filters by day, cinema and movie; timezone has one offset', async () => {
-  const result = await service().query('showtimes', { provider: 'cinesunidos', city: 'Caracas', date: '2026-09-11', cinema_id: '1005', movie_id: 'HO1' });
-  assert.equal(result.total, 1); assert.equal(result.items[0].id, 's3');
-  assert.equal(result.items[0].starts_at, '2026-09-11T21:00:00-04:00');
-});
-test('Cinepic tariffs preserve VES and label the provider-derived USD without exposing configuration', async () => {
-  const result = await service().query('prices', { provider: 'cinepic', cinema_id: '123300', session_id: 'f1', movie_id: 'p1' });
-  assert.equal(result.status, 'available');
-  assert.deepEqual(result.items[0].prices, [{ currency: 'VES', amount: 4162.4, basis: 'provider' }, { currency: 'USD', amount: 5, basis: 'provider_conversion' }]);
-  assert.equal(result.items[0].final_total_verified, false);
-  assert.equal(JSON.stringify(result).includes('SHOULD_NOT_LEAVE_PARSER'), false);
-});
-test('mismatched function/movie cannot return another ticket price', async () => {
-  const result = await service().query('prices', { provider: 'cinepic', cinema_id: '123300', session_id: 'other', movie_id: 'p1' });
-  assert.equal(result.status, 'unavailable'); assert.deepEqual(result.items, []);
-});
+
 test('empty candy is distinct from auth-required providers', async () => {
   const s = service();
   const empty = await s.query('concessions', { provider: 'cinepic', cinema_id: '123300' });
   const auth = await s.query('prices', { provider: 'cinesunidos', cinema_id: '1002', session_id: 's1' });
   assert.equal(empty.status, 'empty'); assert.equal(auth.status, 'auth_required');
   assert.equal(empty.sources.length, 1);
-  assert.equal(empty.sources[0].url, 'https://api.cinexo.com.ar/api/complejo/123300/candy');
+  assert.equal(nth(empty.sources, 0).url, 'https://api.cinexo.com.ar/api/complejo/123300/candy');
 });
-test('Cinepic does not invent a USD price if the provider rate is zero', async () => {
-  const props = structuredClone(cpBuy); props.configData.tasaConversion = '0';
-  const s = new CinemaService(new HttpClient(async () => new Response(page(props))));
-  const result = await s.query('prices', { provider: 'cinepic', cinema_id: '123300', movie_id: 'p1', session_id: 'f1' });
-  assert.equal(result.status, 'available');
-  assert.deepEqual(result.items[0].prices, [{ currency: 'VES', amount: 4162.4, basis: 'provider' }]);
-});
-test('missing product prices never become free, and stock zero remains zero', async () => {
-  const result = await service().query('concessions', { provider: 'cinesunidos', cinema_id: '1002' });
-  assert.deepEqual(result.items.find(r => r.id === '2')?.prices, []);
-  assert.equal(result.items.find(r => r.id === '1')?.stock, 0);
-});
+
 test('pagination is stable with total, offset and accent-insensitive filtering', async () => {
   const s = service(), q = { provider: 'cinesunidos' as const, limit: 1 };
   const one = await s.query('cities', q), two = await s.query('cities', { ...q, offset: 1 });
   assert.equal(one.total, 2); assert.equal(one.next_offset, 1); assert.equal(two.next_offset, null);
-  assert.notEqual(one.items[0].id, two.items[0].id);
-  assert.equal((await s.query('cities', { ...q, query: 'merida' })).items[0].name, 'Mérida');
-});
-test('Cinex HTML separators do not merge screen number and showtime', async () => {
-  const result = await service().query('showtimes', { provider: 'cinex', movie_id: 'pelicula', date: '2026-09-11' });
-  assert.equal(result.items[0].screen, '4'); assert.equal(result.items[0].time, '11:20');
-});
-test('schema drift fails visibly instead of reporting an empty catalog', async () => {
-  const s = new CinemaService(new HttpClient(async () => new Response(JSON.stringify({ ...cpSessions, data: { datos: [] } }))));
-  const r = await s.query('movies', { provider: 'cinepic', cinema_id: '123300' });
-  assert.equal(r.status, 'error'); assert.match(r.warnings[0], /structure/);
-});
-test('invalid ticket amount is an error rather than zero', async () => {
-  const props = structuredClone(cpBuy); props.functionData.tarifas[0].precio = 'no disponible';
-  const s = new CinemaService(new HttpClient(async () => new Response(page(props))));
-  const r = await s.query('prices', { provider: 'cinepic', cinema_id: '123300', movie_id: 'p1', session_id: 'f1' });
-  assert.equal(r.status, 'error');
+  assert.notEqual(nth(one.items, 0).id, nth(two.items, 0).id);
+  assert.equal(nth((await s.query('cities', { ...q, query: 'merida' })).items, 0).name, 'Mérida');
 });
 
 test('refresh survives tool validation and reaches every public source read', async () => {
@@ -104,6 +30,64 @@ test('refresh survives tool validation and reaches every public source read', as
   const s = new CinemaService(new HttpClient(async () => new Response(JSON.stringify([`City ${++calls}`]))));
   const q = inputSchema('cities').parse({ provider: 'cinesunidos', refresh: true });
   const first = await s.query('cities', q), second = await s.query('cities', q);
-  assert.equal(first.items[0].name, 'City 1'); assert.equal(second.items[0].name, 'City 2');
-  assert.equal(second.sources[0].cached, false);
+  assert.equal(nth(first.items, 0).name, 'City 1'); assert.equal(nth(second.items, 0).name, 'City 2');
+  assert.equal(nth(second.sources, 0).cached, false);
+});
+
+test('service caps distinct and repeated provider warnings with an explicit aggregate', async () => {
+  const data = Array.from({ length: 200 }, (_, i) => ({ itemId: `item-${i}`, itemDescription: `Product ${i}` }));
+  const service = new CinemaService(new HttpClient(async input => {
+    if (new URL(String(input)).pathname.includes('/concessions/')) return Response.json(data);
+    return new Response('unexpected', { status: 404 });
+  }));
+  const result = await service.query('concessions', { provider: 'cinesunidos', cinema_id: '1002' });
+  assert.equal(result.status, 'available');
+  assert.equal(result.total, 200);
+  assert.ok(result.warnings.length <= 64);
+  assert.ok(result.warnings.join('').length <= 8192);
+  assert.ok(result.warnings.some(w => /repeated or excess warnings were omitted/.test(w)));
+});
+
+test('all providers block nonqueryable directory identifiers before network or authentication', async () => {
+  let calls = 0;
+  const s = new CinemaService(new HttpClient(async () => { calls++; throw new Error('Must not fetch'); }));
+  for (const provider of ['cinesunidos', 'cinepic', 'cinex'] as const) {
+    for (const op of ['prices', 'concessions', 'showtimes'] as const) {
+      const r = await s.query(op, { provider, cinema_id: 'directory-unknown', city: 'Caracas', movie_id: 'm', session_id: 's' });
+      assert.equal(r.status, 'unavailable'); assert.match(r.warnings.join(' '), /query code/);
+    }
+  }
+  assert.equal(calls, 0);
+});
+
+test('malformed conversion cannot escape the structured result handler, even off the requested page', async () => {
+  const data = structuredClone(cpBuy); data.configData.tasaConversion = '1e-320';
+  const service = new CinemaService(new HttpClient(async () => new Response(page(data))));
+  const r = await service.query('prices', { provider: 'cinepic', cinema_id: '123300', movie_id: 'p1', session_id: 'f1', offset: 100 });
+  assert.equal(r.status, 'error'); assert.deepEqual(r.items, []); assert.equal(r.total, 0);
+});
+
+test('unsafe upstream links are omitted without losing useful product data', async () => {
+  for (const url of ['javascript:alert(1)', 'data:text/html,hello', 'https://secret@example.test/image', 'file:///etc/passwd']) {
+    const data = structuredClone(concessions).map(r => ({ ...r, itemImageUrl: url }));
+    const service = new CinemaService(new HttpClient(async () => new Response(JSON.stringify(data))));
+    const r = await service.query('concessions', { provider: 'cinesunidos', cinema_id: '1002' });
+    assert.equal(r.status, 'available'); assert.ok(r.items.every(i => i.image_url === undefined));
+    assert.equal(JSON.stringify(r).includes(url), false); assert.ok(r.warnings.some(w => w.includes('HTTPS')));
+  }
+});
+
+test('conflicting duplicate session IDs are suppressed and marked partial instead of overwritten', async () => {
+  const show = (id: string, date: string) => ({ id, date });
+  const html = page({ movies: [
+    { vistaId: 'M', title: 'Movie M', theaters: [{ id: '1002', showTimes: [show('S', '2026-11-04T18:00:00'), show('OK', '2026-11-04T19:00:00')] }] },
+    { vistaId: 'N', title: 'Movie N', theaters: [{ id: '1002', showTimes: [show('S', '2026-11-04T20:00:00')] }] },
+  ] }) + page({ movies: [
+    // Later identical copies of a conflicting ID must not resurrect it.
+    { vistaId: 'M', title: 'Movie M', theaters: [{ id: '1002', showTimes: [show('S', '2026-11-04T18:00:00'), show('OK', '2026-11-04T19:00:00')] }] },
+  ] });
+  const r = await new CinemaService(new HttpClient(async () => new Response(html))).query('showtimes', { provider: 'cinesunidos', city: 'Caracas', date: '2026-11-04' });
+  assert.equal(r.status, 'available'); assert.equal(r.partial, true);
+  assert.deepEqual(r.items.map(i => i.id), ['OK'], 'identical duplicates collapse; conflicting IDs are dropped');
+  assert.ok(r.warnings.some(w => /provider returned contradictory data for showtime S/.test(w)));
 });

@@ -1,0 +1,310 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { renderSeats } from '../../src/seats/ascii.js';
+import { cinexRowShifts, cinexSeatOrderFields, parseCinepicSeats, parseCinesUnidosSeats, parseCinexSeats } from '../../src/seats/parsers.js';
+import { seatLayout } from '../../src/seats/schema.js';
+import { CinemaService } from '../../src/service.js';
+import { HttpClient } from '../../src/http/client.js';
+import { assertCinexSeatOrder, assertPrivateRead } from '../../src/http/allow-list.js';
+import { EmptySessionStore, page } from '../helpers/fixtures.js';
+import { defined, nth } from '../helpers/assert.js';
+
+const cp = (overrides = {}) => ({ butaca: 'A-1-1', nombre_butaca: 'A:1', fila: '1', columna: '1', libre: '1', seleccionada: '1', tipo_butaca_id: '1', ...overrides });
+test('Cinepic availability ignores seleccionada and preserves physical labels, gaps, and unknown states', () => {
+  const seats = parseCinepicSeats({ butacas: [cp(), cp({ butaca: 'A-3-1', columna: '3', nombre_butaca: 'A:2', libre: '0' }), cp({ butaca: 'A-4-1', columna: '4', nombre_butaca: 'A:3', libre: 'new' })] });
+  assert.deepEqual(seats.map(s => s.status), ['available', 'occupied', 'unknown']);
+  assert.match(renderSeats(seats), /A:1O\s{6}A:2X\s+A:3\?/);
+  assert.throws(() => parseCinepicSeats({ butacas: [cp(), cp()] }));
+  assert.throws(() => parseCinepicSeats({ butacas: [cp({ columna: '-1' })] }));
+  assert.throws(() => parseCinepicSeats({ butacas: [cp({ nombre_butaca: 'A\nFAKE' })] }));
+});
+test('Cines Unidos keeps special and unknown states separate from free seats', () => {
+  const data = { seats: { areas: [{ number: 1, areaCategoryCode: 'general', rows: [{ rowIndexZeroBased: 0, physicalName: 'P', seats: [0, 1, 2, 3, 4, 5, 6, 7, 99].map((status, columnIndex) => ({ id: String(columnIndex + 1), status, position: { areaNumber: 1, rowIndex: 0, columnIndex } })) }] }] } };
+  assert.deepEqual(parseCinesUnidosSeats(data).map(s => s.status), ['available', 'occupied', 'occupied', 'unavailable', 'unavailable', 'unavailable', 'unavailable', 'available', 'unknown']);
+  nth(nth(nth(data.seats.areas, 0).rows, 0).seats, 0).position.areaNumber = 2;
+  assert.throws(() => parseCinesUnidosSeats(data));
+});
+test('seat reads bypass cached price pages and retain function identity checks', async () => {
+  let reads = 0;
+  const body = page({ functionData: { datos: [{ id: 's1', codigo: 'm1', entradasDisponibles: '1' }], tarifas: [] }, butacasData: { butacas: [cp()] } });
+  const http = new HttpClient(async (_url, init) => { reads++; assert.equal(init?.headers && new Headers(init.headers).get('Cache-Control'), 'no-cache'); return new Response(body); }, 15000, new EmptySessionStore());
+  const service = new CinemaService(http);
+  const q = { provider: 'cinepic' as const, cinema_id: '123301', session_id: 's1', movie_id: 'm1' };
+  assert.equal((await service.seats(q)).available, 1);
+  assert.equal((await service.seats(q)).status, 'available');
+  assert.equal(reads, 2);
+  const mismatch = await service.seats({ ...q, session_id: 'other' });
+  assert.equal(mismatch.status, 'unavailable'); assert.equal(mismatch.ascii, '');
+  assert.equal((await service.seats({ ...q, provider: 'cinex' })).status, 'auth_required');
+});
+test('Cines Unidos allows only the exact GET seat URL with bounded identifiers', () => {
+  const valid = 'https://www.cinesunidos.com/api/seats?theaterId=1005&showTimeId=49993';
+  assert.doesNotThrow(() => assertPrivateRead('cinesunidos', valid));
+  for (const bad of [valid + '&token=x', valid + '&theaterId=1002', valid.replace('www.', 'evil.'), valid.replace('49993', '../orders'), valid + '#fragment']) assert.throws(() => assertPrivateRead('cinesunidos', bad));
+});
+
+const cinexMap = `<a id="btnasientosatras" href="boletosdev.php?cinemaid=SBC&sessionid=s1">Atras</a><div id="mapcontent"><div class="row centermap"><div class="rowletter">B</div><div id="B1" class="seatestandar" alt="0" onclick="javascript:decideAsientoNew('B1','0','0','1','0001','0','N','N');"></div><div class="blankspace"></div><div title="B3" class="seatestandar-occupied" alt="B3"></div><div id="B4" class="new-class" alt="0"></div></div></div>`;
+test('Cinex map verifies function identity, occupied states, gaps, and unknown classes', () => {
+  const q = { provider: 'cinex' as const, cinema_id: 'SBC', session_id: 's1' };
+  const seats = parseCinexSeats(cinexMap, q);
+  assert.deepEqual(seats.map(s => s.status), ['available', 'occupied', 'unknown']);
+  assert.equal(nth(seats, 1).column_index, 2);
+  assert.throws(() => parseCinexSeats(cinexMap, { ...q, session_id: 'other' }));
+  assert.throws(() => parseCinexSeats(cinexMap, { ...q, cinema_id: 'TLN' }));
+  assert.throws(() => parseCinexSeats(cinexMap.replace('B1\',', 'ZZ\','), q));
+});
+test('Cinex seat workflow uses only authenticated GETs and rejects an interleaved function', async () => {
+  const urls: string[] = [];
+  const sessions = new class extends EmptySessionStore { override async headers() { return { Cookie: 'synthetic' }; } };
+  let body = cinexMap;
+  const http = new HttpClient(async (url, init) => {
+    urls.push(String(url)); assert.ok(!init?.method || init.method === 'GET');
+    assert.equal(new Headers(init?.headers).get('Cookie'), 'synthetic');
+    const path = new URL(String(url)).pathname;
+    return new Response(path === '/checklogin.php' ? 'on' : path === '/asientos.php' ? body : '<form id="frmboletos"></form>');
+  }, 15000, sessions);
+  const q = { provider: 'cinex' as const, cinema_id: 'SBC', session_id: 's1' };
+  const partial = await new CinemaService(http).seats(q);
+  assert.equal(partial.available, 1);
+  assert.equal(partial.occupied, 1); assert.equal(partial.unknown, 1);
+  assert.equal(partial.total, 3); assert.equal(partial.availability_complete, false);
+  assert.match(partial.warnings.join(' '), /zero confirmed available seats does not mean sold out/);
+  // Session check, the function selected on Cinex's regular checkout page, then its seat page.
+  assert.deepEqual(urls.map(u => new URL(u).pathname), ['/checklogin.php', '/boletos.php', '/asientos.php']);
+  body = cinexMap.replace('sessionid=s1', 'sessionid=other');
+  const result = await new CinemaService(http).seats(q);
+  assert.equal(result.status, 'unavailable'); assert.equal(result.ascii, '');
+  assert.equal(result.total, 0); assert.equal(result.availability_complete, false);
+  assert.doesNotThrow(() => assertPrivateRead('cinex', 'https://www.cinex.com.ve/asientosdev.php'));
+  assert.doesNotThrow(() => assertPrivateRead('cinex', 'https://www.cinex.com.ve/asientos.php'));
+  assert.throws(() => assertPrivateRead('cinex', 'https://www.cinex.com.ve/asientos_datadevx.php'));
+  // The order route is reachable only through the checked one-ticket POST (see the order tests below).
+  await assert.rejects(http.getAuthenticated('cinex', 'https://www.cinex.com.ve/boletos_data.php'), /not allowed/);
+  assert.throws(() => assertPrivateRead('cinex', 'https://www.cinex.com.ve/asientosdev.php?extra=1'));
+});
+
+test('Cinex VIP availability accepts empty selected-ticket count without relaxing seat state checks', () => {
+  const q = { provider: 'cinex' as const, cinema_id: 'SBC', session_id: 's1' };
+  const vip = cinexMap.replaceAll('seatestandar', 'seatvipplus').replace("'0001','0','N','N'", "'0001','','N','N'");
+  assert.equal(nth(parseCinexSeats(vip, q), 0).status, 'available');
+  assert.equal(nth(parseCinexSeats(vip, q), 0).category, '0001');
+  assert.equal(nth(parseCinexSeats(vip.replace("'0001','','N','N'", "'0001','','S','N'"), q), 0).status, 'unavailable');
+  assert.equal(nth(parseCinexSeats(vip.replace("'0001','','N','N'", "'0001','','N','S'"), q), 0).status, 'unavailable');
+  assert.equal(nth(parseCinexSeats(vip.replace('alt="0"', 'alt="1"'), q), 0).status, 'unknown');
+  assert.equal(nth(parseCinexSeats(vip.replace("'0001','','N','N'", "'0001','garbage','N','N'"), q), 0).status, 'unknown');
+  assert.equal(nth(parseCinexSeats(vip.replace('decideAsientoNew', 'unrecognized'), q), 0).status, 'unknown');
+  assert.throws(() => parseCinexSeats(vip.replace("('B1',", "('WRONG',"), q));
+});
+
+test('Cines Unidos reports confirmed and unknown counts independently, including selectable state 7', async () => {
+  let codes: unknown[] = [0, 7, 1, 2, 3, 4, 5, 6, 99, null];
+  const sessions = new class extends EmptySessionStore { override async headers() { return { Authorization: 'Bearer synthetic' }; } };
+  let session: unknown = [{ cinemaId: '1005', sessionId: 's1', movieName: 'Película de prueba', theaterName: 'Sambil', screenName: 'Sala 3', showtime: '2026-11-12T13:15:00' }];
+  const http = new HttpClient(async (url, init) => {
+    assert.ok(!init?.method || init.method === 'GET');
+    // The session read ticket prices use names the film and venue for the image.
+    if (String(url) === 'https://gateway.cinesunidos.com/tickets/www/theaters/1005/sessions/s1/') return session === undefined ? new Response('', { status: 500 }) : Response.json(session);
+    assert.equal(String(url), 'https://www.cinesunidos.com/api/seats?theaterId=1005&showTimeId=s1');
+    return Response.json({ seats: { areas: [{ number: 1, areaCategoryCode: 'general', rows: [{ rowIndexZeroBased: 0, physicalName: 'G', seats: codes.map((status, columnIndex) => ({ id: String(columnIndex + 1), status, position: { areaNumber: 1, rowIndex: 0, columnIndex } })) }] }] } });
+  }, 15000, sessions);
+  const q = { provider: 'cinesunidos' as const, cinema_id: '1005', session_id: 's1' };
+  const result = await new CinemaService(http).seats(q);
+  assert.equal(result.status, 'available');
+  assert.deepEqual([result.available, result.occupied, result.unavailable, result.unknown, result.total], [2, 2, 4, 2, 10]);
+  assert.equal(result.availability_complete, false);
+  assert.match(result.ascii, /G:1O\s+G:2O\s+G:3X/);
+  assert.deepEqual(result.showing, { movie: 'Película de prueba', cinema_name: 'Sambil', screen: 'Sala 3', date: '2026-11-12', time: '13:15' });
+  // Another function's entry, or a failed session read, leaves the map as it is, without a name.
+  for (const other of [[{ cinemaId: '1005', sessionId: 's2', movieName: 'Otra', theaterName: 'Otro' }], undefined]) {
+    session = other;
+    const unnamed = await new CinemaService(http).seats(q);
+    assert.equal(unnamed.status, 'available'); assert.equal(unnamed.total, 10); assert.equal(unnamed.showing, undefined);
+  }
+  codes = [7, 1];
+  const complete = await new CinemaService(http).seats(q);
+  assert.equal(complete.availability_complete, true); assert.equal(complete.available, 1);
+  codes = [99];
+  const unknown = await new CinemaService(http).seats(q);
+  assert.equal(unknown.available, 0); assert.equal(unknown.unknown, 1);
+  assert.equal(unknown.availability_complete, false);
+  assert.match(unknown.warnings.join(' '), /does not mean sold out/);
+});
+
+test('a Cinepic movie_id from another function is reported as a mismatched pair', async () => {
+  // Observed on 2026-11-05: the purchase page for a valid session with another
+  // film's pid renders without functionData.
+  const service = new CinemaService(new HttpClient(async () => new Response(page({ shell: true })), 15000, new EmptySessionStore()));
+  const r = await service.seats({ provider: 'cinepic', cinema_id: '123301', session_id: '3720', movie_id: '981' });
+  assert.equal(r.status, 'unavailable');
+  assert.match(r.warnings.join(' '), /use the session_id and movie_id of one showtime/);
+});
+
+test('the ASCII map is oriented as each provider website draws it', () => {
+  // Cinepic Candelaria on 2026-11-05: invertida "1", drawn right to left under the screen.
+  const map = { butacas: [cp({ butaca: 'A-15-1', columna: '15', nombre_butaca: 'A:5', invertida: '1' }), cp({ butaca: 'A-23-1', columna: '23', nombre_butaca: 'A:1', invertida: '1' })] };
+  const lines = renderSeats(parseCinepicSeats(map), seatLayout('cinepic', map)).split('\n');
+  assert.equal(lines[1], 'Oriented like the provider\'s website: screen at the top.'); assert.equal(lines[2], '[ SCREEN ]');
+  assert.ok(nth(lines, 4).indexOf('A:1O') < nth(lines, 4).indexOf('A:5O'), nth(lines, 4));
+  assert.deepEqual(seatLayout('cinesunidos'), { screen: 'bottom', column_order: 'ascending' });
+  assert.deepEqual(seatLayout('cinex'), { screen: 'bottom', column_order: 'ascending' });
+  assert.match(renderSeats(parseCinepicSeats(map)), /which does not show the screen side/, 'no layout claims nothing');
+});
+
+test('parallel Cinex seat and price reads for different functions do not switch each other', async () => {
+  // Cinex keeps one selected function per PHP session: the last boletos page opened wins.
+  let selected = '', inFlight = 0, maxInFlight = 0;
+  const sessions = new class extends EmptySessionStore { override async headers() { return { Cookie: 'synthetic' }; } };
+  const http = new HttpClient(async url => {
+    const u = new URL(String(url));
+    inFlight++; maxInFlight = Math.max(maxInFlight, inFlight);
+    await new Promise(r => setTimeout(r, 5 + Math.random() * 15));
+    inFlight--;
+    if (u.pathname === '/checklogin.php') return new Response('on');
+    if (u.pathname === '/boletosdev.php' || u.pathname === '/boletos.php') { selected = defined(u.searchParams.get('sessionid')); return new Response('<form id="frmboletos"></form>'); }
+    if (u.pathname === '/asientos.php') return new Response(cinexMap.replace('sessionid=s1', `sessionid=${selected}`));
+    return new Response('', { status: 404 });
+  }, 15000, sessions);
+  const service = new CinemaService(http);
+  const ids = ['s1', 's2', 's3', 's4', 's5', 's6'];
+  const [results] = await Promise.all([
+    Promise.all(ids.map(session_id => service.seats({ provider: 'cinex', cinema_id: 'SBC', session_id }))),
+    service.query('prices', { provider: 'cinex', cinema_id: 'SBC', session_id: 's9' }),
+  ]);
+  for (const [i, r] of results.entries()) {
+    assert.equal(r.status, 'available', `${ids[i]}: ${r.warnings.join(' ')}`);
+    assert.equal(r.session_id, ids[i]);
+  }
+  assert.ok(maxInFlight >= 2, 'other reads still run in parallel');
+});
+
+test('a Cines Unidos seat answer that is not JSON names the provider response', async () => {
+  const sessions = new class extends EmptySessionStore { override async headers() { return { Authorization: 'Bearer synthetic' }; } };
+  const r = await new CinemaService(new HttpClient(async () => new Response('<html></html>'), 15000, sessions)).seats({ provider: 'cinesunidos', cinema_id: '1002', session_id: 's1' });
+  assert.equal(r.status, 'error'); assert.match(r.warnings.join(' '), /Cines Unidos did not return a seat map in valid JSON/);
+});
+
+test('a Cines Unidos function no longer on sale online is reported as unavailable, not as a format change', async () => {
+  // cinesunidos.com answered this for functions that had started or closed sales (2026-11-11).
+  const sessions = new class extends EmptySessionStore { override async headers() { return { Authorization: 'Bearer synthetic' }; } };
+  const service = new CinemaService(new HttpClient(async () => Response.json({ maxSeatsPerTransaction: 0 }), 15000, sessions));
+  const r = await service.seats({ provider: 'cinesunidos', cinema_id: '1005', session_id: 's1' });
+  assert.equal(r.status, 'unavailable'); assert.equal(r.total, 0);
+  assert.match(r.warnings.join(' '), /does not sell this showtime online/); assert.doesNotMatch(r.warnings.join(' '), /estructura/);
+  // A body that is truly different still says so.
+  const odd = await new CinemaService(new HttpClient(async () => Response.json({ maxSeatsPerTransaction: 4 }), 15000, sessions)).seats({ provider: 'cinesunidos', cinema_id: '1005', session_id: 's1' });
+  assert.equal(odd.status, 'error');
+});
+
+test('Cinex: the regular seat page is read first, and the newer one only when it draws no grid', async () => {
+  // 2026-11-11: asientos.php drew every room's map once the function was selected; asientosdev.php only VIP rooms.
+  const sessions = new class extends EmptySessionStore { override async headers() { return { Cookie: 'synthetic' }; } };
+  const empty = '<a id="btnasientosatras" href="boletos.php?cinemaid=SBC&sessionid=s1">Atras</a><div id="mapcontent"><div class="row centermap"></div></div>';
+  for (const [regular, newer, expected] of [[cinexMap, empty, ['/checklogin.php', '/boletos.php', '/asientos.php']], [empty, cinexMap, ['/checklogin.php', '/boletos.php', '/asientos.php', '/asientosdev.php']]] as const) {
+    const paths: string[] = [];
+    const http = new HttpClient(async url => {
+      const path = new URL(String(url)).pathname; paths.push(path);
+      return new Response(path === '/checklogin.php' ? 'on' : path === '/asientos.php' ? regular.replace('boletosdev.php', 'boletos.php') : path === '/asientosdev.php' ? newer : '<form id="frmboletos"></form>');
+    }, 15000, sessions);
+    const r = await new CinemaService(http).seats({ provider: 'cinex', cinema_id: 'SBC', session_id: 's1' });
+    assert.equal(r.status, 'available'); assert.equal(r.total, 3);
+    assert.deepEqual(paths, expected);
+  }
+});
+
+test("Cinex regular seat page: sold seats are \"seat occupied\" without id, wheelchair seats stay restricted", () => {
+  // As asientos.php served it on 2026-11-11 (Sotavento La Guaira, Los Proceres).
+  const html = `<a id="btnasientosatras" href="boletos.php?cinemaid=STV&sessionid=s1">Atras</a><div id="mapcontent"><div class="row centermap">`
+    + `<div class="row centermap"><div class="rowletter">E</div>`
+    + `<div class="seat" alt="0" id="E4" name="E4" onclick="javascript:decideAsientoNew(\x27E4\x27,\x270\x27,\x270\x27,\x271\x27,\x270000000001\x27,\x271\x27,\x27N\x27);" title="Asiento E4"></div>`
+    + `<div class="seat occupied" title="E5" alt="E5"></div><div class="blankspace"></div>`
+    + `<div class="seat wheelchair" alt="3" id="E6" name="E6" onclick="javascript:decideAsientoNew(\x27E6\x27,\x270\x27,\x273\x27,\x271\x27,\x270000000001\x27,\x271\x27,\x27N\x27);" title="Asiento E6"></div>`
+    + `</div></div></div>`;
+  const seats = parseCinexSeats(html, { provider: "cinex", cinema_id: "STV", session_id: "s1" });
+  assert.deepEqual(seats.map(s => [s.id, s.status, s.column_index]), [["E4", "available", 0], ["E5", "occupied", 1], ["E6", "unavailable", 3]]);
+  // An unrecognized cell still fails visibly.
+  assert.throws(() => parseCinexSeats(html.replace(`class="blankspace"`, `class="mystery"`), { provider: "cinex", cinema_id: "STV", session_id: "s1" }), /Cinex/);
+});
+
+test("Cinex VIP functions are read from the seat page their own checkout leads to", async () => {
+  // boletos.php sends VIP functions to boletosdev.php, whose form posts to boletos_datadev.php, then asientosdev.php.
+  const sessions = new class extends EmptySessionStore { override async headers() { return { Cookie: "synthetic" }; } };
+  const paths: string[] = [];
+  const http = new HttpClient(async url => {
+    const path = new URL(String(url)).pathname; paths.push(path);
+    return new Response(path === "/checklogin.php" ? "on" : path === "/asientosdev.php" ? cinexMap : path === "/asientos.php" ? "<div id=\"mapcontent\"></div>" : "<script>post_to_url(\"boletos_datadev.php\", {}, \"post\");</script>");
+  }, 15000, sessions);
+  const r = await new CinemaService(http).seats({ provider: "cinex", cinema_id: "SBC", session_id: "s1" });
+  assert.equal(r.status, "available"); assert.equal(r.total, 3);
+  assert.deepEqual(paths, ["/checklogin.php", "/boletos.php", "/asientosdev.php"]);
+});
+
+test('final review: odd Cinex rows, looser grid markup and odd Cines Unidos bodies never throw or mislead', async () => {
+  const sessions = new class extends EmptySessionStore { override async headers() { return { Cookie: 'synthetic', Authorization: 'Bearer synthetic' }; } };
+  const seat = (id: string) => `<div class='seat' alt='0' id='${id}' onclick=javascript:decideAsientoNew('${id}','0','0','1','0000000001','1','N'); title='Asiento ${id}'></div>`;
+  const page = (rows: string, rowClass = `class='rowletter'`) => `<a id="btnasientosatras" href="boletos.php?cinemaid=SBC&sessionid=s1">Atras</a><div id="mapcontent"><div class="row centermap">${rows.replaceAll(`class='rowletter'`, rowClass)}</div></div>`;
+  // A row of 250 blank cells next to a seat row: no shift beyond the schema, and a seatless row does not shift anything.
+  const wide = page(`<div class='row centermap'><div class='rowletter'>Z</div>${"<div class='blankspace'></div>".repeat(250)}</div><div class='row centermap'><div class='rowletter'>A</div>${seat('A1')}${seat('A2')}</div>`);
+  assert.deepEqual(cinexRowShifts(wide), {});
+  const read = async (html: string) => new CinemaService(new HttpClient(async url => new Response(new URL(String(url)).pathname === '/checklogin.php' ? 'on' : new URL(String(url)).pathname === '/asientos.php' ? html : '<form id="frmboletos"></form>'), 15000, sessions)).seats({ provider: 'cinex', cinema_id: 'SBC', session_id: 's1' });
+  assert.equal((await read(wide)).status, 'available');
+  // Shifts the schema would refuse are dropped instead of failing the whole call.
+  const huge = page(`<div class='row centermap'><div class='rowletter'>B</div>${seat('B1')}${"<div class='blankspace'></div>".repeat(250)}</div><div class='row centermap'><div class='rowletter'>A</div>${seat('A1')}</div>`);
+  assert.deepEqual(cinexRowShifts(huge), {});
+  assert.equal((await read(huge)).status, 'available');
+  // A grid whose row letters carry extra classes is still the grid (the newer page is not read instead).
+  const extra = await read(page(`<div class='row centermap'><div class='rowletter'>A</div>${seat('A1')}</div>`, `class="rowletter big"`));
+  assert.equal(extra.status, 'available'); assert.equal(extra.total, 1);
+  // Cines Unidos: only a real zero means "not on sale online"; a null counter without areas is still an error.
+  const cu = async (body: unknown) => new CinemaService(new HttpClient(async () => Response.json(body), 15000, sessions)).seats({ provider: 'cinesunidos', cinema_id: '1005', session_id: 's1' });
+  assert.equal((await cu({ maxSeatsPerTransaction: '0' })).status, 'unavailable');
+  for (const body of [{ maxSeatsPerTransaction: null }, { maxSeatsPerTransaction: '' }, {}]) assert.equal((await cu(body)).status, 'error', JSON.stringify(body));
+});
+
+// The ticket page of a regular Cinex room, as cinex.com.ve served it on 2026-11-11 (one child ticket listed first).
+const cinexTicketPage = `<form id="frmboletos"><input type="hidden" name="amount0001" id="amount0001" value="1803.24" disabled>`
+  + `<button class="cart-qty-plus" onclick="javascript:updateCount('qty0001', 'total0001', 'amount0001', 'plus', '1', '90162', '45081', '135243', '50', '120', 'Niño Dig');">+</button>`
+  + `<input type="hidden" name="amount0002" id="amount0002" value="3606.48" disabled>`
+  + `<button class="cart-qty-plus" onclick="javascript:updateCount('qty0002', 'total0002', 'amount0002', 'plus', '2', '90162', '90162', '270486', '100', '120', 'Adulto Dig');">+</button></form>`;
+
+test('Cinex: a regular room without a grid opens a one-ticket order, reads the map, and always resets it', async () => {
+  // As cinex.com.ve's form would post for one Adulto ticket (the child ticket cannot be bought alone).
+  assert.deepEqual(cinexSeatOrderFields(cinexTicketPage), { total: '3606.48', cantboletos: '1', indicetickets: ',,1', bookingfeetotal: '270486', tickettotal: '90162', totalticketsusd: '100' });
+  assert.equal(cinexSeatOrderFields('<form></form>'), undefined);
+  assert.doesNotThrow(() => assertCinexSeatOrder({ total: '3606.48', cantboletos: '1', indicetickets: ',1', bookingfeetotal: '270486', tickettotal: '90.162', totalticketsusd: '100' }));
+  for (const bad of [{ cantboletos: '2' }, { indicetickets: ',1,1' }, { indicetickets: '1' }, { total: 'x' }, { extra: '1' }]) {
+    assert.throws(() => assertCinexSeatOrder({ total: '3606.48', cantboletos: '1', indicetickets: ',1', bookingfeetotal: '270486', tickettotal: '90162', totalticketsusd: '100', ...bad }), /not allowed/, JSON.stringify(bad));
+  }
+  const sessions = new class extends EmptySessionStore { override async headers() { return { Cookie: 'synthetic' }; } };
+  const run = async (options: { orderStatus?: number; vip?: boolean } = {}) => {
+    const calls: string[] = []; let ordered = false;
+    const http = new HttpClient(async (url, init) => {
+      const path = new URL(String(url)).pathname, method = init?.method ?? 'GET';
+      calls.push(`${method} ${path}`);
+      if (path === '/checklogin.php') return new Response('on');
+      if (path === '/boletos.php') return new Response(options.vip ? '<script>post_to_url("boletos_datadev.php", {}, "post");</script>' : cinexTicketPage);
+      if (path === '/boletos_data.php') {
+        assert.equal(method, 'POST');
+        assert.deepEqual(Object.fromEntries(new URLSearchParams(String(init?.body))), { total: '3606.48', cantboletos: '1', indicetickets: ',,1', bookingfeetotal: '270486', tickettotal: '90162', totalticketsusd: '100' });
+        if (options.orderStatus) return new Response('', { status: options.orderStatus });
+        ordered = true; return new Response('', { status: 302, headers: { location: 'asientos.php' } });
+      }
+      if (path === '/resetpurchase.php') { ordered = false; return new Response('', { status: 302, headers: { location: 'boletos.php?sessionid=s1&cinemaid=SBC' } }); }
+      const empty = '<a id="btnasientosatras" href="boletos.php?cinemaid=SBC&sessionid=s1">Atras</a><div id="mapcontent"><div class="row centermap"></div></div>';
+      if (path === '/asientos.php') return new Response(ordered ? cinexMap.replace('boletosdev.php', 'boletos.php') : empty);
+      if (path === '/asientosdev.php') return new Response(empty);
+      return new Response('', { status: 404 });
+    }, 15000, sessions);
+    return { r: await new CinemaService(http).seats({ provider: 'cinex', cinema_id: 'SBC', session_id: 's1' }), calls };
+  };
+  const ok = await run();
+  assert.equal(ok.r.status, 'available'); assert.equal(ok.r.total, 3);
+  assert.deepEqual(ok.calls, ['GET /checklogin.php', 'GET /boletos.php', 'GET /asientos.php', 'GET /asientosdev.php', 'POST /boletos_data.php', 'GET /asientos.php', 'GET /resetpurchase.php']);
+  assert.match(ok.r.warnings.join(' '), /opened one for 1 ticket without choosing a seat, read the map and cancelled it at once/);
+  assert.doesNotMatch(ok.r.warnings.join(' '), /without selecting tickets/, 'no contradictory note');
+  // The order failing still resets, and the answer stays Cinex's own count without a map.
+  const failed = await run({ orderStatus: 500 });
+  assert.notEqual(failed.r.status, 'available'); assert.equal(failed.calls.at(-1), 'GET /resetpurchase.php');
+  // VIP functions never open an order.
+  const vip = await run({ vip: true });
+  assert.ok(!vip.calls.some(c => c.includes('boletos_data')), vip.calls.join(', '));
+});

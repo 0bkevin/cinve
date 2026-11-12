@@ -1,5 +1,5 @@
 // HTTPS fallback for operator networks that block Postgres TCP connections.
-import { migrationSql } from '../src/migrations.js';
+import { migrationSql } from '../src/hosted/migrations.js';
 import { neon } from '@neondatabase/serverless';
 try {
   const url = process.env.DATABASE_URL;

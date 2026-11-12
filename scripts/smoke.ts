@@ -1,14 +1,15 @@
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { Result, today } from '../src/core.js';
-import { SeatResult } from '../src/seats.js';
+import { SeatResult } from '../src/seats/schema.js';
 import type { QueryResult } from '../src/core.js';
 import * as z from 'zod';
 
 // Live reads, deliberately separate from deterministic tests. No snapshots count as live data.
 const client = new Client({ name: 'cinev-live-smoke', version: '1.0.0' });
-const urlIndex = process.argv.indexOf('--url');
-const remoteUrl = urlIndex < 0 ? undefined : new URL(process.argv[urlIndex + 1]);
+const urlIndex = process.argv.indexOf('--url'), urlArgument = urlIndex < 0 ? undefined : process.argv[urlIndex + 1];
+if (urlIndex >= 0 && urlArgument === undefined) throw new Error('--url needs the MCP URL after it.');
+const remoteUrl = urlArgument === undefined ? undefined : new URL(urlArgument);
 if (remoteUrl && (remoteUrl.protocol !== 'https:' || remoteUrl.username || remoteUrl.password)) throw new Error('Use a public HTTPS MCP URL without credentials.');
 const transport = remoteUrl ? new StreamableHTTPClientTransport(remoteUrl) : new StdioClientTransport({ command: process.execPath, args: ['dist/index.js'], cwd: process.cwd(), stderr: 'inherit' });
 let failed = false;
