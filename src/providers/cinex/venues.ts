@@ -2,6 +2,7 @@ import { load } from 'cheerio';
 import { DataError, folded, Id, isObj } from '../../core.js';
 import type { DataItem, Query } from '../../core.js';
 import { CallStopped, type ReadContext } from '../../http/read-context.js';
+import { decodeLabel } from '../parsing.js';
 
 const base = 'https://www.cinex.com.ve';
 const detailPath = /^cinex-[A-Za-z0-9_-]{1,80}\.html$/;
@@ -16,7 +17,7 @@ const directoryPage = (body: string) => /href=["']?cinex-/.test(body);
 const maxDiscoveryVenues = 100;
 const maxCatalogWarnings = 32;
 const metadataUrl = (id: string) => `${base}/assets/php/datasource.php?${new URLSearchParams({ method: 'getcinemadatafromcinemaid', cinemaid: id })}`;
-type MetadataRow = { siglas: string; name: string };
+type MetadataRow = { siglas: string; name: string; desc?: unknown };
 /**
  * The venue rows of a Cinex datasource answer, `{ data: [...] }` or, where
  * `bareArray` allows it, a bare array; undefined when it is neither. Rows
@@ -114,13 +115,17 @@ export class CinexCinemaCatalog {
     }
     return undefined;
   }
-  private async verifyImage(image: string | undefined, venueName: string, c: ReadContext): Promise<string | undefined> {
+  /** The venue's code, and its address (desc) when the metadata confirms the venue. */
+  private async verifyImage(image: string | undefined, venueName: string, c: ReadContext): Promise<{ code: string; address?: string } | undefined> {
     const candidate = imageCode(image);
     if (!candidate || !Id.safeParse(candidate).success) return undefined;
     try {
       const rows = metadataRows(await c.json(metadataUrl(candidate), metadataTtl), false);
       const match = rows?.find(r => r.siglas.toUpperCase() === candidate && normalizedName(r.name) === normalizedName(venueName));
-      return match && Id.safeParse(match.siglas).success ? match.siglas : undefined;
+      if (!match || !Id.safeParse(match.siglas).success) return undefined;
+      // "C.C. Plaza Mayor. Prolongación Paseo Colón. Lecherías, Edo. Anzoátegui."
+      const address = typeof match.desc === 'string' ? decodeLabel(match.desc).replace(/\s+/g, ' ').trim().slice(0, 300) : '';
+      return { code: match.siglas, ...(address ? { address } : {}) };
     } catch (error) { if (error instanceof CallStopped) throw error; return undefined; }
   }
   async list(q: Query, c: ReadContext): Promise<DataItem[]> {
@@ -179,11 +184,11 @@ export class CinexCinemaCatalog {
       }
       const batch = await Promise.all(work.slice(i, i + 4).map(async venue => {
         const present = listed.has(venue.href), url = `${base}/${venue.href}`;
-        let code: string | undefined, detailVerifiedUrl: string | undefined, metadataConfirmed = false;
+        let code: string | undefined, address: string | undefined, detailVerifiedUrl: string | undefined, metadataConfirmed = false;
         const mapped = this.mappedCode(url, venue.name);
         const mappedCode = mapped?.code;
         if (present) {
-          code = await this.verifyImage(venue.image, venue.name, c);
+          ({ code, address } = await this.verifyImage(venue.image, venue.name, c) ?? {});
           metadataConfirmed = !!code;
         }
         if (code) this.rememberDirectoryVerified(code, url, venue.name, metadataConfirmed);
@@ -220,7 +225,7 @@ export class CinexCinemaCatalog {
               if (!titleMatches) throw new DataError('unavailable', 'The page does not confirm the venue\'s identity.');
               code = [...codes][0]; metadataConfirmed = false;
             } else if (codes.size === 0 && !code && Date.now() < deadline) {
-              code = await this.verifyImage(detail('img[src*="cinemas/"]').first().attr('src'), venue.name, c);
+              ({ code, address } = await this.verifyImage(detail('img[src*="cinemas/"]').first().attr('src'), venue.name, c) ?? {});
               metadataConfirmed = !!code;
             }
             if (!code || (!titleMatches && !metadataConfirmed)) throw new DataError('unavailable', 'The page does not confirm the venue\'s identity.');
@@ -249,6 +254,7 @@ export class CinexCinemaCatalog {
           warn(`Query code not verified for ${venue.name}; venue kept. Check its official website: ${url}. This does not indicate a closure.`);
         }
         return { kind: 'cinema' as const, id: code ?? `directory-${venue.href.slice(6, -5)}`, name: venue.name, city: venue.city, url,
+          ...(code && address ? { address } : {}),
           ...(code ? { cinema_id: code } : {}), code_status: code ? 'verified' as const : 'unverified' as const,
           directory_status: present ? 'listed' as const : 'not_listed' as const };
       }));
