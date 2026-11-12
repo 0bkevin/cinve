@@ -145,7 +145,7 @@ const budgetMs = 60000;
 const readMs = 15000;
 const workers = 2;
 async function showtimes(q: Query, c: ReadContext): Promise<DataItem[]> {
-  const deadline = Date.now() + budgetMs;
+  const deadline = c.budget(budgetMs);
   const date = q.date ?? today();
   if (isPastDate(date)) {
     // The upstream still answers for past dates; its pages never show them.

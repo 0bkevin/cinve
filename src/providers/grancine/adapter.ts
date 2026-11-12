@@ -108,7 +108,7 @@ export function parseGranCineVenuePage(html: string, venue: Venue, date: string,
 // venue page starts only while one read (15 s) still fits.
 const venueLimit = 12, budgetMs = 60000, readMs = 15000, workers = 2;
 async function showtimes(q: Query, c: ReadContext, listing = false): Promise<Showtime[]> {
-  const deadline = Date.now() + budgetMs;
+  const deadline = c.budget(budgetMs);
   const date = q.date ?? today();
   if (isPastDate(date)) {
     c.warnings.push('That date has passed: Gran Cine only publishes the schedule from today onward.');
