@@ -18,7 +18,7 @@ const isCinepicVenue = (id: string): id is keyof typeof CP => Object.hasOwn(CP, 
 export const cinepicVenueName = (id: string): string | undefined => isCinepicVenue(id) ? CP[id].name : undefined;
 export function cpSite(q: Query) {
   const id = requireArg(q, 'cinema_id');
-  if (!isCinepicVenue(id)) throw new DataError('unavailable', 'Cinepic admite las sedes 123300 (Candelaria) y 123301 (VVIP Lido).');
+  if (!isCinepicVenue(id)) throw new DataError('unavailable', 'Cinepic supports the venues 123300 (Candelaria) and 123301 (VVIP Lido).');
   return { id, ...CP[id] };
 }
 /**
@@ -38,18 +38,18 @@ export async function cpBuy(q: Query, c: ReadContext) {
   const functionData = findField(records, 'functionData');
   if (functionData === undefined) {
     const $ = load(html); $('script,style').remove();
-    if (/No pudimos mostrar la función/.test($.text()) && /\bAC-001\b/.test($.text())) throw new DataError('unavailable', 'Cinepic informa que no pudo cargar la función (AC-001). Inténtalo nuevamente más tarde.');
+    if (/No pudimos mostrar la función/.test($.text()) && /\bAC-001\b/.test($.text())) throw new DataError('unavailable', 'Cinepic reports that it could not load the showtime (AC-001). Try again later.');
     // A movie_id from another film renders the page without function data;
     // that is a mismatched pair, not a provider format change.
-    throw new DataError('unavailable', 'Cinepic no devolvió esa función; usa session_id y movie_id de una misma función de get_showtimes.');
+    throw new DataError('unavailable', 'Cinepic did not return that showtime; use the session_id and movie_id of one showtime from get_showtimes.');
   }
   const f = object(functionData);
   const functions = rows(f.datos, 'functionData.datos');
-  if (text(functions[0]?.id) !== q.session_id) throw new DataError('unavailable', 'La página no corresponde a la función y película solicitadas.');
+  if (text(functions[0]?.id) !== q.session_id) throw new DataError('unavailable', 'The page does not match the requested showtime and movie.');
   // Cinepic serves a function under another film's movie_id; name the right pair instead of guessing.
   if (text(functions[0]?.codigo) !== q.movie_id) {
     const actual = Id.safeParse(text(functions[0]?.codigo));
-    throw new DataError('unavailable', `Esa función es de otra película${actual.success ? ` (movie_id ${actual.data})` : ''}; usa session_id y movie_id de una misma función de get_showtimes.`);
+    throw new DataError('unavailable', `That showtime is for another movie${actual.success ? ` (movie_id ${actual.data})` : ''}; use the session_id and movie_id of one showtime from get_showtimes.`);
   }
   return { records, f, url };
 }

@@ -44,7 +44,7 @@ test('service preserves a named cinema with malformed code as a nonqueryable dir
   assert.equal(nth(result.items, 0).cinema_id, undefined);
   assert.match(nth(result.items, 0).id, /^directory-/);
   assert.equal(result.total, 1);
-  assert.match(nth(result.warnings, 0), /sede conservada/);
+  assert.match(nth(result.warnings, 0), /venue kept/);
 });
 
 const cu = (html: string) => new CinemaService(new HttpClient(async () => new Response(html)));
@@ -81,7 +81,7 @@ test('CU retries unrecognized city spellings with the official canonical city an
   assert.equal(r.status, 'available'); assert.equal(nth(r.items, 0).city, 'Maturín');
   assert.ok(requests.some(u => u.includes('Matur%C3%ADn')));
   const missing = await s.query('cinemas', { ...cq, city: 'Atlantis' });
-  assert.equal(missing.status, 'unavailable'); assert.match(missing.warnings.join(' '), /ciudad/i);
+  assert.equal(missing.status, 'unavailable'); assert.match(missing.warnings.join(' '), /city/i);
 });
 
 test('CU distinguishes a genuinely empty directory from wholly unreadable data', async () => {
@@ -137,7 +137,7 @@ test('Cines Unidos falls back to its public search API when the website challeng
   const s = new CinemaService(http);
   const cinemas = await s.query('cinemas', { provider: 'cinesunidos', city: 'merida' });
   assert.equal(cinemas.status, 'available'); assert.equal(nth(cinemas.items, 0).cinema_id, '1012'); assert.equal(nth(cinemas.items, 0).city, 'Mérida');
-  assert.ok(cinemas.warnings.some(w => /API pública de búsqueda/.test(w)));
+  assert.ok(cinemas.warnings.some(w => /public search API/.test(w)));
   const showtimes = await s.query('showtimes', { provider: 'cinesunidos', city: 'Mérida', cinema_id: '1012', date: '2026-11-04' });
   assert.deepEqual(showtimes.items.map(i => [i.id, i.movie_id, i.time, i.screen, i.starts_at]), [['44788', 'HO00006098', '18:15', '2', '2026-11-04T18:15:00-04:00']]);
   const movies = await s.query('movies', { provider: 'cinesunidos', city: 'Mérida', date: '2026-11-04' });
@@ -173,7 +173,7 @@ test('the Cines Unidos search fallback searches only matching titles and keeps t
   assert.deepEqual(all.items.map(i => i.name).sort(), ['El Silbón', 'Good Film', 'Otra']);
   // A malformed title fails alone, like a failed request.
   // An ID the service would reject fails its title too, instead of the whole response.
-  assert.ok(all.warnings.some(w => /3 de 6 títulos/.test(w)), all.warnings.join(' | '));
+  assert.ok(all.warnings.some(w => /Showtimes could not be queried for 3 of 6 Cines Unidos titles/.test(w)), all.warnings.join(' | '));
 });
 
 test('the Cines Unidos search fallback stops at its total deadline and keeps the titles it read', async t => {
@@ -193,7 +193,7 @@ test('the Cines Unidos search fallback stops at its total deadline and keeps the
   const r = await new CinemaService(http).query('showtimes', { provider: 'cinesunidos', city: 'Caracas', date: '2026-11-04' });
   assert.equal(r.status, 'available'); assert.equal(r.partial, true);
   assert.ok(r.total > 0 && r.total < 10, `${r.total} titles read before the 45 s budget`);
-  assert.ok(r.warnings.some(w => /Se agotó el tiempo de consulta antes de leer \d+ de 40 títulos/.test(w)), r.warnings.join(' | '));
+  assert.ok(r.warnings.some(w => /query timed out before reading \d+ of 40 Cines Unidos titles/.test(w)), r.warnings.join(' | '));
 });
 
 test('the Cines Unidos search fallback counts its setup reads against the hosted time limit', async t => {

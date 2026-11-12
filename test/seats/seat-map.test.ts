@@ -68,7 +68,7 @@ test('Cinex seat workflow uses only authenticated GETs and rejects an interleave
   assert.equal(partial.available, 1);
   assert.equal(partial.occupied, 1); assert.equal(partial.unknown, 1);
   assert.equal(partial.total, 3); assert.equal(partial.availability_complete, false);
-  assert.match(partial.warnings.join(' '), /cero libres confirmados no significa agotado/);
+  assert.match(partial.warnings.join(' '), /zero confirmed available seats does not mean sold out/);
   // Session check, the function selected on Cinex's regular checkout page, then its seat page.
   assert.deepEqual(urls.map(u => new URL(u).pathname), ['/checklogin.php', '/boletos.php', '/asientos.php']);
   body = cinexMap.replace('sessionid=s1', 'sessionid=other');
@@ -79,7 +79,7 @@ test('Cinex seat workflow uses only authenticated GETs and rejects an interleave
   assert.doesNotThrow(() => assertPrivateRead('cinex', 'https://www.cinex.com.ve/asientos.php'));
   assert.throws(() => assertPrivateRead('cinex', 'https://www.cinex.com.ve/asientos_datadevx.php'));
   // The order route is reachable only through the checked one-ticket POST (see the order tests below).
-  await assert.rejects(http.getAuthenticated('cinex', 'https://www.cinex.com.ve/boletos_data.php'), /no permitida/);
+  await assert.rejects(http.getAuthenticated('cinex', 'https://www.cinex.com.ve/boletos_data.php'), /not allowed/);
   assert.throws(() => assertPrivateRead('cinex', 'https://www.cinex.com.ve/asientosdev.php?extra=1'));
 });
 
@@ -117,7 +117,7 @@ test('Cines Unidos reports confirmed and unknown counts independently, including
   const unknown = await new CinemaService(http).seats(q);
   assert.equal(unknown.available, 0); assert.equal(unknown.unknown, 1);
   assert.equal(unknown.availability_complete, false);
-  assert.match(unknown.warnings.join(' '), /no significa agotado/);
+  assert.match(unknown.warnings.join(' '), /does not mean sold out/);
 });
 
 test('a Cinepic movie_id from another function is reported as a mismatched pair', async () => {
@@ -126,18 +126,18 @@ test('a Cinepic movie_id from another function is reported as a mismatched pair'
   const service = new CinemaService(new HttpClient(async () => new Response(page({ shell: true })), 15000, new EmptySessionStore()));
   const r = await service.seats({ provider: 'cinepic', cinema_id: '123301', session_id: '3720', movie_id: '981' });
   assert.equal(r.status, 'unavailable');
-  assert.match(r.warnings.join(' '), /usa session_id y movie_id de una misma función/);
+  assert.match(r.warnings.join(' '), /use the session_id and movie_id of one showtime/);
 });
 
 test('the ASCII map is oriented as each provider website draws it', () => {
   // Cinepic Candelaria on 2026-11-05: invertida "1", drawn right to left under the screen.
   const map = { butacas: [cp({ butaca: 'A-15-1', columna: '15', nombre_butaca: 'A:5', invertida: '1' }), cp({ butaca: 'A-23-1', columna: '23', nombre_butaca: 'A:1', invertida: '1' })] };
   const lines = renderSeats(parseCinepicSeats(map), seatLayout('cinepic', map)).split('\n');
-  assert.equal(lines[1], 'Orientado como la web del proveedor: pantalla arriba.'); assert.equal(lines[2], '[ PANTALLA ]');
-  assert.ok(nth(lines, 4).indexOf('A:1O') < nth(lines, 4).indexOf('A:5O'), lines[4]);
+  assert.equal(lines[1], 'Oriented like the provider\'s website: screen at the top.'); assert.equal(lines[2], '[ SCREEN ]');
+  assert.ok(nth(lines, 4).indexOf('A:1O') < nth(lines, 4).indexOf('A:5O'), nth(lines, 4));
   assert.deepEqual(seatLayout('cinesunidos'), { screen: 'bottom', column_order: 'ascending' });
   assert.deepEqual(seatLayout('cinex'), { screen: 'bottom', column_order: 'ascending' });
-  assert.match(renderSeats(parseCinepicSeats(map)), /que no indica el lado de la pantalla/, 'no layout claims nothing');
+  assert.match(renderSeats(parseCinepicSeats(map)), /which does not show the screen side/, 'no layout claims nothing');
 });
 
 test('parallel Cinex seat and price reads for different functions do not switch each other', async () => {
@@ -170,7 +170,7 @@ test('parallel Cinex seat and price reads for different functions do not switch 
 test('a Cines Unidos seat answer that is not JSON names the provider response', async () => {
   const sessions = new class extends EmptySessionStore { override async headers() { return { Authorization: 'Bearer synthetic' }; } };
   const r = await new CinemaService(new HttpClient(async () => new Response('<html></html>'), 15000, sessions)).seats({ provider: 'cinesunidos', cinema_id: '1002', session_id: 's1' });
-  assert.equal(r.status, 'error'); assert.match(r.warnings.join(' '), /Cines Unidos no devolvió un mapa de asientos en JSON válido/);
+  assert.equal(r.status, 'error'); assert.match(r.warnings.join(' '), /Cines Unidos did not return a seat map in valid JSON/);
 });
 
 test('a Cines Unidos function no longer on sale online is reported as unavailable, not as a format change', async () => {
@@ -179,7 +179,7 @@ test('a Cines Unidos function no longer on sale online is reported as unavailabl
   const service = new CinemaService(new HttpClient(async () => Response.json({ maxSeatsPerTransaction: 0 }), 15000, sessions));
   const r = await service.seats({ provider: 'cinesunidos', cinema_id: '1005', session_id: 's1' });
   assert.equal(r.status, 'unavailable'); assert.equal(r.total, 0);
-  assert.match(r.warnings.join(' '), /no vende en línea esta función/); assert.doesNotMatch(r.warnings.join(' '), /estructura/);
+  assert.match(r.warnings.join(' '), /does not sell this showtime online/); assert.doesNotMatch(r.warnings.join(' '), /estructura/);
   // A body that is truly different still says so.
   const odd = await new CinemaService(new HttpClient(async () => Response.json({ maxSeatsPerTransaction: 4 }), 15000, sessions)).seats({ provider: 'cinesunidos', cinema_id: '1005', session_id: 's1' });
   assert.equal(odd.status, 'error');
@@ -262,7 +262,7 @@ test('Cinex: a regular room without a grid opens a one-ticket order, reads the m
   assert.equal(cinexSeatOrderFields('<form></form>'), undefined);
   assert.doesNotThrow(() => assertCinexSeatOrder({ total: '3606.48', cantboletos: '1', indicetickets: ',1', bookingfeetotal: '270486', tickettotal: '90.162', totalticketsusd: '100' }));
   for (const bad of [{ cantboletos: '2' }, { indicetickets: ',1,1' }, { indicetickets: '1' }, { total: 'x' }, { extra: '1' }]) {
-    assert.throws(() => assertCinexSeatOrder({ total: '3606.48', cantboletos: '1', indicetickets: ',1', bookingfeetotal: '270486', tickettotal: '90162', totalticketsusd: '100', ...bad }), /no permitido/, JSON.stringify(bad));
+    assert.throws(() => assertCinexSeatOrder({ total: '3606.48', cantboletos: '1', indicetickets: ',1', bookingfeetotal: '270486', tickettotal: '90162', totalticketsusd: '100', ...bad }), /not allowed/, JSON.stringify(bad));
   }
   const sessions = new class extends EmptySessionStore { override async headers() { return { Cookie: 'synthetic' }; } };
   const run = async (options: { orderStatus?: number; vip?: boolean } = {}) => {
@@ -289,8 +289,8 @@ test('Cinex: a regular room without a grid opens a one-ticket order, reads the m
   const ok = await run();
   assert.equal(ok.r.status, 'available'); assert.equal(ok.r.total, 3);
   assert.deepEqual(ok.calls, ['GET /checklogin.php', 'GET /boletos.php', 'GET /asientos.php', 'GET /asientosdev.php', 'POST /boletos_data.php', 'GET /asientos.php', 'GET /resetpurchase.php']);
-  assert.match(ok.r.warnings.join(' '), /abrió uno de 1 boleto sin elegir asiento, leyó el mapa y lo anuló de inmediato/);
-  assert.doesNotMatch(ok.r.warnings.join(' '), /sin seleccionar boletos/, 'no contradictory note');
+  assert.match(ok.r.warnings.join(' '), /opened one for 1 ticket without choosing a seat, read the map and cancelled it at once/);
+  assert.doesNotMatch(ok.r.warnings.join(' '), /without selecting tickets/, 'no contradictory note');
   // The order failing still resets, and the answer stays Cinex's own count without a map.
   const failed = await run({ orderStatus: 500 });
   assert.notEqual(failed.r.status, 'available'); assert.equal(failed.calls.at(-1), 'GET /resetpurchase.php');

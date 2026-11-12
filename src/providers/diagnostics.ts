@@ -26,13 +26,13 @@ export function providerWarning(c: ReadContext, key: string, message: string | (
     const bounded = warningLabel(typeof message === 'function' ? message() : message, 512);
     const index = c.warnings.length;
     c.warnings.push(bounded);
-    state.entries.set(key, { index, count: 1, base: bounded.replace(/ \(repetido \d+ veces\)\.$/, '') });
+    state.entries.set(key, { index, count: 1, base: bounded.replace(/ \(repeated \d+ times\)\.$/, '') });
     return;
   }
   state.suppressed++;
   if (state.aggregateIndex === undefined) {
     state.aggregateIndex = c.warnings.length;
-    c.warnings.push('Se omitieron diagnósticos repetidos o excedentes del proveedor; la respuesta puede ser parcial.');
+    c.warnings.push('Repeated or excess provider diagnostics were omitted; the response may be partial.');
   }
 }
 
@@ -40,7 +40,7 @@ export function providerWarningSummary(c: ReadContext) {
   const state = providerWarningStates.get(c);
   if (!state) return;
   for (const entry of state.entries.values()) {
-    if (entry.count > 1) c.warnings[entry.index] = `${entry.base} (repetido ${entry.count} veces).`;
+    if (entry.count > 1) c.warnings[entry.index] = `${entry.base} (repeated ${entry.count} times).`;
   }
-  if (state.aggregateIndex !== undefined && state.suppressed > 1) c.warnings[state.aggregateIndex] = `Se omitieron ${state.suppressed} diagnósticos repetidos o excedentes del proveedor; la respuesta puede ser parcial.`;
+  if (state.aggregateIndex !== undefined && state.suppressed > 1) c.warnings[state.aggregateIndex] = `${state.suppressed} repeated or excess provider diagnostics were omitted; the response may be partial.`;
 }

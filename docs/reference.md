@@ -1,218 +1,163 @@
-# Referencia técnica de Cinve
+# Technical reference
 
-Esta página reúne el contrato de consulta y los límites que interesan al integrar
-o mantener Cinve. Para empezar, consulta el [README](../README.md).
+Cinve's tools, responses and limits.
 
-## Herramientas MCP
+## MCP tools
 
-| Herramienta | Uso principal |
-| --- | --- |
-| `list_providers` | Describe proveedores, capacidades y límites implementados. |
-| `get_auth_status` | Informa el estado de las conexiones Cinex y Cines Unidos. La caducidad de Cinex es un tope de 24 h: su sesión puede terminar antes por inactividad (se vio en menos de una hora); cuando Cinex la rechaza, Cinve la marca `expired`. |
-| `connect_account` | En modo alojado, crea el enlace privado para conectar un cine. |
-| `disconnect_account` | Elimina la sesión de un cine y sus enlaces pendientes. |
-| `list_cities` | Lista las ciudades publicadas por un proveedor. |
-| `list_cinemas` | Lista sedes; Cines Unidos requiere una ciudad. |
-| `list_movies` | Lista o busca películas según el proveedor y la fecha. |
-| `get_showtimes` | Consulta funciones por sede, película, ciudad o fecha. |
-| `get_ticket_prices` | Consulta tarifas de una función cuando están disponibles. |
-| `get_seats` | Devuelve un mapa de asientos sin seleccionar ni reservar. |
-| `get_concessions` | Consulta la caramelería publicada para una sede. |
+| Tool                 | Purpose                                                  |
+| -------------------- | -------------------------------------------------------- |
+| `list_providers`     | Coverage, capabilities and limits of each cinema.        |
+| `get_auth_status`    | Status of Cinex, Cines Unidos and Supercines accounts.   |
+| `connect_account`    | Hosted mode only: starts connecting a cinema account.    |
+| `disconnect_account` | Hosted mode only: deletes a cinema session from Cinve.   |
+| `list_cities`        | A cinema's cities.                                       |
+| `list_cinemas`       | A cinema's venues.                                       |
+| `list_movies`        | Movies showing, with optional search.                    |
+| `get_showtimes`      | Showtimes by venue, city, movie or date.                 |
+| `get_ticket_prices`  | Ticket prices for a showtime.                            |
+| `get_seats`          | Seat map for a showtime (does not reserve).              |
+| `get_concessions`    | A venue's concessions.                                   |
 
-Salvo `list_providers` y `get_auth_status`, las herramientas reciben `provider`:
-`cinepic`, `cinesunidos` o `cinex`. Los listados admiten `query`
-cuando corresponde, `offset` y `limit` —50 por defecto y 100 como máximo—.
-Continúa con `next_offset` hasta que sea `null`. Un argumento opcional enviado
-como `null` equivale a omitirlo, como lo envían los adaptadores de llamadas a
-funciones en modo estricto.
+Queries take `provider`: `cinex`, `cinesunidos`, `cinepic`, `supercines` or
+`grancine`. Account tools only accept `cinex`, `cinesunidos` or `supercines`;
+in local mode, use `npm run login`.
 
-Para responder con pocas llamadas:
+Lists accept `query`, `offset` and `limit` (50 by default, 100 max). To page,
+repeat with `next_offset` until it is `null`.
 
-- Cinex: `get_showtimes` con `city` consulta todas las sedes verificadas de la
-  ciudad en una sola llamada; con `cinema_id`, una sede (y `movie_id` opcional
-  para filtrarla). Usa `query` para filtrar por título.
-- Cines Unidos: `get_showtimes` con `city` devuelve toda la ciudad; añade
-  `cinema_id` para una sede.
-- Cinepic: sus dos sedes son `123300` (Candelaria) y `123301` (VVIP Lido).
-- Las funciones incluyen `cinema_name` cuando la fuente publica el nombre de la
-  sede junto a la función.
-- Las tarifas de Cinex y Cines Unidos requieren `cinema_id`, `session_id` y una
-  cuenta conectada.
+## Recommended flow
 
-## Flujo recomendado
+1. `list_cities` and `list_cinemas` to get venues.
+2. `get_showtimes` to get showtimes.
+3. `get_ticket_prices` or `get_seats` with the showtime's IDs.
 
-1. Consulta `list_providers` una vez para conocer la cobertura.
-2. Obtén ciudades y sedes con `list_cities` y `list_cinemas`.
-3. Usa únicamente los identificadores devueltos por Cinve.
-4. Consulta funciones y pasa sus identificadores a precios o asientos.
-5. Revisa siempre `status`, `warnings`, `partial` y `sources`.
+Only use IDs returned by Cinve, and don't mix them across cinemas. Venues with
+`code_status=unverified` can't be queried.
 
-No mezcles identificadores entre proveedores. Una sede con
-`code_status=unverified` puede aparecer en el directorio, pero no tiene un código
-confirmado para consultar funciones, precios o caramelería.
+## Arguments by cinema
 
-## Contrato de respuesta
+| Cinema       | What it requires                                                                                   |
+| ------------ | -------------------------------------------------------------------------------------------------- |
+| Cinex        | `get_showtimes` with `city` reads the whole city; with `cinema_id`, one venue; with `movie_id`, every venue for that movie. `list_movies` is the general catalog, with no date or venue. |
+| Cines Unidos | `list_cinemas`, `list_movies` and `get_showtimes` require `city`; add `cinema_id` for one venue.   |
+| Cinepic      | Two venues: `123300` (Candelaria) and `123301` (VVIP Lido). Everything except cities and venues requires `cinema_id`. |
+| Supercines   | `get_showtimes` requires `cinema_id`, `city` or `movie_id`. Prices require `movie_id` and, if not today, the same `date` used in `get_showtimes`. |
+| Gran Cine    | `get_showtimes` with no venue or city reads all its screens.                                       |
 
-Las consultas incluyen:
+## Responses
 
 - `status`: `available`, `empty`, `unavailable`, `auth_required`, `blocked`,
-  `rate_limited` o `error`.
-- `items`: registros normalizados y validados.
-- `sources`: URL, fecha de lectura y estado de caché de las fuentes. Se listan
-  como máximo 10, incluida siempre la más antigua; si hubo más, una advertencia
-  indica el total.
-- `queried_at` y `timezone`, configurada como `America/Caracas`.
-- `warnings`, `partial`, `total` y `next_offset`.
+  `rate_limited` or `error`. `empty` means no results, not a failure.
+- `items`: the results.
+- `partial: true`: Cinve couldn't verify part of the response.
+- `warnings`, `sources`, `total`, `next_offset`, `queried_at` and `timezone`.
 
-`empty` significa que el proveedor devolvió una lista vacía o que no hubo
-coincidencias. No equivale a un fallo ni a un precio cero. `partial: true` indica
-que Cinve omitió o no pudo verificar parte de la respuesta.
+## Coverage
 
-## Cobertura actual
+| Cinema       | Prices | Concessions | Seats | Account required                   |
+| ------------ | ------ | ----------- | ----- | ---------------------------------- |
+| Cinex        | Yes    | Yes         | Yes   | Prices, concessions and seats      |
+| Cines Unidos | Yes    | Yes         | Yes   | Prices and seats                   |
+| Cinepic      | Yes    | Yes         | Yes   | No                                 |
+| Supercines   | Yes    | Yes         | No    | No (optional, for account fares)   |
+| Gran Cine    | No     | No          | No    | No                                 |
 
-| Proveedor | Cobertura | Límites conocidos |
-| --- | --- | --- |
-| Cinepic | Dos sedes configuradas; películas, funciones, precios, asientos y consulta de caramelería. | No descubre sedes nuevas automáticamente. La conversión a USD usa la tasa publicada por el proveedor. La caramelería es el mismo catálogo que muestra su web de compra; el 5 de noviembre de 2026 estaba vacío en ambas sedes aunque la venta en línea está habilitada, y Cinve lo informa como `empty`. Cuando tenga productos, se leen como su web: precio en Bs. con equivalencia USD a su tasa, sin stock, y `options_required` para los combos con opciones. |
-| Cines Unidos | Ciudades, sedes, películas, funciones, caramelería, precios y asientos. | Precios y asientos requieren una cuenta conectada. Si su web exige un desafío anti-bots (ocurre desde algunas redes de centros de datos, como la del servicio alojado), sedes, películas y funciones se leen de su API pública de búsqueda y el resultado lo advierte. Esa vía consulta cada título por separado, dos a la vez y con un plazo total de 45 s; con `query` solo consulta los títulos que coinciden. Los títulos que fallan o no se alcanzan a leer se cuentan en una advertencia y el resultado se marca `partial`. |
-| Cinex | Ciudades, sedes, catálogo, funciones, precios, caramelería y asientos. | Precios, caramelería y asientos requieren una cuenta conectada. Algunos cruces de títulos pueden ser parciales. El descubrimiento de sedes tiene un plazo de 40 s, comprobado antes de cada lectura; las sedes sin comprobar se devuelven como `unverified` y `partial`. Las funciones por ciudad leen hasta 16 sedes, dos a la vez, con un plazo total de 45 s; nombran las que no se pudieron leer y fallan si no se leyó ninguna. |
+All of them provide venues, movies and showtimes. Limitations:
 
-La cobertura describe implementaciones, no certifica que cada proveedor esté
-disponible en todo momento ni que abarque todos los cines de Venezuela.
+- **Cines Unidos:** if its website serves an anti-bot challenge (common from
+  cloud servers), Cinve uses its public search API. It can be slower and mark
+  results as `partial`.
+- **Supercines:** showtimes sold only at the box office appear in `warnings`.
+  Accounts created with Google can't be connected.
+- **Gran Cine:** arthouse cinema (Paseo Las Mercedes, Cine Ávila and other
+  screens); publishes about 20 days ahead.
+- **Cinepic:** its concessions API may return an empty catalog.
+- **Cinex:** venue discovery and city-wide queries have time limits; venues
+  that couldn't be read are listed in the result.
+- **Prices:** Cinepic and Supercines compute USD with the rate the cinema
+  publishes. No price is the final purchase total.
 
-## Mapas de asientos
+## Seat maps
 
-`get_seats` requiere `cinema_id` y `session_id`; Cinepic también requiere
-`movie_id`. Cinex y Cines Unidos requieren una cuenta conectada. La herramienta
-no selecciona asientos ni crea órdenes.
+`get_seats` requires `cinema_id` and `session_id`; Cinepic also requires
+`movie_id`. Cinex and Cines Unidos require a connected account.
 
 ```text
-O libre  X ocupado  - no disponible  ? desconocido
+O available  X occupied  - restricted/unavailable  ? unknown
 ```
 
-El resultado incluye `available`, `occupied`, `unavailable`, `unknown`, `total`,
-`availability_complete` y el mapa `ascii`, que muestra cada asiento con su
-etiqueta y estado (`O` corresponde a `status=available`). El detalle por asiento
-(`seats`: identificador, fila, coordenadas y estado del proveedor) se añade solo
-con `include_seats=true`, porque ocupa unas diez veces más que el mapa. En esta herramienta, `status=available` significa que
-se obtuvo un mapa, no que todas sus butacas estén libres. Si `unknown` es mayor
-que cero, el mapa es parcial; cero asientos libres confirmados no significa que
-la función esté agotada.
+Returns the `ascii` map and the `available`, `occupied`, `unavailable`,
+`unknown` and `total` counters. `include_seats=true` adds each seat.
 
-En Cinepic, una butaca libre solo cuenta como `available` si alguna tarifa de la
-función puede venderla: su web compara el `id` de la tarifa con el tipo de
-butaca y muestra las demás como no disponibles (en Candelaria, las butacas
-especiales de la fila A y algunas de las filas I y J). Su web vende además un
-cupo por tarifa, a menudo menor que las butacas libres; `get_ticket_prices` lo
-devuelve como `tickets_available` (cupo menos vendidas y retenidas en compras en
-curso) y `get_seats` lo advierte cuando es menor.
+- `status=available` means the map was retrieved, not that seats are free.
+- `availability_complete` is `true` only if the map has seats and none are
+  unknown. If `unknown` is greater than zero, the map is partial: zero free
+  seats with unknowns does **not** mean sold out.
+- No seat is selected or reserved, and nothing is paid.
 
-`layout` indica cómo se orientan el mapa ASCII y la imagen, igual que en la web
-de cada cine (comprobado en su código el 5 de noviembre de 2026):
+`layout` says how the ASCII map and the image are oriented, the same way each
+cinema's website draws them:
 
-| Proveedor | Pantalla | Columnas |
-| --- | --- | --- |
-| Cinepic | Arriba, junto a la fila 1 | De derecha a izquierda en las salas marcadas `invertida` |
-| Cines Unidos | Abajo | De izquierda a derecha |
-| Cinex | Abajo: su página dibuja la imagen de la pantalla después de la fila A | En el orden de su página, de izquierda a derecha |
+| Cinema       | Screen                                      | Columns                                          |
+| ------------ | ------------------------------------------- | ------------------------------------------------ |
+| Cinepic      | Top, next to row 1                          | Right to left in rooms marked `invertida`         |
+| Cines Unidos | Bottom                                      | Left to right                                    |
+| Cinex        | Bottom: its page draws the screen after row A | In page order; shorter rows are centred (`row_shift`) |
 
-Para muchas funciones, Cinex solo envía el mapa después de elegir boletos, lo que
-abre una orden temporizada. Cinve no elige boletos porque eso los retendría; en
-ese caso `get_seats` responde `unavailable` con el contador "Asientos
-disponibles" que Cinex sí publica en la misma página.
+Wheelchair spaces carry `accessible: true` (Cines Unidos and Cinex mark them);
+they keep their status, restricted unless occupied, and the image draws them in
+blue with a wheelchair icon.
 
-Además de los datos, `get_seats` devuelve el mapa como imagen PNG (hasta 1200 px
-de ancho) para mostrarla o compartirla, con la leyenda, los contadores y la hora
-de consulta. La cabecera nombra la función con `showing` (película, sede, sala,
-fecha y hora), que se lee de la misma respuesta del mapa: completo en Cinex y
-Cinepic; en Cines Unidos solo la sala, porque su mapa no trae la película ni la
-sede. En Cinex se compara además con su contador "Asientos disponibles" y se
-advierte si difiere. `image=svg` devuelve el mismo mapa como SVG embebido e
-`image=none`, solo los datos. Si la imagen no se puede generar, la respuesta
-conserva los datos y lo advierte. La imagen usa el estilo de la marca (sala
-oscura, butacas libres en rojo y el total de libres en ámbar) y se dibuja con
-resvg (WebAssembly) y las fuentes Instrument Sans y Bricolage Grotesque incluidas
-en `src/assets` como instancias estáticas, sin depender de fuentes del sistema.
+At Cinepic, a free seat is `available` only if one of the showtime's fares can
+sell it; its website shows the others as unavailable. It also sells a quota per
+fare, often below the free seats; `get_ticket_prices` returns it as
+`tickets_available` and `get_seats` warns when it is lower.
 
-## Caché, red y seguridad
+Cinex draws a regular room's map only on a session that has opened an order
+before. When neither of its seat pages draws one, Cinve opens an order of
+exactly one ticket, never picks a seat, reads the map and always resets the
+order in the same call (`resetpurchase.php`, the route Cinex uses when its
+countdown ends), one order at a time per account. The result's warnings say so. When no map is
+published, Cinex's own "available seats" counter is reported instead.
 
-- Las lecturas HTTP tienen un plazo de 15 segundos (25 s para Cinepic, cuyo
-  servidor a veces tarda unos 19 s en responder) y un cuerpo máximo de 4 MiB. El
-  cuerpo se decodifica con el `charset` que declara la respuesta (UTF-8 si no
-  declara ninguno).
-- Una lectura pública se repite una sola vez, tras una pausa breve, si la
-  conexión falla antes de recibir respuesta o el proveedor responde 502 o 504, y
-  solo si queda al menos la mitad de su plazo. No se repiten respuestas 4xx, 429
-  ni 503, los vencimientos de plazo ni las lecturas autenticadas.
-- Una llamada de herramienta no inicia lecturas del proveedor después de 60 s; con la lectura en curso termina en unos 75 s (85 s en el peor caso de Cinepic), por debajo del límite de 90 s del servicio alojado. Los plazos de 40 y 45 s de los recorridos por sedes o títulos cuentan dentro de ese límite.
-- Hay como máximo dos consultas activas y 32 en cola por origen.
-- Si el cliente cancela una llamada, Cinve no inicia más lecturas para ella; las
-  que ya están en curso terminan, porque otras consultas pueden compartirlas.
-- Si el cliente envía un `progressToken`, las consultas que leen muchas fuentes
-  (descubrimiento de sedes Cinex, funciones Cinex por ciudad y la API de búsqueda
-  de Cines Unidos) envían `notifications/progress` con un valor creciente y un
-  mensaje como «Cinex: 3 de 9 sedes leídas.».
-- Las instrucciones del servidor son breves (menos de 2.048 caracteres en todos
-  los modos) y empiezan por las reglas esenciales, porque algunos clientes solo
-  muestran el comienzo. Las reglas de asientos están en la descripción de
-  `get_seats`, y los pasos de conexión llegan con cada resultado `auth_required`
-  y en `get_auth_status`.
-- Los esquemas publicados usan expresiones regulares compatibles con
-  validadores ECMA, Python y RE2 (sin `lookaround` ni `\p{...}`); las reglas que
-  no lo son se comprueban en el servidor.
-- La caché pública mantiene hasta 512 entradas y 64 MiB, y descarta primero la
-  entrada usada hace más tiempo. Las páginas HTML de Cinex se guardan con los
-  espacios en blanco compactados. Las sesiones y los mapas
-  de asientos no usan caché.
-- Duración en caché: una hora para ciudades, directorios de sedes y datos de
-  identidad de sede de Cinex; 10 minutos para la tasa de Cinepic y 5 para su
-  caramelería; 2 minutos para carteleras, funciones y la caramelería de Cines
-  Unidos (que publica stock); 1 minuto para la página de compra de Cinepic.
-- Solo se guardan respuestas correctas: un error HTTP, un cuerpo vacío, un JSON
-  inválido o una página sin la estructura esperada (por ejemplo, una página de
-  mantenimiento) se informan y se vuelven a pedir en la siguiente consulta.
-- Una comprobación de sesión Cinex que responde `on` se reutiliza durante un
-  minuto en el mismo proceso; cualquier lectura Cinex fallida la descarta.
-- Si la comprobación de sesión Cinex responde algo distinto de `on` u `off`, se
-  informa como un fallo de Cinex y la sesión no se marca expirada. Si un
-  proveedor rechaza la sesión guardada (HTTP 401 o redirección a su login),
-  Cinve la marca `expired`.
-- Los errores distinguen el lado que falló: un fallo al leer la sesión guardada
-  es de Cinve y no llega a consultar al proveedor; un plazo vencido o una
-  conexión cortada se atribuyen al proveedor.
-- Si un origen público responde con un desafío anti-bots, Cinve lo recuerda
-  durante 10 minutos: las consultas siguientes usan directamente la alternativa
-  documentada (o informan el bloqueo) sin volver a pedir la página. `refresh=true`
-  vuelve a intentarlo, y cualquier lectura correcta del origen lo olvida.
-- El servidor solo realiza solicitudes GET a orígenes y rutas permitidos: cada
-  lectura pública se valida contra la lista de páginas y API que los adaptadores
-  interpretan, con sus parámetros exactos, y las lecturas autenticadas tienen su
-  propia lista. Los flujos de inicio de sesión son la excepción controlada.
-- Si un proveedor devuelve el mismo identificador de función con película,
-  fecha, hora o sala distintas, la función se omite y el resultado se marca
-  `partial`, porque ese identificador se usa para tarifas y asientos.
-- El HTML y JSON externos se tratan como datos, nunca como instrucciones.
-- Los enlaces inseguros, redirecciones no autorizadas y registros inválidos se
-  rechazan o se omiten con una advertencia.
+Besides the data, `get_seats` returns the map as a PNG image (up to 1200 px
+wide) to show or share, with the legend, counters and lookup time. Its header
+names the showtime from `showing` (movie, venue, room, date and time), read from
+the same map response: complete at Cinex and Cinepic, only the room at Cines
+Unidos. `image=svg` returns the same map as embedded SVG and `image=none` only
+the data. If the image can't be drawn, the response keeps the data and warns.
+The image uses Cinve's brand style, with Spanish labels for the people it is
+shown to, and is drawn with resvg (WebAssembly) and the Instrument Sans and
+Bricolage Grotesque fonts bundled in `src/assets` as static instances.
 
-En modo local se guardan sesiones con permisos privados del sistema de archivos.
-En el servicio alojado se cifran con AES-256-GCM y los tokens OAuth se conservan
-como resúmenes SHA-256. Consulta [la guía del servicio alojado](hosted.md) para el
-ciclo completo de autenticación y despliegue.
+## Cache and network
 
-## Validación
-
-```sh
-npm run check
-npm test
-npm run build
-npm run smoke
-```
-
-Las tres primeras tareas validan tipos, comportamiento y compilación. `smoke`
-consulta fuentes reales y sus resultados pueden cambiar. Con
-`npm run smoke -- --require-auth` también se exigen muestras autenticadas de
-Cinex y Cines Unidos.
-
-Las decisiones vigentes deben quedar reflejadas en esta referencia, en el código
-y en las pruebas. Las observaciones puntuales de proveedores no se presentan como
-datos actuales ni como garantías del servicio.
+- Public responses are cached; `refresh=true` forces a fresh read. Account
+  reads and seats are never cached. Only correct answers are kept: an HTTP
+  error, an empty body, invalid JSON or a page without the expected structure
+  (a maintenance page, for example) is reported and asked for again next time.
+- Cache lifetimes: one hour for cities, venue directories and Cinex venue
+  identity; 10 minutes for Cinepic's rate and 5 for its concessions; 2 minutes
+  for listings, showtimes and Cines Unidos concessions (which publish stock);
+  1 minute for Cinepic's purchase page.
+- Each read has a 15 s timeout (25 s for Cinepic, whose server sometimes takes
+  about 19 s), a 4 MiB body limit, and at most two concurrent reads per site.
+  Bodies are decoded with the `charset` the response declares (UTF-8 if none).
+- A public read is retried once, after a short pause, if the connection fails
+  before any response or the site answers 502 or 504, and only while at least
+  half of its timeout remains. 4xx, 429 and 503 answers, timeouts, form posts
+  and account reads are never retried.
+- A tool call starts no provider read after 60 s, counted from when the hosted
+  server received the request; with the read in flight it ends within about
+  75 s (85 s at worst for Cinepic), under the hosted 90 s limit.
+- A Cinex session check that answers `on` is reused for one minute in the same
+  process; any failed Cinex read drops it. An answer other than `on` or `off` is
+  reported as Cinex failing, and the session is not marked expired. A provider
+  refusing the saved session (HTTP 401 or a redirect to its login) marks it
+  `expired`.
+- Errors say which side failed: failing to read the saved session is Cinve's
+  and never reaches the provider; a timeout or a cut connection is the
+  provider's.
+- Only allowed pages, APIs and forms are queried. Cinve never buys, pays,
+  selects a seat or changes accounts; the only order step is the one-ticket
+  Cinex seat-map order above, always reset.

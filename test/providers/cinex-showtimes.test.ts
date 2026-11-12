@@ -47,7 +47,7 @@ test('Cinex cinema-wide showtimes use one cinema page plus one catalog, paginate
   assert.equal(first.status, 'available'); assert.equal(first.total, 2); assert.equal(first.next_offset, 1);
   assert.equal(nth(first.items, 0).movie_id, 'coyote'); assert.equal(first.partial, true);
   assert.equal(nth(first.items, 0).id, '23059'); assert.equal(nth(first.items, 0).screen, '1'); assert.equal(nth(first.items, 0).language, 'es');
-  assert.ok(first.warnings.some(w => /catálogo|identificador/.test(w)));
+  assert.ok(first.warnings.some(w => /catalog|identifier/.test(w)));
   assert.deepEqual(requests, ['/cartelera.html', '/cines.html', '/cinex-sambil.html']);
 
   const cached = await s.query('showtimes', { provider: 'cinex', cinema_id: 'SBC', date: '2026-09-18', offset: 0, limit: 1 });
@@ -100,7 +100,7 @@ test('Cinex rejects a schedule page with no session blocks as a schema error', a
     { XX: [{ siglas: 'XX', name: 'X CINEMA' }] },
   );
   const result = await s.query('showtimes', { provider: 'cinex', cinema_id: 'XX', date: '2026-09-18' });
-  assert.equal(result.status, 'error'); assert.match(result.warnings.join(' '), /estructura/);
+  assert.equal(result.status, 'error'); assert.match(result.warnings.join(' '), /structure/);
 });
 
 test('Cinex permanently suppresses a session ID after cross-movie conflict, including a third duplicate', async () => {
@@ -115,7 +115,7 @@ test('Cinex permanently suppresses a session ID after cross-movie conflict, incl
   const result = await s.query('showtimes', { provider: 'cinex', cinema_id: 'XX', date: '2026-09-18' });
   assert.equal(result.status, 'empty'); assert.equal(result.total, 0); assert.equal(result.partial, true);
   assert.equal(result.items.some(item => item.id === 's1'), false);
-  assert.ok(result.warnings.some(w => /contradictorios/.test(w)));
+  assert.ok(result.warnings.some(w => /contradictory/.test(w)));
 });
 
 test('a Cinex venue plus movie query reads the venue page, not the synopsis page', async () => {
@@ -139,7 +139,7 @@ test('a Cinex venue plus movie query reads the venue page, not the synopsis page
   // Movie-only queries still read the synopsis page, and an empty one points to the venue path.
   const movieOnly = await s.query('showtimes', { provider: 'cinex', movie_id: 'elsilbon', date: '2026-09-18' });
   assert.equal(movieOnly.status, 'unavailable');
-  assert.ok(movieOnly.warnings.some(w => /cinema_id de cada sede/.test(w)), movieOnly.warnings.join(' | '));
+  assert.ok(movieOnly.warnings.some(w => /cinema_id of each venue/.test(w)), movieOnly.warnings.join(' | '));
 });
 
 test('Cinex city showtimes read every verified venue of the city in one call and keep the ones that answer', async () => {
@@ -161,7 +161,7 @@ test('Cinex city showtimes read every verified venue of the city in one call and
   assert.equal(r.status, 'available');
   assert.deepEqual(r.items.map(i => [i.id, i.cinema_id, i.cinema_name, i.movie_id, i.time]), [['1', 'SBC', 'Sambil', 'clayface', '20:30']]);
   assert.equal(r.partial, true);
-  assert.ok(r.warnings.some(w => /1 sedes Cinex \(Lider\)/.test(w)), r.warnings.join(' | '));
+  assert.ok(r.warnings.some(w => /1 Cinex venues \(Lider\)/.test(w)), r.warnings.join(' | '));
   assert.ok(!requests.includes('/cinex-tolon.html'), 'venues of other cities are not read');
   assert.equal(inputSchema('showtimes').safeParse({ provider: 'cinex', city: 'Caracas' }).success, true);
   assert.equal(inputSchema('showtimes').safeParse({ provider: 'cinex', city: 'Caracas', cinema_id: 'SBC' }).success, false);
@@ -191,7 +191,7 @@ test('Cinex city showtimes keep reads within the per-origin limit, and a city wi
   const none = await new CinemaService(down, new CinexCinemaCatalog()).query('showtimes', { provider: 'cinex', city: 'Caracas', date: '2026-09-18' });
   assert.notEqual(none.status, 'empty', 'no venue was read, so there is no observed empty schedule');
   assert.equal(none.status, 'error');
-  assert.ok(none.warnings.some(w => /4 sedes Cinex/.test(w)), none.warnings.join(' | '));
+  assert.ok(none.warnings.some(w => /4 Cinex venues/.test(w)), none.warnings.join(' | '));
 });
 
 test('Cinex city showtimes fail, rather than report an empty city, when no venue code could be verified', async () => {
@@ -203,7 +203,7 @@ test('Cinex city showtimes fail, rather than report an empty city, when no venue
   const s = new CinemaService(http, new CinexCinemaCatalog());
   const r = await s.query('showtimes', { provider: 'cinex', city: 'Caracas', date: '2026-11-04' });
   assert.equal(r.status, 'unavailable'); assert.equal(r.total, 0);
-  assert.ok(r.warnings.some(w => /ninguna sede Cinex/.test(w)), r.warnings.join(' | '));
+  assert.ok(r.warnings.some(w => /No Cinex venue code in this city could be verified/.test(w)), r.warnings.join(' | '));
   const elsewhere = await s.query('showtimes', { provider: 'cinex', city: 'Maracay', date: '2026-11-04' });
   assert.equal(elsewhere.status, 'empty', 'a city without Cinex venues is a real empty answer');
 });
@@ -229,7 +229,7 @@ test('one Cinex venue with an invalid item fails alone instead of emptying the c
   assert.equal(r.status, 'available', r.warnings.join(' | '));
   assert.deepEqual(r.items.map(i => [i.id, i.cinema_id]), [['1', 'SBC']]);
   assert.equal(r.partial, true);
-  assert.ok(r.warnings.some(w => /1 sedes Cinex \(Lider\)/.test(w)), r.warnings.join(' | '));
+  assert.ok(r.warnings.some(w => /1 Cinex venues \(Lider\)/.test(w)), r.warnings.join(' | '));
 });
 
 const epoch = (date: string, time = '18:00') => String(Date.parse(`${date}T${time}:00-04:00`) / 1000);
@@ -253,8 +253,8 @@ test('a Cinex movie_id without a synopsis page is reported as a wrong ID, not as
   const s = new CinemaService(http);
   const missing = await s.query('showtimes', { provider: 'cinex', movie_id: 'noexiste', date: '2026-09-18' });
   assert.equal(missing.status, 'unavailable');
-  assert.ok(missing.warnings.some(w => /no tiene una ficha para ese movie_id; obtén un ID vigente con list_movies/.test(w)), missing.warnings.join(' | '));
+  assert.ok(missing.warnings.some(w => /has no page for that movie_id; get a current ID with list_movies/.test(w)), missing.warnings.join(' | '));
   const empty = await s.query('showtimes', { provider: 'cinex', movie_id: 'clayface', date: '2026-09-18' });
   assert.equal(empty.status, 'unavailable');
-  assert.ok(empty.warnings.some(w => /no lista funciones/.test(w)), empty.warnings.join(' | '));
+  assert.ok(empty.warnings.some(w => /lists no showtimes/.test(w)), empty.warnings.join(' | '));
 });

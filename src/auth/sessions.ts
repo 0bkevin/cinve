@@ -8,21 +8,23 @@ import * as z from 'zod';
 import { DataError, isObj } from '../core.js';
 import { assertPrivateRead } from '../http/allow-list.js';
 
-export const AuthProvider = z.enum(['cinex', 'cinesunidos']);
+export const AuthProvider = z.enum(['cinex', 'cinesunidos', 'supercines']);
 export type AuthProviderId = z.infer<typeof AuthProvider>;
+/** Providers whose website session is a cookie jar (the others use a bearer token). */
+const cookieSession = (p: AuthProviderId) => p === 'cinex' || p === 'supercines';
 export const Session = z.object({
   version: z.literal(1), provider: AuthProvider, expires_at: z.number().int().positive().max(8.64e15),
   /** When this login was saved; a refusal seen after a newer login must not expire it. */
   saved_at: z.number().int().positive().max(8.64e15).optional(),
   cookie_jar: z.string().max(100000).optional(), access_token: z.string().min(1).max(16000).regex(/^[A-Za-z0-9._~+\/-]+=*$/).optional(),
-}).strict().refine(s => s.provider === 'cinex' ? !!s.cookie_jar && !s.access_token : !!s.access_token && !s.cookie_jar);
+}).strict().refine(s => cookieSession(s.provider) ? !!s.cookie_jar && !s.access_token : !!s.access_token && !s.cookie_jar);
 export type AuthSession = z.infer<typeof Session>;
-/** The Cinex cookie jar a session carries; the schema's refinement requires one for Cinex. */
-function cinexJar(s: AuthSession): CookieJar {
-  if (s.cookie_jar === undefined) throw new Error('A Cinex session carries a cookie jar.');
+/** The cookie jar a Cinex or Supercines session carries; the schema's refinement requires one. */
+function sessionJar(s: AuthSession): CookieJar {
+  if (s.cookie_jar === undefined) throw new Error('A cookie session carries a cookie jar.');
   return CookieJar.deserializeSync(s.cookie_jar);
 }
-const loginHint = (p: AuthProviderId) => `Ejecuta npm run login -- ${p} en una terminal local. No envíes contraseñas al agente.`;
+const loginHint = (p: AuthProviderId) => `Run npm run login -- ${p} in a local terminal. Do not send passwords to the agent.`;
 
 /** One OS user per MCP process. No passwords, profile data, or shared session cache. */
 export class SessionStore {
@@ -52,19 +54,19 @@ export class SessionStore {
         if (!stat.isFile() || stat.size > 128 * 1024 || (stat.mode & 0o077) || (process.getuid && stat.uid !== process.getuid())) throw new Error();
         const session = Session.parse(JSON.parse(await handle.readFile('utf8')));
         if (session.provider !== p) throw new Error();
-        if (p === 'cinex') cinexJar(session);
+        if (cookieSession(p)) sessionJar(session);
         return session;
       } finally { await handle.close(); }
     } catch (e) {
       if (isObj(e) && e.code === 'ENOENT') return undefined;
-      throw new DataError('auth_required', `La sesión local de ${p} no es válida o tiene permisos inseguros. ${loginHint(p)}`);
+      throw new DataError('auth_required', `The local ${p} session is invalid or has insecure permissions. ${loginHint(p)}`);
     }
   }
   async save(value: AuthSession) {
     const s = Session.parse(value);
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
     const stat = await lstat(this.directory);
-    if (!stat.isDirectory() || (process.getuid && stat.uid !== process.getuid())) throw new Error('Directorio de sesiones no válido.');
+    if (!stat.isDirectory() || (process.getuid && stat.uid !== process.getuid())) throw new Error('Invalid session directory.');
     await chmod(this.directory, 0o700);
     const path = this.path(s.provider), temporary = `${path}.${randomUUID()}.tmp`;
     try {
@@ -76,7 +78,7 @@ export class SessionStore {
   async remove(p: AuthProviderId) {
     try {
       const dir = await lstat(this.directory);
-      if (!dir.isDirectory() || (process.getuid && dir.uid !== process.getuid())) throw new Error('Directorio de sesiones no válido.');
+      if (!dir.isDirectory() || (process.getuid && dir.uid !== process.getuid())) throw new Error('Invalid session directory.');
       await unlink(this.path(p));
     } catch (e) { if (!isObj(e) || e.code !== 'ENOENT') throw e; }
   }
@@ -102,8 +104,19 @@ export class SessionStore {
     if (!s || s.expires_at <= Date.now()) throw new DataError('auth_required', loginHint(p));
     this.sent.set(p, s.saved_at ?? 0);
     if (p === 'cinesunidos') return { Authorization: `Bearer ${s.access_token}`, xChannel: 'www' };
+    if (p === 'supercines') {
+      // Laravel accepts the session's own XSRF-TOKEN cookie, echoed in a
+      // header, as the form token: no page read is needed per request, and
+      // an ended session answers 419 instead of silently reading as a guest.
+      try {
+        const jar = sessionJar(s), cookies = await jar.getCookies(url);
+        const xsrf = cookies.find(c => c.key === 'XSRF-TOKEN')?.value;
+        if (!xsrf || !cookies.some(c => c.key === 'supercines_session')) throw new Error();
+        return { Cookie: await jar.getCookieString(url), 'X-XSRF-TOKEN': decodeURIComponent(xsrf), 'X-Requested-With': 'XMLHttpRequest' };
+      } catch { throw new DataError('auth_required', loginHint(p)); }
+    }
     try {
-      const cookie = await cinexJar(s).getCookieString(url);
+      const cookie = await sessionJar(s).getCookieString(url);
       if (!cookie) throw new Error();
       return { Cookie: cookie, Referer: 'https://www.cinex.com.ve/', 'X-Requested-With': 'XMLHttpRequest' };
     } catch { throw new DataError('auth_required', loginHint(p)); }

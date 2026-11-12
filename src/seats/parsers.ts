@@ -57,7 +57,7 @@ function validateSeats(seats: SeatData[]): SeatData[] {
   const positions = new Set<string>(), ids = new Set<string>();
   for (const s of result) {
     const key = `${s.area}:${s.row_index}:${s.column_index}`;
-    if (positions.has(key) || ids.has(s.id)) throw new DataError('error', 'El mapa contiene posiciones o identificadores duplicados.');
+    if (positions.has(key) || ids.has(s.id)) throw new DataError('error', 'The map contains duplicate positions or identifiers.');
     positions.add(key); ids.add(s.id);
   }
   return result;
@@ -102,7 +102,7 @@ export function parseCinesUnidosSeats(data: unknown): SeatData[] {
   return validateSeats(rows(object(object(data).seats).areas, 'seats.areas').flatMap(a =>
     rows(a.rows, 'area.rows').flatMap(r => rows(r.seats, 'row.seats').map(s => {
       const p = object(s.position), status = text(s.status), area = text(a.number), row = text(r.physicalName);
-      if (text(p.areaNumber) !== area || text(p.rowIndex) !== text(r.rowIndexZeroBased)) throw new DataError('error', 'Posición de asiento inconsistente.');
+      if (text(p.areaNumber) !== area || text(p.rowIndex) !== text(r.rowIndexZeroBased)) throw new DataError('error', 'Inconsistent seat position.');
       return {
         id: `${area}:${row}:${text(s.id)}`, label: `${row}:${text(s.id)}`, row, area,
         row_index: Number(p.rowIndex), column_index: Number(p.columnIndex),
@@ -166,9 +166,9 @@ export function parseCinexSeats(html: string, q: Query): SeatData[] {
   if (!url || url.origin !== 'https://www.cinex.com.ve' || !['/boletos.php', '/boletosdev.php'].includes(url.pathname) ||
       url.searchParams.getAll('cinemaid').length !== 1 || url.searchParams.getAll('sessionid').length !== 1 ||
       url.searchParams.get('cinemaid') !== q.cinema_id || url.searchParams.get('sessionid') !== q.session_id) {
-    throw new DataError('unavailable', 'El mapa Cinex no corresponde a la sede y función solicitadas; repite la consulta.');
+    throw new DataError('unavailable', 'The Cinex map does not match the requested venue and showtime; repeat the query.');
   }
-  if (/error al obtener el mapa/i.test(html)) throw new DataError('unavailable', 'Cinex respondió con un error al cargar el mapa de esta función.');
+  if (/error al obtener el mapa/i.test(html)) throw new DataError('unavailable', 'Cinex responded with an error while loading the map for this showtime.');
   const result: SeatData[] = [];
   const freeClasses = new Set(['seat', 'seatestandar', 'seatvipbed', 'seatvipplus', 'seatvipstandar']);
   $('#mapcontent .row').filter((_, r) => $(r).children('.rowletter').length === 1).each((rowIndex, r) => {
@@ -182,13 +182,13 @@ export function parseCinexSeats(html: string, q: Query): SeatData[] {
         || (classes.includes('occupied') && classes.some(c => freeClasses.has(c)));
       const id = seat.attr('id') ?? (occupied ? seat.attr('title') : undefined);
       if (!id) {
-        if (!seat.hasClass('blankspace')) throw new DataError('error', 'Elemento desconocido en el mapa Cinex.');
+        if (!seat.hasClass('blankspace')) throw new DataError('error', 'Unknown element in the Cinex map.');
         return;
       }
       // Argument 6 is the selected-ticket count, not seat availability. Cinex
       // emits an empty string in VIP rooms before any tickets are selected.
       const call = (seat.attr('onclick') ?? '').match(/^javascript:decideAsientoNew\('([A-Za-z0-9]+)','(\d+)','(\d+)','(\d+)','([A-Za-z0-9]+)','(\d*)','([NS])'(?:,'([NS])')?\);?$/);
-      if (call && call[1] !== id) throw new DataError('error', 'Identificador de asiento Cinex inconsistente.');
+      if (call && call[1] !== id) throw new DataError('error', 'Inconsistent Cinex seat identifier.');
       const restricted = classes.some(c => /wheelchair|selected/.test(c)) || call?.[7] === 'S' || call?.[8] === 'S';
       const available = call && seat.attr('alt') === '0' && classes.length === 1 && classes.every(c => freeClasses.has(c));
       result.push({ id, label: id, row, area: 'Sala', row_index: rowIndex, column_index: columnIndex,
@@ -196,7 +196,7 @@ export function parseCinexSeats(html: string, q: Query): SeatData[] {
         provider_status: seat.attr('alt') ?? 'unknown', category: call?.[5], ...(classes.some(c => /wheelchair/.test(c)) ? { accessible: true } : {}) });
     });
   });
-  if (result.length !== $('#mapcontent [id], #mapcontent [class$="-occupied"], #mapcontent .occupied:not([id])').length) throw new DataError('error', 'El mapa Cinex contiene asientos fuera de filas reconocidas.');
-  if (!result.length) throw new EmptyCinexMap('unavailable', 'Cinex no devolvió asientos para esta función.');
+  if (result.length !== $('#mapcontent [id], #mapcontent [class$="-occupied"], #mapcontent .occupied:not([id])').length) throw new DataError('error', 'The Cinex map contains seats outside recognized rows.');
+  if (!result.length) throw new EmptyCinexMap('unavailable', 'Cinex returned no seats for this showtime.');
   return validateSeats(result);
 }

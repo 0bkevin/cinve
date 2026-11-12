@@ -1,17 +1,123 @@
-import { randomBytes } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { digest, EncryptedSessionStore, lockUser, returnedRow, transaction } from './store.js';
+import { CinemaUnavailable, CredentialsRejected, LoginError } from '../auth/login.js';
 import type { AuthProviderId, AuthSession } from '../auth/sessions.js';
+import { group } from '../core.js';
 
 /** The cinev_links columns lookup() reads, with the owner's current token hash. */
 type LinkRow = { user_id: string; owner_hash: string; provider: AuthProviderId; expires_at: Date; attempts: number; busy: boolean };
 type Connection = { user: string; tokenHash: string; provider: AuthProviderId; expires: number; attempts: number; busy: boolean };
+
+/** Cinema sign-in limits; see ConnectionLinks.admitSignIn. */
+export const signInLimits = {
+  networkPerMinute: 20, blockPerMinute: 60,
+  networkFailuresPerDay: 100, blockFailuresPerDay: 300,
+  accountAttempts: 5, accountWindowSeconds: 900,
+  globalFailures: 300, recentWindowSeconds: 900,
+  strainedPerNetwork: 1, strainedPerBlock: 2,
+  slowPerNetwork: 1, slowPerBlock: 2,
+  knownSeconds: 30 * 86400,
+};
+/**
+ * network: a rate-limit network (rateLimitNetwork); username as typed (see
+ * accountName). proofs: identifiers only the account's owner holds (the Cinve
+ * connection that connected it before, a cookie in their browser), which
+ * earn the known-owner exemption; an address never does.
+ */
+export type SignInSubject = { network: string; provider: AuthProviderId; username: string; proofs?: string[] };
+export type SignInRefusal = 'account' | 'network' | 'strained';
+export const signInRefusalMessage: Record<SignInRefusal, string> = {
+  account: 'Demasiados intentos para esta cuenta. Espera 15 minutos o comprueba tus datos en la web del cine.',
+  network: 'Demasiados intentos desde tu red. Espera un minuto y vuelve a intentarlo.',
+  strained: 'Demasiados intentos fallidos en Cinve en este momento. Espera 15 minutos y vuelve a intentarlo.',
+};
+/**
+ * Refused and unclear sign-ins are answered at the next multiple of this
+ * interval after the attempt began (at least one). Some unclear failures only
+ * follow a correct password and take an extra round trip; answering in fixed
+ * steps hides that difference, also when the cinema is slow.
+ */
+export const signInFloorMs = 2000;
+export async function signInFloor(started: number, floorMs = signInFloorMs) {
+  if (floorMs <= 0) return;
+  const elapsed = Date.now() - started;
+  const wait = Math.max(1, Math.ceil(elapsed / floorMs)) * floorMs - elapsed;
+  if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
+}
+/** For a sign-in whose credentials never reached the cinema. */
+export const cinemaUnavailableMessage = 'El cine no está respondiendo en este momento. Inténtalo de nuevo en unos minutos.';
+const globalFailures = 'signin-fail:global';
+/**
+ * The account a username names, for limits only. Cinemas may compare
+ * usernames with accent-, case- and width-insensitive collations, so every
+ * variant must share one counter: NFKC, then drop default-ignorable
+ * characters and whitespace, strip combining marks and fold case. Merging
+ * more names than the cinema does only makes the limit stricter.
+ */
+// Letters accent-insensitive collations equate with Latin ones but Unicode does not decompose.
+const foldedLetters: Record<string, string> = { æ: 'ae', œ: 'oe', ø: 'o', ł: 'l', đ: 'd', ð: 'd', þ: 'th', ħ: 'h', ŧ: 't', ŋ: 'n', ĸ: 'k' };
+export function accountName(username: string) {
+  return username.normalize('NFKC').replace(/[\p{Default_Ignorable_Code_Point}\p{Cc}\s]/gu, '')
+    .normalize('NFD').replace(/\p{M}/gu, '').toUpperCase().toLowerCase()
+    .replace(/[æœøłđðþħŧŋĸ]/g, c => foldedLetters[c] ?? c)
+    // Encode remaining non-ASCII code points distinctly after the stricter folding above.
+    .replace(/[^\x20-\x7e]/gu, c => '%' + c.codePointAt(0)!.toString(16));
+}
+const account = (s: SignInSubject) => `${s.provider}:${accountName(s.username)}`;
+const accountKey = (s: SignInSubject) => `signin:account:${account(s)}`;
+const knownKey = (s: SignInSubject, proof: string) => `signin:known:${account(s)}:${proof}`;
+const pairKey = (s: SignInSubject, proof: string) => `signin:pair:${account(s)}:${proof}`;
+/** The /48 an IPv6 /64 rate-limit network belongs to; undefined for IPv4. Catches rotation across a larger IPv6 allocation. */
+export function ipv6Block(network: string) {
+  return network.endsWith('::/64') ? network.split(':').slice(0, 3).join(':') + '::/48' : undefined;
+}
+function failureKeys(network: string) {
+  const block = ipv6Block(network);
+  return { day: `signin-fail:day:${network}`, recent: `signin-fail:recent:${network}`, block,
+    blockDay: block && `signin-fail:day:${block}`, blockRecent: block && `signin-fail:recent:${block}` };
+}
+/**
+ * budgetKey keys rate-limit keys. Those name addresses and cinema account
+ * emails, which a plain digest would not hide (any IPv4 address or a known
+ * email can be hashed and compared), so they are stored as HMACs. linkKey
+ * signs connection-link tokens, so forged ones are refused in memory.
+ */
+export type LinkKeys = { budgetKey: Buffer; linkKey: Buffer };
+export type LinkStage = 'invitation' | 'browser';
 export class ConnectionLinks {
-  constructor(readonly pool: Pool) {}
+  /** Without keys only cleanup and reading existing links work (the operator CLI). */
+  constructor(readonly pool: Pool, private readonly keys?: LinkKeys) {
+    if (keys && (keys.budgetKey.length !== 32 || keys.linkKey.length !== 32)) throw new Error('Invalid keys.');
+  }
+  /** The stored form of a rate-limit key. */
+  keyHash(key: string) {
+    if (!this.keys) throw new Error('Rate-limit key is missing.');
+    return createHmac('sha256', this.keys.budgetKey).update(key).digest('hex');
+  }
+  private linkMac(stage: LinkStage, id: string) {
+    if (!this.keys) throw new Error('Link key is missing.');
+    return createHmac('sha256', this.keys.linkKey).update(`cvl:${stage}:${id}`).digest('base64url');
+  }
+  /** A new link token for a stage: 64 random hex characters and their HMAC, with the stage inside the signed text. */
+  private signedLink(stage: LinkStage) {
+    const id = randomBytes(32).toString('hex');
+    return `${id}.${this.linkMac(stage, id)}`;
+  }
+  /**
+   * 'signed' when the token carries a valid HMAC for this stage, 'legacy' for
+   * the unsigned format issued before signing (links last ten minutes), and
+   * undefined otherwise, judged without the database.
+   */
+  linkFormat(token: string, stage: LinkStage): 'signed' | 'legacy' | undefined {
+    const signed = token.match(/^([a-f0-9]{64})\.([A-Za-z0-9_-]{43})$/);
+    if (signed) return timingSafeEqual(Buffer.from(group(signed, 2)), Buffer.from(this.linkMac(stage, group(signed, 1)))) ? 'signed' : undefined;
+    return /^[a-f0-9]{64}$/.test(token) ? 'legacy' : undefined;
+  }
   async issue(user: string, tokenHash: string, provider: AuthProviderId) {
     return transaction(this.pool, async client => {
-      if (await lockUser(client, user) !== tokenHash) throw new Error('Acceso revocado.');
-      const token = randomBytes(32).toString('hex');
+      if (await lockUser(client, user) !== tokenHash) throw new Error('Access revoked.');
+      const token = this.signedLink('invitation');
       const { rows } = await client.query<{ expires_at: Date }>(`INSERT INTO cinev_links(token_hash,user_id,provider,stage,expires_at)
         VALUES($1,$2,$3,'invitation',now()+interval '10 minutes')
         ON CONFLICT(user_id,provider) DO UPDATE SET token_hash=EXCLUDED.token_hash,stage='invitation',
@@ -36,7 +142,7 @@ export class ConnectionLinks {
   }
   async exchange(token: string) {
     return this.locked(token, 'invitation', async (client, connection) => {
-      const browserToken = randomBytes(32).toString('hex');
+      const browserToken = this.signedLink('browser');
       await client.query("UPDATE cinev_links SET token_hash=$2,stage='browser' WHERE token_hash=$1", [digest(token), digest(browserToken)]);
       return { browserToken, connection };
     });
@@ -52,8 +158,11 @@ export class ConnectionLinks {
       return connection;
     });
   }
-  async release(token: string) {
-    await this.locked(token, 'browser', async client => { await client.query('UPDATE cinev_links SET busy=false WHERE token_hash=$1', [digest(token)]); });
+  /** refund gives back the attempt claim counted, for a sign-in that never ran. */
+  async release(token: string, refund = false) {
+    await this.locked(token, 'browser', async client => {
+      await client.query(`UPDATE cinev_links SET busy=false${refund ? ',attempts=GREATEST(attempts-1,0)' : ''} WHERE token_hash=$1`, [digest(token)]);
+    });
   }
   async complete(token: string, value: AuthSession, key: Buffer) {
     return this.locked(token, 'browser', async (client, connection) => {
@@ -69,16 +178,152 @@ export class ConnectionLinks {
       await client.query('DELETE FROM cinev_links WHERE user_id=$1 AND provider=$2', [user, provider]);
     });
   }
-  async budget(key: string, limit: number) {
+  private uses = 0;
+  /**
+   * Every new network creates rate-limit rows, so a flood of fresh addresses
+   * (rotating IPv6 /64s) would grow the table until the daily cleanup.
+   * Remove expired windows as they accumulate, in bounded batches.
+   */
+  private async prune() {
+    if (++this.uses % 100) return;
+    await this.pool.query('DELETE FROM cinev_budgets WHERE key_hash IN (SELECT key_hash FROM cinev_budgets WHERE expires_at<=now() LIMIT 1000)')
+      .catch(() => {}); // Housekeeping never fails a request.
+  }
+  /** Charges one use of a fixed window (one minute by default); false once the limit is spent. */
+  async budget(key: string, limit: number, windowSeconds = 60) {
+    await this.prune();
     const { rows } = await this.pool.query<{ count: number }>(`INSERT INTO cinev_budgets(key_hash,expires_at,count)
-      VALUES($1,now()+interval '1 minute',1) ON CONFLICT(key_hash) DO UPDATE SET
+      VALUES($1,now()+make_interval(secs => $3),1) ON CONFLICT(key_hash) DO UPDATE SET
       count=CASE WHEN cinev_budgets.expires_at<=now() THEN 1 ELSE LEAST(cinev_budgets.count+1,$2+1) END,
       expires_at=CASE WHEN cinev_budgets.expires_at<=now() THEN EXCLUDED.expires_at ELSE cinev_budgets.expires_at END
-      RETURNING count`, [digest(key), limit]);
+      RETURNING count`, [this.keyHash(key), limit, windowSeconds]);
     return returnedRow(rows).count <= limit;
   }
+  /** Current counts of live windows, without charging them (0 when absent or expired). */
+  private async counts(keys: string[]): Promise<number[]> {
+    const { rows } = await this.pool.query('SELECT key_hash,count FROM cinev_budgets WHERE key_hash=ANY($1) AND expires_at>now()', [keys.map(key => this.keyHash(key))]);
+    const found = new Map(rows.map(r => [r.key_hash as string, r.count as number]));
+    return keys.map(key => found.get(this.keyHash(key)) ?? 0);
+  }
+  /** Adds one event to each window, in one statement. Keys must be distinct. */
+  private async record(entries: Array<[key: string, windowSeconds: number]>) {
+    await this.pool.query(`INSERT INTO cinev_budgets(key_hash,expires_at,count)
+      SELECT k, now()+make_interval(secs => s), 1 FROM unnest($1::text[], $2::int[]) AS t(k, s)
+      ON CONFLICT(key_hash) DO UPDATE SET
+      count=CASE WHEN cinev_budgets.expires_at<=now() THEN 1 ELSE LEAST(cinev_budgets.count+1,1000000) END,
+      expires_at=CASE WHEN cinev_budgets.expires_at<=now() THEN EXCLUDED.expires_at ELSE cinev_budgets.expires_at END`,
+    [entries.map(([key]) => this.keyHash(key)), entries.map(([, seconds]) => seconds)]);
+  }
+  // Everything each admitted attempt was charged, for a refund if the cinema never saw it.
+  private charged = new WeakMap<SignInSubject, string[]>();
+  /** Gives back one use of each window (a charge that turned out not to be needed). */
+  private async refund(keys: string[]) {
+    if (keys.length) await this.pool.query('UPDATE cinev_budgets SET count=GREATEST(count-1,0) WHERE key_hash=ANY($1) AND expires_at>now()', [keys.map(key => this.keyHash(key))]);
+  }
+  /**
+   * Admission for one cinema sign-in, from the consent page or a connection
+   * link (connections are self-service, so per-connection limits alone would
+   * let one network test unbounded credentials through Cinve). Returns why it
+   * is refused, or undefined. Every admitted attempt must be reported with
+   * signInError or signInSucceeded, passing the same subject object.
+   *
+   * - A known owner (this account signed in within 30 days with one of the
+   *   subject's proofs) has only their own budget of 5 attempts per 15
+   *   minutes: nothing others do (network caps, strained mode, guesses at
+   *   the account) locks them out, and nobody without the proof can use or
+   *   observe the exemption.
+   * - Otherwise, per network (an IPv4 address or IPv6 /64) and per IPv6
+   *   /48: attempts per minute; past the daily failure cap only a slow lane
+   *   of one attempt per minute (two per /48), so first-time users behind a
+   *   shared address are slowed, never locked out for the day. Per cinema
+   *   account: 5 attempts per 15 minutes from all networks together.
+   * - Service-wide failures: past the threshold ("strained"), networks or
+   *   /48s with a recent failure are refused, and each may hold one attempt
+   *   (two per /48) per 15 minutes. Successful sign-ins have no global cap.
+   *
+   * Every charge is atomic, and a refusal gives back the charges made before
+   * it, so a refused attempt spends nothing (a strained slot included).
+   */
+  async admitSignIn(subject: SignInSubject): Promise<SignInRefusal | undefined> {
+    const keys = failureKeys(subject.network), L = signInLimits, proofs = subject.proofs ?? [];
+    const [day = 0, recent = 0, global = 0, blockDay = 0, blockRecent = 0, ...known] = await this.counts([keys.day, keys.recent, globalFailures,
+      ...(keys.block ? [keys.blockDay!, keys.blockRecent!] : [0, 0].map((_, i) => `signin:none:${i}`)), ...proofs.map(proof => knownKey(subject, proof))]);
+    const owner = proofs.find((_, i) => (known[i] ?? 0) > 0);
+    if (owner !== undefined) {
+      if (!await this.budget(pairKey(subject, owner), L.accountAttempts, L.accountWindowSeconds)) return 'account';
+      this.charged.set(subject, [pairKey(subject, owner)]);
+      return undefined;
+    }
+    const charged: string[] = [];
+    const charge = async (key: string, limit: number, windowSeconds = 60) => {
+      if (!await this.budget(key, limit, windowSeconds)) return false;
+      charged.push(key); return true;
+    };
+    const refuse = async (reason: SignInRefusal) => { await this.refund(charged); return reason; };
+    if (global >= L.globalFailures) {
+      if (recent > 0 || blockRecent > 0) return 'strained';
+      if (!await charge(`signin:strained:${subject.network}`, L.strainedPerNetwork, L.recentWindowSeconds) ||
+          (keys.block && !await charge(`signin:strained:${keys.block}`, L.strainedPerBlock, L.recentWindowSeconds))) return refuse('strained');
+    }
+    if (day >= L.networkFailuresPerDay && !await charge(`signin:slow:${subject.network}`, L.slowPerNetwork)) return refuse('network');
+    if (blockDay >= L.blockFailuresPerDay && !await charge(`signin:slow:${keys.block}`, L.slowPerBlock)) return refuse('network');
+    if (!await charge(`oauth:login-ip:${subject.network}`, L.networkPerMinute)) return refuse('network');
+    if (keys.block && !await charge(`signin:block:${keys.block}`, L.blockPerMinute)) return refuse('network');
+    if (!await charge(accountKey(subject), L.accountAttempts, L.accountWindowSeconds)) return refuse('account');
+    this.charged.set(subject, charged);
+    return undefined;
+  }
+  /** Refused credentials (or a failure of unknown kind): every failure counter. */
+  async signInFailed(subject: SignInSubject) {
+    const keys = failureKeys(subject.network), day = 86400, recent = signInLimits.recentWindowSeconds;
+    await this.record([[keys.day, day], [keys.recent, recent], [globalFailures, recent],
+      ...(keys.block ? [[keys.blockDay!, day], [keys.blockRecent!, recent]] as Array<[string, number]> : [])]);
+  }
+  /**
+   * The credentials never reached the cinema: give back everything this
+   * attempt was charged (account, network and /48 attempts, slow-lane and
+   * strained slots), since nothing was tested.
+   */
+  async signInUnavailable(subject: SignInSubject) {
+    const keys = this.charged.get(subject);
+    this.charged.delete(subject);
+    if (keys) await this.refund(keys);
+  }
+  /**
+   * How a failed sign-in counts. Only a refusal counts as a failure (and a
+   * thrown value of unknown kind, failing closed); outages do not. A cinema
+   * error after the credentials were sent is answered like a refusal, so a
+   * response never reveals whether they were right.
+   */
+  async signInError(subject: SignInSubject, error: unknown): Promise<'unavailable' | 'refused'> {
+    if (error instanceof CinemaUnavailable) { await this.signInUnavailable(subject); return 'unavailable'; }
+    if (!(error instanceof LoginError) || error instanceof CredentialsRejected) await this.signInFailed(subject);
+    else {
+      // Unclear (the cinema failed after receiving the credentials): bounded by
+      // the daily network caps, but never strained mode, which outages must not trip.
+      const keys = failureKeys(subject.network);
+      await this.record([[keys.day, 86400], ...(keys.blockDay ? [[keys.blockDay, 86400] as [string, number]] : [])]);
+    }
+    return 'refused';
+  }
+  /**
+   * Correct credentials: remember the owner's proofs for this account.
+   * Nothing is cleared, so a success cannot be observed through the limits.
+   */
+  async signInSucceeded(subject: SignInSubject) {
+    const proofs = subject.proofs ?? [];
+    if (proofs.length) await this.record(proofs.map(proof => [knownKey(subject, proof), signInLimits.knownSeconds] as [string, number]));
+  }
   async cleanup() {
-    await this.pool.query('DELETE FROM cinev_oauth_requests WHERE expires_at<=now()');
+    // A cinema connected on the consent page whose code was never exchanged
+    // belongs to nobody: drop its connection (and session) with the request.
+    // Request rows are locked first: an exchange holding one is skipped, and
+    // one that committed is re-checked and kept (consumed_at is now set).
+    await this.pool.query(`DELETE FROM cinev_clients WHERE id IN (SELECT user_id FROM cinev_oauth_requests
+      WHERE user_id IS NOT NULL AND consumed_at IS NULL AND expires_at<=now() FOR UPDATE SKIP LOCKED)`);
+    // A request still holding a connection was skipped above (locked); keep it
+    // so the next cleanup removes both, instead of orphaning the connection.
+    await this.pool.query('DELETE FROM cinev_oauth_requests WHERE expires_at<=now() AND (user_id IS NULL OR consumed_at IS NOT NULL)');
     // Keep consumed refresh tokens until the grant expires to detect replay.
     await this.pool.query("DELETE FROM cinev_oauth_tokens WHERE kind='access' AND expires_at<=now()");
     await this.pool.query(`DELETE FROM cinev_clients c USING cinev_oauth_grants g
@@ -91,7 +336,8 @@ export class ConnectionLinks {
     // registers again; its grants would have expired after 30 days anyway.
     // Runs last and tolerates a deployment that precedes migration 003.
     await this.pool.query(`DELETE FROM cinev_oauth_apps a WHERE COALESCE(a.last_used_at, a.created_at) <= now()-interval '90 days'
-      AND NOT EXISTS (SELECT 1 FROM cinev_oauth_grants g WHERE g.app_id=a.id)`).catch((error: { code?: string }) => {
+      AND NOT EXISTS (SELECT 1 FROM cinev_oauth_grants g WHERE g.app_id=a.id)
+      AND NOT EXISTS (SELECT 1 FROM cinev_oauth_requests r WHERE r.app_id=a.id)`).catch((error: { code?: string }) => {
       if (error?.code !== '42703') throw error; // undefined_column: migration 003 pending.
     });
   }

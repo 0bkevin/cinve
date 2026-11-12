@@ -18,20 +18,20 @@ export async function cinex(op: Operation, q: Query, c: ReadContext, catalog = n
   if (op === 'prices') {
     // Cinex publishes ticket prices only on the authenticated function page.
     const sessionId = requireArg(q, 'session_id');
-    if (!await c.cinexSessionActive()) throw new DataError('auth_required', 'La sesión Cinex expiró. Ejecuta npm run login -- cinex en una terminal local.');
+    if (!await c.cinexSessionActive()) throw new DataError('auth_required', 'The Cinex session expired. Run npm run login -- cinex in a local terminal.');
     const url = `${CX}/boletos.php?${new URLSearchParams({ sessionid: sessionId, cinemaid: requireArg(q, 'cinema_id') })}`;
-    c.warnings.push('Importe VES de la función, con boleto y otros cargos desglosados; no es un total final de compra.');
+    c.warnings.push('VES amount for the showtime, with the ticket and other charges itemized; not a final purchase total.');
     // Opening a function page selects it in Cinex's PHP session, which a seat read in progress depends on.
     return parseCinexPrices(await c.exclusive('cinex', () => c.authenticated('cinex', url)), q, url);
   }
   if (op === 'concessions') {
-    if (!await c.cinexSessionActive()) throw new DataError('auth_required', 'La sesión Cinex expiró. Ejecuta npm run login -- cinex en una terminal local.');
+    if (!await c.cinexSessionActive()) throw new DataError('auth_required', 'The Cinex session expired. Run npm run login -- cinex in a local terminal.');
     const url = `${CX}/concesiones.php?${new URLSearchParams({ cinemaid: requireArg(q, 'cinema_id') })}`;
-    c.warnings.push('Precios VES del catálogo de sede. La cantidad máxima del formulario no se interpreta como stock; cargos finales no verificados.');
+    c.warnings.push('VES prices from the venue catalog. The form\'s maximum quantity is not interpreted as stock; final charges not verified.');
     return parseCinexConcessions(await c.authenticated('cinex', url), q, url);
   }
   if (op === 'movies') {
-    c.warnings.push('Cinex devuelve el catálogo general; consulta funciones para confirmar fecha y sede.');
+    c.warnings.push('Cinex returns the general catalog; look up showtimes to confirm date and venue.');
     return parseCinexMovies(await c.get(`${CX}/cartelera.html`));
   }
   const date = isoDate(q);
@@ -44,12 +44,12 @@ export async function cinex(op: Operation, q: Query, c: ReadContext, catalog = n
     catch (error) {
       // A missing or redirected synopsis page means the ID is wrong, not that
       // the film has no functions: send the model back to list_movies.
-      if (error instanceof DataError && error.status === 'unavailable') throw new DataError('unavailable', 'Cinex no tiene una ficha para ese movie_id; obtén un ID vigente con list_movies.');
+      if (error instanceof DataError && error.status === 'unavailable') throw new DataError('unavailable', 'Cinex has no page for that movie_id; get a current ID with list_movies.');
       throw error;
     }
     try { return parseCinexShowtimes(html, mid, date, c); }
     catch (error) {
-      if (error instanceof DataError && error.status === 'unavailable') throw new DataError('unavailable', 'La ficha Cinex de esta película no lista funciones. Consulta get_showtimes con el cinema_id de cada sede (list_cinemas), que lee la programación de la sede.');
+      if (error instanceof DataError && error.status === 'unavailable') throw new DataError('unavailable', 'The Cinex page for this movie lists no showtimes. Call get_showtimes with the cinema_id of each venue (list_cinemas), which reads the venue\'s schedule.');
       throw error;
     }
   }
@@ -87,17 +87,17 @@ async function cinexCityShowtimes(q: Query, c: ReadContext, catalog: CinexCinema
   const venues = listed.filter((v): v is DataItem & { cinema_id: string } => v.code_status === 'verified' && !!v.cinema_id);
   // Known venues without a verified code are unread schedules, not an empty
   // city: report a failure. Only a city with no Cinex venue at all is empty.
-  if (listed.length && !venues.length) throw new DataError('unavailable', 'No se pudo verificar el código de ninguna sede Cinex de esta ciudad, así que no se leyó su programación; consulta list_cinemas y sus enlaces oficiales.');
+  if (listed.length && !venues.length) throw new DataError('unavailable', 'No Cinex venue code in this city could be verified, so their schedules were not read; check list_cinemas and its official links.');
   if (!venues.length) {
-    c.warnings.push('No se encontraron sedes Cinex en esta ciudad; consulta list_cities para ver los nombres disponibles.');
+    c.warnings.push('No Cinex venues were found in this city; check list_cities for the available names.');
     return [];
   }
   const work = venues.slice(0, cinexCityVenues);
   if (venues.length > work.length) {
     c.partial = true;
-    c.warnings.push(`Se consultaron ${work.length} de ${venues.length} sedes Cinex de la ciudad; usa cinema_id para las demás.`);
+    c.warnings.push(`${work.length} of ${venues.length} Cinex venues in the city were queried; use cinema_id for the rest.`);
   }
-  const timedOut = () => new DataError('unavailable', 'Se agotó el tiempo de consulta de las sedes Cinex de la ciudad; consulta get_showtimes con el cinema_id de cada sede (list_cinemas).');
+  const timedOut = () => new DataError('unavailable', 'The query of the city\'s Cinex venues timed out; call get_showtimes with the cinema_id of each venue (list_cinemas).');
   if (Date.now() >= deadline) throw timedOut();
   const movies = parseCinexMovies(await c.get(`${CX}/cartelera.html`, 120000));
   const items: DataItem[] = [], failed: string[] = [];
@@ -115,7 +115,7 @@ async function cinexCityShowtimes(q: Query, c: ReadContext, catalog: CinexCinema
       } catch (error) {
         failed.push(v.name); firstError ??= error;
       }
-      c.progress(`Cinex: ${succeeded + failed.length} de ${work.length} sedes leídas.`);
+      c.progress(`Cinex: ${succeeded + failed.length} of ${work.length} venues read.`);
     }
   };
   await Promise.all(Array.from({ length: Math.min(cinexCityWorkers, work.length) }, worker));
@@ -123,11 +123,11 @@ async function cinexCityShowtimes(q: Query, c: ReadContext, catalog: CinexCinema
   const names = (list: string[]) => list.map(n => warningLabel(n, 60)).join(', ');
   if (failed.length) {
     c.partial = true;
-    c.warnings.push(`No se pudieron leer las funciones de ${failed.length} sedes Cinex (${names(failed)}); consulta su cinema_id por separado.`);
+    c.warnings.push(`Showtimes could not be read for ${failed.length} Cinex venues (${names(failed)}); query their cinema_id separately.`);
   }
   if (skipped.length) {
     c.partial = true;
-    c.warnings.push(`Se agotó el tiempo de consulta antes de leer ${skipped.length} sedes Cinex (${names(skipped)}); consulta su cinema_id por separado.`);
+    c.warnings.push(`The query timed out before reading ${skipped.length} Cinex venues (${names(skipped)}); query their cinema_id separately.`);
   }
   // No venue read means no schedule was observed: that is a failure, not "empty".
   if (!succeeded) throw firstError ?? timedOut();

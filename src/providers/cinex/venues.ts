@@ -130,20 +130,20 @@ export class CinexCinemaCatalog {
       else suppressedWarnings++;
     };
     const finishWarnings = () => {
-      if (suppressedWarnings) c.warnings.push(`Se omitieron ${suppressedWarnings} advertencias adicionales de descubrimiento de sedes.`);
+      if (suppressedWarnings) c.warnings.push(`${suppressedWarnings} additional venue discovery warnings were omitted.`);
     };
     const $ = load(await c.get(`${base}/cines.html`, directoryTtl, directoryPage));
     const links = $('a[href^="cinex-"]');
-    if (!links.length) throw new DataError('error', 'No se reconoció el listado de cines Cinex.');
+    if (!links.length) throw new DataError('error', 'Unrecognized Cinex cinema listing.');
     const listed = new Map<string, Venue>();
     links.each((_, e) => {
       const href = $(e).attr('href') ?? '';
       if (!detailPath.test(href)) {
-        c.partial = true; warn('Enlace de sede Cinex no reconocido; se omitió sin seguirlo.'); return;
+        c.partial = true; warn('Unrecognized Cinex venue link; it was omitted without following it.'); return;
       }
       const label = $(e).attr('title')?.trim() ?? '';
       const name = $(e).find('h3').text().trim() || label.split(',')[0];
-      if (!name) { c.partial = true; warn(`Sede Cinex sin nombre reconocible: ${href}.`); return; }
+      if (!name) { c.partial = true; warn(`Cinex venue without a recognizable name: ${href}.`); return; }
       const venue = { href, name, city: label.split(',').slice(1).join(',').trim(), image: $(e).find('img').attr('src') };
       listed.set(href, venue);
       if (this.known.has(href) || this.known.size < 100) this.known.set(href, venue);
@@ -159,11 +159,11 @@ export class CinexCinemaCatalog {
       (!q.query || folded(v.name).includes(folded(q.query))));
     // A city from list_cities that no directory label maps to would otherwise
     // look like a city without cinemas.
-    if (q.city && !venues.length) warn('Ninguna sede del directorio Cinex corresponde a esta ciudad; list_cinemas sin city devuelve todas las sedes con su localidad.');
+    if (q.city && !venues.length) warn('No venue in the Cinex directory matches this city; list_cinemas without city returns every venue with its town.');
     const work = venues.slice(0, maxDiscoveryVenues);
     if (venues.length > work.length) {
       c.partial = true;
-      warn(`Se limitaron las comprobaciones de sedes a ${maxDiscoveryVenues}; se omitieron ${venues.length - work.length} candidatas. El resultado es parcial.`);
+      warn(`Venue checks were limited to ${maxDiscoveryVenues}; ${venues.length - work.length} candidates were omitted. The result is partial.`);
     }
     // Limit fan-out so one discovery call has a real, explicit work bound.
     const deadline = c.budget(this.discoveryBudgetMs);
@@ -172,7 +172,7 @@ export class CinexCinemaCatalog {
         // Keep the remaining directory venues visible, without unverifiable codes.
         const remaining = work.slice(i).filter(v => listed.has(v.href));
         c.partial = true;
-        warn(`Se agotó el tiempo de comprobación de sedes; ${remaining.length} sedes del directorio se devuelven sin código verificado. Repite la consulta para completarlas. Esto no indica cierre.`);
+        warn(`Venue checks timed out; ${remaining.length} directory venues are returned without a verified code. Repeat the query to complete them. This does not indicate a closure.`);
         items.push(...remaining.map(venue => ({ kind: 'cinema' as const, id: `directory-${venue.href.slice(6, -5)}`, name: venue.name, city: venue.city,
           url: `${base}/${venue.href}`, code_status: 'unverified' as const, directory_status: 'listed' as const })));
         break;
@@ -195,7 +195,7 @@ export class CinexCinemaCatalog {
         // batch starts: one venue can need metadata, detail and metadata again.
         if (needsDetail && Date.now() >= deadline) {
           c.partial = true;
-          warn(`Se agotó el tiempo de comprobación de ${venue.name}; repite la consulta para completarla. Esto no indica cierre.`);
+          warn(`The check of ${venue.name} timed out; repeat the query to complete it. This does not indicate a closure.`);
           if (!present && !this.known.has(venue.href)) return undefined;
         } else if (needsDetail) {
           try {
@@ -206,10 +206,10 @@ export class CinexCinemaCatalog {
             // A detail-derived code is trusted only after the page identifies
             // the venue. Metadata-confirmed codes may survive an absent title,
             // but a wrong title always rejects the page.
-            if (title && !titleMatches) throw new DataError('unavailable', 'La página no confirma la identidad de la sede.');
+            if (title && !titleMatches) throw new DataError('unavailable', 'The page does not confirm the venue\'s identity.');
             // A seed may enter discovery history only after this page names
             // the expected venue. A generic 200 or a code alone is not enough.
-            if (!present && !titleMatches) throw new DataError('unavailable', 'La página no confirma la identidad de la sede.');
+            if (!present && !titleMatches) throw new DataError('unavailable', 'The page does not confirm the venue\'s identity.');
             if (!present && !this.known.has(venue.href) && this.known.size < 100) this.known.set(venue.href, venue);
             const codes = new Set<string>();
             detail('[onclick]').each((_, e) => {
@@ -217,13 +217,13 @@ export class CinexCinemaCatalog {
               if (found) codes.add(found);
             });
             if (codes.size === 1) {
-              if (!titleMatches) throw new DataError('unavailable', 'La página no confirma la identidad de la sede.');
+              if (!titleMatches) throw new DataError('unavailable', 'The page does not confirm the venue\'s identity.');
               code = [...codes][0]; metadataConfirmed = false;
             } else if (codes.size === 0 && !code && Date.now() < deadline) {
               code = await this.verifyImage(detail('img[src*="cinemas/"]').first().attr('src'), venue.name, c);
               metadataConfirmed = !!code;
             }
-            if (!code || (!titleMatches && !metadataConfirmed)) throw new DataError('unavailable', 'La página no confirma la identidad de la sede.');
+            if (!code || (!titleMatches && !metadataConfirmed)) throw new DataError('unavailable', 'The page does not confirm the venue\'s identity.');
             detailVerifiedUrl = page.source.url;
             if (mappedCode && mappedCode !== code) this.dropMappingsFor(url, venue.name);
             this.rememberVerified(code, page.source.url, venue.name, url, metadataConfirmed);
@@ -233,27 +233,27 @@ export class CinexCinemaCatalog {
             if (error instanceof CallStopped) throw error;
             if (mappedCode) this.dropMappingsFor(url, venue.name);
             c.partial = true;
-            warn(error instanceof DataError && error.status === 'unavailable' && error.message.startsWith('La página no confirma')
-              ? `La página oficial de ${venue.name} no confirma su identidad ni un código de consulta: ${url}.`
-              : `No se pudo leer la página oficial de ${venue.name}: ${url}.`);
+            warn(error instanceof DataError && error.status === 'unavailable' && error.message.startsWith('The page does not confirm')
+              ? `The official page of ${venue.name} confirms neither its identity nor a query code: ${url}.`
+              : `Could not read the official page of ${venue.name}: ${url}.`);
             if (!present && !this.known.has(venue.href)) return undefined;
           }
         }
         if (code && !detailVerifiedUrl) this.rememberDirectoryVerified(code, url, venue.name, metadataConfirmed);
         if (!present) {
           c.partial = true;
-          warn(`${venue.name} no aparece en el directorio recibido; se conserva como pendiente de verificar. Esto no indica cierre.`);
+          warn(`${venue.name} does not appear in the received directory; it is kept as pending verification. This does not indicate a closure.`);
         }
         if (!code) {
           c.partial = true;
-          warn(`Código de consulta no verificado para ${venue.name}; sede conservada. Consulta su web oficial: ${url}. Esto no indica cierre.`);
+          warn(`Query code not verified for ${venue.name}; venue kept. Check its official website: ${url}. This does not indicate a closure.`);
         }
         return { kind: 'cinema' as const, id: code ?? `directory-${venue.href.slice(6, -5)}`, name: venue.name, city: venue.city, url,
           ...(code ? { cinema_id: code } : {}), code_status: code ? 'verified' as const : 'unverified' as const,
           directory_status: present ? 'listed' as const : 'not_listed' as const };
       }));
       items.push(...batch.filter((v): v is NonNullable<typeof v> => v !== undefined));
-      c.progress(`Cinex: ${Math.min(i + 4, work.length)} de ${work.length} sedes comprobadas.`);
+      c.progress(`Cinex: ${Math.min(i + 4, work.length)} of ${work.length} venues checked.`);
     }
     finishWarnings();
     return items;
@@ -265,7 +265,7 @@ export class CinexCinemaCatalog {
    * metadata fan-out used by a full cinema discovery call.
    */
   async resolve(cinemaId: string, c: ReadContext): Promise<{ url: string; name?: string; city?: string; body?: string }> {
-    if (!Id.safeParse(cinemaId).success) throw new DataError('unavailable', 'El código de sede Cinex no es válido.');
+    if (!Id.safeParse(cinemaId).success) throw new DataError('unavailable', 'The Cinex venue code is not valid.');
     const remembered = this.verifiedUrls.get(cinemaId);
     if (remembered) {
       try {
@@ -336,7 +336,7 @@ export class CinexCinemaCatalog {
       const name = $(e).find('h3').text().trim() || label.split(',')[0];
       if (name) matches.push({ href, name, city: label.split(',').slice(1).join(',').trim(), image });
     });
-    if (matches.length > 1) throw new DataError('unavailable', 'El código de sede Cinex coincide con varias entradas del directorio.');
+    if (matches.length > 1) throw new DataError('unavailable', 'The Cinex venue code matches several directory entries.');
     const [listed] = matches;
     if (listed) {
       // The image filename narrows the directory candidate but is not itself
@@ -347,7 +347,7 @@ export class CinexCinemaCatalog {
     // uses a different asset code. Ask metadata for this one requested ID,
     // then use the returned name to select one official directory link.
     const metadataName = await this.metadataName(cinemaId, c);
-    if (!metadataName) throw new DataError('unavailable', 'No se encontró la sede Cinex en el directorio oficial; consulta list_cinemas para obtener un ID actual.');
+    if (!metadataName) throw new DataError('unavailable', 'The Cinex venue was not found in the official directory; call list_cinemas to get a current ID.');
     $('a[href^="cinex-"]').each((_, e) => {
       const href = $(e).attr('href') ?? '';
       if (!detailPath.test(href)) return;
@@ -356,14 +356,14 @@ export class CinexCinemaCatalog {
       if (name && normalizedName(name) === normalizedName(metadataName)) matches.push({ href, name, city: label.split(',').slice(1).join(',').trim(), image: $(e).find('img').attr('src') });
     });
     const [named] = matches;
-    if (!named || matches.length !== 1) throw new DataError('unavailable', matches.length ? 'El nombre de sede Cinex coincide con varias entradas del directorio.' : 'El código de sede Cinex no coincide con una sede identificable del directorio.');
+    if (!named || matches.length !== 1) throw new DataError('unavailable', matches.length ? 'The Cinex venue name matches several directory entries.' : 'The Cinex venue code does not match an identifiable directory venue.');
     return { venue: named, metadataConfirmed: true };
   }
 
   private async validatePage(html: string, cinemaId: string, venueName: string, c: ReadContext, metadataConfirmed = false) {
     const detail = load(html), title = detail('h3.title').first().text().trim();
     if (title && normalizedName(title) !== normalizedName(venueName)) {
-      throw new DataError('unavailable', 'La página oficial no confirma la identidad de la sede Cinex.');
+      throw new DataError('unavailable', 'The official page does not confirm the identity of the Cinex venue.');
     }
     const codes = new Set<string>();
     detail('[onclick]').each((_, e) => {
@@ -371,7 +371,7 @@ export class CinexCinemaCatalog {
       if (found) codes.add(found);
     });
     if (codes.size) {
-      if (!codes.has(cinemaId) || (!title && !metadataConfirmed)) throw new DataError('unavailable', 'La página oficial no confirma el código de la sede Cinex.');
+      if (!codes.has(cinemaId) || (!title && !metadataConfirmed)) throw new DataError('unavailable', 'The official page does not confirm the code of the Cinex venue.');
       return;
     }
     if (metadataConfirmed) return;
@@ -382,12 +382,12 @@ export class CinexCinemaCatalog {
     try { data = await c.json(metadataUrl(cinemaId), metadataTtl); } catch (error) {
       // As 'unavailable', a stopped call would make resolve() forget a verified URL.
       if (error instanceof CallStopped) throw error;
-      throw new DataError('unavailable', 'Cinex no confirmó el código de la sede sin funciones visibles.');
+      throw new DataError('unavailable', 'Cinex did not confirm the code of the venue without visible showtimes.');
     }
     const rows = metadataRows(data, true);
-    if (!rows) throw new DataError('unavailable', 'Cinex no confirmó el código de la sede sin funciones visibles.');
+    if (!rows) throw new DataError('unavailable', 'Cinex did not confirm the code of the venue without visible showtimes.');
     const verified = rows.some(row => row.siglas.toUpperCase() === cinemaId && normalizedName(row.name) === normalizedName(venueName));
-    if (!verified) throw new DataError('unavailable', 'Cinex no confirmó el código de la sede sin funciones visibles.');
+    if (!verified) throw new DataError('unavailable', 'Cinex did not confirm the code of the venue without visible showtimes.');
   }
 
   private async metadataName(cinemaId: string, c: ReadContext): Promise<string | undefined> {

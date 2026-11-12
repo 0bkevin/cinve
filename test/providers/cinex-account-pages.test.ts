@@ -36,7 +36,7 @@ test('Cinex VIP prices keep membership tickets, and closed online sales are repo
     ['1 entrada gratis VIP al mes (Expires 30/11/2026)', 0, [0, 0], true, 1],
   ]);
   // A sum that does not add up still stops the read.
-  assert.throws(() => parseCinexPrices(`<form id="frmboletos">${cinexRow('1', 'X', 'Bs. 1,00', 'Bs. 1,00', '5')}</form>`, q, 'https://www.cinex.com.ve/boletos.php'), /suma de tarifas/);
-  assert.throws(() => parseCinexPrices('<div>Disculpe, la compra de boletos en este complejo no esta disponible en este momento.</div>', q, 'https://www.cinex.com.ve/boletos.php'), /compra de boletos en línea en esta sede no está disponible/);
-  assert.throws(() => parseCinexConcessions('<div>Disculpe, la venta de dulceria web para este complejo no esta disponible en este momento.</div>', q, 'https://www.cinex.com.ve/concesiones.php'), /venta de caramelería en línea en esta sede no está disponible/);
+  assert.throws(() => parseCinexPrices(`<form id="frmboletos">${cinexRow('1', 'X', 'Bs. 1,00', 'Bs. 1,00', '5')}</form>`, q, 'https://www.cinex.com.ve/boletos.php'), /structure or sum of Cinex prices/);
+  assert.throws(() => parseCinexPrices('<div>Disculpe, la compra de boletos en este complejo no esta disponible en este momento.</div>', q, 'https://www.cinex.com.ve/boletos.php'), /online ticket sales at this venue are not available/);
+  assert.throws(() => parseCinexConcessions('<div>Disculpe, la venta de dulceria web para este complejo no esta disponible en este momento.</div>', q, 'https://www.cinex.com.ve/concesiones.php'), /online concessions sales at this venue are not available/);
 });

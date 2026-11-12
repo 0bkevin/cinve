@@ -52,7 +52,7 @@ export function isClientIdUrl(value: string): boolean {
 }
 
 /** IPv4 or IPv6 text to its address bytes; undefined when it is not an address. */
-function addressBytes(address: string): number[] | undefined {
+export function addressBytes(address: string): number[] | undefined {
   const family = isIP(address);
   if (family === 4) return address.split('.').map(Number);
   if (family !== 6) return undefined;

@@ -52,10 +52,10 @@ try {
   if (tools.tools.length !== expectedTools) throw new Error(`Expected ${expectedTools} tools.`);
   const auth = z.object({ providers: z.array(z.object({ provider: z.string(), status: z.string() })) }).parse((await client.callTool({ name: 'get_auth_status', arguments: {} })).structuredContent);
   console.log(JSON.stringify(auth));
-  if (requireAuth && !auth.providers.every(p => p.status === 'configured')) throw new Error('Authenticated smoke requires both local accounts to be connected.');
+  if (requireAuth && !auth.providers.filter(p => p.provider !== 'supercines').every(p => p.status === 'configured')) throw new Error('Authenticated smoke requires both local accounts to be connected.');
   const providers = await client.callTool({ name: 'list_providers', arguments: {} });
   if (!providers.structuredContent) throw new Error('Missing structured provider catalog.');
-  for (const provider of ['cinex', 'cinesunidos', 'cinepic']) await call('list_cities', { provider });
+  for (const provider of ['cinex', 'cinesunidos', 'cinepic', 'supercines', 'grancine']) await call('list_cities', { provider });
   // Repeat in the same MCP process to prove refresh bypasses warm local state (local mode).
   await call('list_cities', { provider: 'cinesunidos' });
   await call('list_cinemas', { provider: 'cinepic' });
@@ -75,6 +75,16 @@ try {
     } else { failed = true; console.log(JSON.stringify({ skipped: 'Cinepic price live check', cinema_id, reason: 'No upcoming function returned today; price retrieval is unverified.' })); }
     await call('get_concessions', { provider: 'cinepic', cinema_id }, ['available', 'empty']);
   }
+  await call('list_cinemas', { provider: 'supercines' });
+  await call('list_movies', { provider: 'supercines', cinema_id: '7', limit: 2 });
+  const scSessions = await call('get_showtimes', { provider: 'supercines', cinema_id: '7', date: today(), limit: 100 });
+  const scSession = scSessions.items.find(r => r.starts_at && Date.parse(r.starts_at) > Date.now());
+  if (scSession) await call('get_ticket_prices', { provider: 'supercines', cinema_id: '7', session_id: scSession.id, movie_id: scSession.movie_id, date: today() });
+  else { failed = true; console.log(JSON.stringify({ skipped: 'Supercines price live check', cinema_id: '7', reason: 'No upcoming function returned today; price retrieval is unverified.' })); }
+  await call('get_concessions', { provider: 'supercines', cinema_id: '7', limit: 2 });
+  await call('list_cinemas', { provider: 'grancine' });
+  // An art-house circuit may have no function at a venue on a given day.
+  await call('get_showtimes', { provider: 'grancine', city: 'Caracas', date: today(), limit: 100 }, ['available', 'empty']);
   const cu = await call('list_movies', { provider: 'cinesunidos', city: 'Caracas', date: day, limit: 8 });
   await authenticatedTickets('cinesunidos', cu);
   await call('get_concessions', { provider: 'cinesunidos', cinema_id: '1005', limit: 2 });

@@ -35,33 +35,35 @@ test('rejects arbitrary origins before making requests', async () => {
 });
 test('429/auth errors are explicit and never cached as successful empty lists', async () => {
   let count = 0;
-  const http = new HttpClient(async () => { count++; return new Response('', { status: 429 }); });
+  const http = new HttpClient(async () => { count++; return new Response('', { status: 429, headers: { 'retry-after': '120' } }); });
   for (let i = 0; i < 2; i++) await assert.rejects(http.get(origin + '/test'), (e: unknown) => e instanceof DataError && e.status === 'rate_limited');
-  assert.equal(count, 2);
+  // The refusal is remembered as a refusal (Retry-After), not as an empty
+  // result, and the provider is not asked again while it lasts.
+  assert.equal(count, 1);
 });
 test('oversize response is cancelled', async () => {
   const http = new HttpClient(async () => new Response('x'.repeat(4 * 1024 * 1024 + 1)));
-  await assert.rejects(http.get(origin + '/large'), /demasiado grande/);
+  await assert.rejects(http.get(origin + '/large'), /too large/);
 });
 
 test('configured deadline covers injected request, authorization and response-body stalls', async () => {
   const never = <T>() => new Promise<T>(() => {});
   let requests = 0;
   const stalledRequest = new HttpClient(async () => { requests++; return never<Response>(); }, 20);
-  await assert.rejects(stalledRequest.get(origin + '/request-stall'), e => e instanceof DataError && /plazo total/.test(e.message));
-  await assert.rejects(stalledRequest.get(origin + '/request-stall-again'), e => e instanceof DataError && /plazo total/.test(e.message));
+  await assert.rejects(stalledRequest.get(origin + '/request-stall'), e => e instanceof DataError && /overall time limit/.test(e.message));
+  await assert.rejects(stalledRequest.get(origin + '/request-stall-again'), e => e instanceof DataError && /overall time limit/.test(e.message));
   assert.equal(requests, 2, 'a timed-out request must release its active slot');
 
   const { SessionStore } = await import('../../src/auth/sessions.js');
   class StalledStore extends SessionStore { override async headers() { return never<Record<string, string>>(); } }
   const stalledHeaders = new HttpClient(async () => new Response('must not reach transport'), 20, new StalledStore());
-  await assert.rejects(stalledHeaders.getAuthenticated('cinesunidos', 'https://gateway.cinesunidos.com/tickets/www/theaters/1005/sessions/s1/'), e => e instanceof DataError && /plazo total/.test(e.message));
+  await assert.rejects(stalledHeaders.getAuthenticated('cinesunidos', 'https://gateway.cinesunidos.com/tickets/www/theaters/1005/sessions/s1/'), e => e instanceof DataError && /overall time limit/.test(e.message));
 
   const stalledBody = new ReadableStream<Uint8Array>({
     start() {}, cancel() { return never<void>(); },
   });
   const stalledResponse = new HttpClient(async () => new Response(stalledBody), 20);
-  await assert.rejects(stalledResponse.get(origin + '/body-stall'), e => e instanceof DataError && /plazo total/.test(e.message));
+  await assert.rejects(stalledResponse.get(origin + '/body-stall'), e => e instanceof DataError && /overall time limit/.test(e.message));
 });
 
 const cities = 'https://gateway.cinesunidos.com/search/cities';
@@ -91,7 +93,7 @@ test('a public read retries once after a dropped connection or a 502/504, never 
   // A second failure is reported, not retried again.
   let calls = 0;
   const failing = new HttpClient(async () => { calls++; throw new TypeError('fetch failed'); });
-  await assert.rejects(failing.get(cities), e => e instanceof DataError && /No se pudo conectar con el proveedor/.test(e.message));
+  await assert.rejects(failing.get(cities), e => e instanceof DataError && /Could not connect to the provider/.test(e.message));
   assert.equal(calls, 2);
 });
 
@@ -119,7 +121,7 @@ test('Cinepic origins get a longer read deadline than the others', async () => {
   const http = new HttpClient(slow, 45);
   // 45 ms scales to 75 ms for Cinepic's slow backend.
   await http.get('https://api.cinexo.com.ar/api/complejo/123300/configuration');
-  await assert.rejects(http.get(cities), e => e instanceof DataError && /el proveedor no terminó de responder/.test(e.message));
+  await assert.rejects(http.get(cities), e => e instanceof DataError && /the provider did not finish answering/.test(e.message));
 });
 
 test('a failing session store is reported as Cinve failing, not the provider', async () => {
@@ -127,7 +129,7 @@ test('a failing session store is reported as Cinve failing, not the provider', a
   const sessions = new class extends EmptySessionStore { override async headers(): Promise<never> { throw new Error('connection terminated'); } };
   const http = new HttpClient(async () => { calls++; return new Response('on'); }, 15000, sessions);
   await assert.rejects(http.getAuthenticated('cinex', 'https://www.cinex.com.ve/checklogin.php'),
-    e => e instanceof DataError && /Cinve no pudo leer la sesión guardada/.test(e.message) && !/conectar con el proveedor/.test(e.message));
+    e => e instanceof DataError && /Cinve could not read the account's saved session/.test(e.message) && !/connect to the provider/.test(e.message));
   assert.equal(calls, 0);
 });
 
@@ -143,7 +145,7 @@ test('queue wait consumes the deadline and expired queued work never reaches fet
   const http = new HttpClient(async () => { count++; await gate; return new Response('[]'); }, 25);
   const active = [http.get('https://gateway.cinesunidos.com/hold/1'), http.get('https://gateway.cinesunidos.com/hold/2')].map(p => p.catch(() => null));
   const queued = http.get('https://gateway.cinesunidos.com/hold/3');
-  await Promise.all([assert.rejects(queued, /cola/), delay(50)]);
+  await Promise.all([assert.rejects(queued, /query queue/), delay(50)]);
   release(); await Promise.all(active); assert.equal(count, 2);
 });
 
@@ -164,7 +166,7 @@ test('a Cloudflare challenge is reported as an explicit block without evasion', 
   const s = new CinemaService(new HttpClient(async () => { calls++; return new Response('Just a moment...', { status: 403, headers: { 'cf-mitigated': 'challenge' } }); }));
   const r = await s.query('movies', { provider: 'cinex' });
   assert.equal(r.status, 'blocked'); assert.equal(calls, 1); assert.equal(r.sources.length, 0);
-  assert.ok(r.warnings.some(w => /desafío anti-bots/.test(w) && /no evade/.test(w)), r.warnings.join(' | '));
+  assert.ok(r.warnings.some(w => /anti-bot challenge/.test(w) && /does not bypass/.test(w)), r.warnings.join(' | '));
 });
 
 test('a challenged origin is remembered so later public reads skip straight to the fallback', async () => {
@@ -183,7 +185,7 @@ test('a challenged origin is remembered so later public reads skip straight to t
   const s = new CinemaService(http);
   for (let i = 0; i < 3; i++) {
     const r = await s.query('cinemas', { provider: 'cinesunidos', city: 'Caracas' });
-    assert.equal(r.status, 'available'); assert.ok(r.warnings.some(w => /API pública de búsqueda/.test(w)));
+    assert.equal(r.status, 'available'); assert.ok(r.warnings.some(w => /public search API/.test(w)));
   }
   assert.equal(www.length, 1, 'the challenged website is asked once, not on every call');
   // refresh=true still asks the website again, and a success clears the memory.

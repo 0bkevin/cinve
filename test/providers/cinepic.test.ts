@@ -22,7 +22,7 @@ test('overnight times remain commercial dates and do not invent a calendar times
   const result = await service().query('showtimes', { provider: 'cinepic', cinema_id: '123300', date: '2026-09-11' });
   assert.equal(result.items.find(r => r.id === 'f1')?.starts_at, '2026-09-11T20:30:00-04:00');
   assert.equal(result.items.find(r => r.id === 'f2')?.starts_at, undefined);
-  assert.ok(result.warnings.some(s => s.includes('trasnoche')));
+  assert.ok(result.warnings.some(s => s.includes('late-night showing')));
 });
 
 test('Cinepic tariffs preserve VES and label the provider-derived USD without exposing configuration', async () => {
@@ -58,12 +58,12 @@ test('a Cinepic snack catalog is read the way its checkout shows it', async () =
     ['1', 'Cotufa grande', 'COMBOS', [{ currency: 'VES', amount: 3579.52, basis: 'provider' }, { currency: 'USD', amount: 4, basis: 'provider_conversion' }], false, 'https://api.cinexo.com.ar/img/1.png'],
     ['3', 'Nachos', 'COMBOS', [], true, undefined],
   ]);
-  assert.match(r.warnings.join(' '), /Producto 3 sin precio verificable/);
+  assert.match(r.warnings.join(' '), /Product 3 without a verifiable price/);
   assert.deepEqual(urls, ['https://api.cinexo.com.ar/api/complejo/123300/candy', 'https://api.cinexo.com.ar/api/complejo/123300/configuration']);
   rate = '0';
   const noRate = await new CinemaService(new HttpClient(async url => Response.json(String(url).endsWith('/configuration') ? { datos: { tasaConversion: rate } } : candy))).query('concessions', { provider: 'cinepic', cinema_id: '123301' });
   assert.deepEqual(noRate.items.find(i => i.id === '1')?.prices, [{ currency: 'VES', amount: 3579.52, basis: 'provider' }]);
-  assert.match(noRate.warnings.join(' '), /se omite la equivalencia USD/);
+  assert.match(noRate.warnings.join(' '), /the USD equivalent is omitted/);
 });
 test('one odd Cinepic snack item or group is skipped, not the whole catalog', async () => {
   const catalog = (categorias: unknown) => ({ tiene_unidades_negocios: true, unidades_negocios: [{ id: 'u1', nombre_empresa: 'Cinepic', categorias }] });
@@ -76,9 +76,9 @@ test('one odd Cinepic snack item or group is skipped, not the whole catalog', as
   assert.deepEqual(r.items.map(i => i.id).sort(), ['1', '2']);
   assert.equal(r.items.find(i => i.id === '1')?.name, '$Refresco', 'a leading $ is part of the name');
   assert.ok(defined(r.items.find(i => i.id === '2')).name.length <= 512);
-  assert.match(r.warnings.join(' '), /3 productos o grupos del catálogo .* se omitieron/);
+  assert.match(r.warnings.join(' '), /3 catalog products or groups .* were omitted/);
   assert.equal(r.warnings.filter(w => /USD/.test(w)).length, 1, 'one consistent USD note when the rate is missing');
-  assert.match(r.warnings.join(' '), /se omite la equivalencia USD/);
+  assert.match(r.warnings.join(' '), /the USD equivalent is omitted/);
   // A server-sent TODOS category is shown by the site, so its items are kept.
   const todos = await run(catalog([{ nombre: 'TODOS', items: [{ id: '9', nombre: 'Cotufa', precio: '10' }] }]), '10');
   assert.deepEqual(todos.items.map(i => [i.id, i.category, i.prices?.map(p => p.amount)]), [['9', undefined, [10, 1]]]);
@@ -96,7 +96,7 @@ test('Cinepic does not invent a USD price if the provider rate is zero', async (
 test('schema drift fails visibly instead of reporting an empty catalog', async () => {
   const s = new CinemaService(new HttpClient(async () => new Response(JSON.stringify({ ...cpSessions, data: { datos: [] } }))));
   const r = await s.query('movies', { provider: 'cinepic', cinema_id: '123300' });
-  assert.equal(r.status, 'error'); assert.match(nth(r.warnings, 0), /estructura/);
+  assert.equal(r.status, 'error'); assert.match(nth(r.warnings, 0), /structure/);
 });
 test('invalid ticket amount is an error rather than zero', async () => {
   const props = structuredClone(cpBuy); nth(props.functionData.tarifas, 0).precio = 'no disponible';
@@ -116,8 +116,8 @@ test('Cinepic omits unknown subtitle and overnight flags and marks the result pa
   assert.equal(result.partial, true);
   assert.equal(nth(result.items, 0).language, undefined);
   assert.equal(nth(result.items, 0).starts_at, undefined);
-  assert.ok(result.warnings.some(w => /subtítulos/.test(w)));
-  assert.ok(result.warnings.some(w => /trasnoche/.test(w)));
+  assert.ok(result.warnings.some(w => /subtitle status/.test(w)));
+  assert.ok(result.warnings.some(w => /late-night showing/.test(w)));
 });
 
 test('Cinepic retains both known venues when one site fails or changes its configuration ID', async () => {
@@ -140,7 +140,7 @@ test('Cinepic configured cities return without probing either cinema website', a
   const s = new CinemaService(new HttpClient(async () => { requests++; return new Response('unexpected'); }));
   const result = await s.query('cities', { provider: 'cinepic' });
   assert.equal(result.status, 'available'); assert.deepEqual(result.items.map(item => item.name), ['Caracas']);
-  assert.equal(requests, 0); assert.ok(result.warnings.some(w => /configurada/.test(w)));
+  assert.equal(requests, 0); assert.ok(result.warnings.some(w => /Configured Cinepic coverage/.test(w)));
 });
 test('Cinepic retains movie references when scheduled sessions lack movie metadata', async () => {
   const payload = structuredClone(cpSessions); payload.data.datos = [];
@@ -156,7 +156,7 @@ test('Cinepic keeps explicitly unverified known sites if both sites fail, withou
   const r = await s.query('cinemas', { provider: 'cinepic' });
   assert.equal(r.total, 2); assert.equal(r.partial, true); assert.equal(r.sources.length, 0);
   assert.ok(r.items.every(i => i.code_status === 'unverified' && i.cinema_id === undefined));
-  assert.ok(r.warnings.some(w => w.includes('no hay descubrimiento automático')));
+  assert.ok(r.warnings.some(w => w.includes('new venues are not discovered automatically')));
 });
 
 test('explicit Cinepic provider failure is distinct from an unrecognized page schema', async () => {

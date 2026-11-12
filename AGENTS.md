@@ -1,10 +1,13 @@
 # Cinve: map for coding agents
 
 Cinve is a read-only MCP server for Venezuelan cinema data (Cinex, Cines
-Unidos, Cinepic): cities, venues, films, showtimes, ticket prices,
-concessions and seat maps. It runs locally over stdio, as a stdio bridge to a
-hosted instance, and hosted on Vercel with Postgres. TypeScript, ESM, Node 22+.
-User-facing text is Spanish; code and comments are English.
+Unidos, Cinepic, Supercines, Gran Cine): cities, venues, films, showtimes,
+ticket prices, concessions and seat maps. It runs locally over stdio, as a
+stdio bridge to a hosted instance, and hosted on Vercel with Postgres.
+TypeScript, ESM, Node 22+. Tool texts, results and messages are English; the
+hosted website has Spanish and English pages (src/web/locales/), and the seat
+map image is labelled in Spanish for the people it is shown to. Code and
+comments are English.
 
 ## Layout
 
@@ -21,11 +24,17 @@ src/
   auth-cli.ts        entry: npm run login | logout | auth:status
   core.ts            shared contract: zod schemas (Query, Item, Result), DataError, value helpers
   service.ts         CinemaService: runs an adapter, validates, dedupes, filters, pages results
+  agent-instructions.ts  the server instructions and the saved cinema preference text
+  local-limit.ts     in-process rate limiter for the hosted app; discovery.ts: robots, sitemap
+  public-web.tsx     the hosted site's pages (re-exports src/web/pages); auth-web.tsx: connect page
   mcp/               server.ts: tools, argument schemas, instructions; bridge.ts: stdio proxy
   providers/         one folder per chain, each with adapter.ts = <chain>(op, query, ctx)
     cinex/           adapter, public-pages (HTML parsers), venues (discovery), account-pages
     cinesunidos/     adapter (+ search-API fallback), directory, prices
     cinepic/         adapter, sites (the two venues and their purchase page)
+    supercines/      adapter: public form reads (anonymous form token), fares, concessions
+    grancine/        adapter: HTML venue pages, no upstream IDs
+    fanout.ts        bounded parallel reads with a deadline, shared by the adapters
     parsing.ts       bounded Next.js Flight reader and payload checks
     diagnostics.ts   bounded parser warnings; read-policy.ts: cache lifetimes
   http/              client.ts: HttpClient (cache, queue, retries); read-context.ts: one
@@ -37,16 +46,20 @@ src/
                      credentials-prompt.ts: hidden terminal input
   hosted/            app.ts: HTTP app; oauth, client-metadata, store (encrypted sessions),
                      connection-links, http-client, migrations, auth-guidance
-  web/               HTML for the hosted site: site (layout, assets), install, connect-page;
-                     /site.js and /app.js are plain strings that test/web runs in a fake DOM
-  assets/            fonts, og.png, favicon; both builds copy them next to the output
+  web/               the hosted site in JSX (jsx.ts renders it): pages/, components/, layout,
+                     locales/ (es, en), assets.ts (hashed asset URLs), http.ts (headers,
+                     locale negotiation), install.ts (/install guide)
+  client/            browser scripts, compiled by tsconfig.client.json to src/assets/js/
+  assets/            fonts, og images, favicon, logos, CSS; both builds copy them next to
+                     the output; the seat image reads its static TTF instances from here
 test/                mirrors src/: test/http/client.test.ts tests src/http/client.ts,
                      test/providers/cinex-venues.test.ts tests providers/cinex/venues.ts;
                      test/helpers/ holds fixtures and subprocess helpers; assert.ts has
                      nth/defined/capture, which fail the test instead of reading undefined;
                      terminal-probe.py stays Python: Node has no built-in pty or termios,
                      and node-pty would be a native dependency
-scripts/             test-postgres.ts (npm test), smoke.ts (live), migrate-neon.ts
+scripts/             test-postgres.ts (npm test), smoke.ts (live), migrate-neon.ts,
+                     build-og.ts (social images), vendor-assets.ts (pinned CSS and fonts)
 docs/                reference.md (tools, statuses, limits), hosted.md (deployment)
 ```
 
@@ -55,8 +68,8 @@ docs/                reference.md (tools, statuses, limits), hosted.md (deployme
 1. `mcp/server.ts` registers each tool; `inputSchema(op)` validates arguments.
 2. `CinemaService.query` (`service.ts`) creates a `ReadContext` and calls the
    adapter `providers/<chain>/adapter.ts`.
-3. The adapter reads through the context (`get`, `json`, `page`,
-   `authenticated`). Each URL is checked by `http/allow-list.ts`, then fetched
+3. The adapter reads through the context (`get`, `json`, `page`, `form`,
+   `authenticated`, `authenticatedForm`). Each URL is checked by `http/allow-list.ts`, then fetched
    by `HttpClient` (`http/client.ts`): per-origin queue, deadline, public cache.
    Authenticated reads add the saved session's headers and are never cached.
 4. The service validates every item against `core.ts`, drops conflicting
@@ -100,9 +113,9 @@ npm run dev                   # stdio server from source
   through `npm run login` in a local terminal or through the hosted connect page.
 - Never present an unknown seat state as free. Keep "empty" distinct from a
   failure, and mark unverified data as partial. Never evade anti-bot challenges.
-- The public contract is fixed: tool names, schemas and Spanish messages, and
-  the entry paths under `dist/` (`bin`, npm scripts, client configs).
+- The public contract is fixed: tool names, schemas and messages, and the
+  entry paths under `dist/` (`bin`, npm scripts, client configs).
 - Use plain relative imports with `.js` extensions; there are no path aliases.
   Modules that read files resolve them from `import.meta.url`: `seats/image.ts`
-  and `web/site.ts` read `../assets/`, and `hosted/migrations.ts` reads
+  and `web/assets.ts` read `../assets/`, and `hosted/migrations.ts` reads
   `../../migrations/`.

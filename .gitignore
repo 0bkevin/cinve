@@ -10,3 +10,6 @@ coverage/
 .env*
 
 .hosted/
+
+# Browser scripts compiled from src/client
+/src/assets/js/

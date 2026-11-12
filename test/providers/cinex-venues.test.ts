@@ -44,7 +44,7 @@ test('missing, conflicting, and mismatched codes keep directory venues and canno
     const before = requests.length;
     for (const op of ['prices', 'concessions', 'showtimes'] as const) {
       const blocked = await s.query(op, { provider: 'cinex', cinema_id: item.id, movie_id: 'movie', session_id: 'session' });
-      assert.equal(blocked.status, 'unavailable'); assert.match(nth(blocked.warnings, 0), /enlace oficial/);
+      assert.equal(blocked.status, 'unavailable'); assert.match(nth(blocked.warnings, 0), /official link/);
     }
     assert.equal(requests.length, before);
   }
@@ -229,7 +229,7 @@ test('large Cinex directories have bounded discovery work while name filtering r
   const bounded = await serviceForTest.query('cinemas', { provider: 'cinex', city: 'Caracas', limit: 1 });
   assert.equal(bounded.total, 100); assert.equal(bounded.next_offset, 1); assert.equal(bounded.partial, true);
   assert.equal(requests.filter(path => path.startsWith('/cinex-')).length, 100);
-  assert.ok(bounded.warnings.some(w => /limitaron|parcial/.test(w)));
+  assert.ok(bounded.warnings.some(w => /were limited|result is partial/.test(w)));
 
   requests.length = 0;
   const searched = await serviceForTest.query('cinemas', { provider: 'cinex', city: 'Caracas', query: 'Venue 124', refresh: true });
@@ -305,7 +305,7 @@ test('Cinex does not accept an image-only code when an empty schedule lacks meta
       '/cartelera.html': `<div class="poster" onclick="posterMovieClick('M','KNOWN','0','x','A','sinopsis-known.html','CARTELERA')" title="KNOWN"></div>` },
   );
   const result = await s.query('showtimes', { provider: 'cinex', cinema_id: 'XX', date: '2026-09-18' });
-  assert.equal(result.status, 'unavailable'); assert.match(result.warnings.join(' '), /confirmó el código/);
+  assert.equal(result.status, 'unavailable'); assert.match(result.warnings.join(' '), /did not confirm the code/);
 });
 
 test('a cancelled call does not make the shared Cinex catalog forget verified venues', async () => {
@@ -325,7 +325,7 @@ test('a cancelled call does not make the shared Cinex catalog forget verified ve
   assert.equal((await s.query('showtimes', q)).status, 'empty');
   abortOnVenuePage = new AbortController();
   const cancelled = await s.query('showtimes', q, { signal: abortOnVenuePage.signal });
-  assert.ok(cancelled.warnings.some(w => /cancelada/.test(w)), cancelled.warnings.join(' | '));
+  assert.ok(cancelled.warnings.some(w => /cancelled by the client/.test(w)), cancelled.warnings.join(' | '));
   abortOnVenuePage = undefined; requests.length = 0;
   assert.equal((await s.query('showtimes', q)).status, 'empty');
   assert.ok(!requests.includes('/cines.html'), `the remembered venue URL must survive the cancellation; read: ${requests.join(', ')}`);
@@ -344,7 +344,7 @@ test('Cinex areas from list_cities include the venues the directory labels with 
   assert.deepEqual((await names('MARACAIBO')).sort(), [['COSTA MALL', 'Cabimas'], ['LAGO MALL', 'Maracaibo']]);
   assert.deepEqual(await names('Punto Fijo'), [['SAMBIL PARAGUANA', 'Punto Fijo']], 'the town itself still works');
   const none = await s.query('cinemas', { provider: 'cinex', city: 'Atlantis' });
-  assert.equal(none.total, 0); assert.ok(none.warnings.some(w => /Ninguna sede del directorio Cinex corresponde/.test(w)), none.warnings.join(' | '));
+  assert.equal(none.total, 0); assert.ok(none.warnings.some(w => /No venue in the Cinex directory matches/.test(w)), none.warnings.join(' | '));
 });
 
 test('untrusted cinema detail href cannot change the requested route', async () => {
@@ -385,7 +385,7 @@ test('Cinex venue discovery stops at its time budget and keeps remaining venues 
   const r = await new CinemaService(http, new CinexCinemaCatalog(0)).query('cinemas', { provider: 'cinex' });
   assert.equal(r.total, 5); assert.equal(r.partial, true); assert.equal(metadata, 0, 'no provider reads after the budget is spent');
   assert.ok(r.items.every(i => i.code_status === 'unverified' && i.id.startsWith('directory-')));
-  assert.ok(r.warnings.some(w => /tiempo de comprobación/.test(w)));
+  assert.ok(r.warnings.some(w => /checks timed out/.test(w)));
 });
 
 test('Cinex venue discovery checks its budget before each follow-up read of an admitted venue', async () => {
@@ -401,5 +401,5 @@ test('Cinex venue discovery checks its budget before each follow-up read of an a
   const r = await new CinemaService(http, new CinexCinemaCatalog(10)).query('cinemas', { provider: 'cinex', city: 'Caracas' });
   assert.deepEqual(reads, ['/cines.html', '/assets/php/datasource.php'], 'no detail read after the budget is spent');
   assert.equal(r.partial, true); assert.equal(nth(r.items, 0).code_status, 'unverified');
-  assert.ok(r.warnings.some(w => /tiempo de comprobación de A/.test(w)), r.warnings.join(' | '));
+  assert.ok(r.warnings.some(w => /check of A timed out/.test(w)), r.warnings.join(' | '));
 });

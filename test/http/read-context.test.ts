@@ -34,7 +34,7 @@ test('an unexpected Cinex login-check answer is not reported or recorded as an e
   await sessions.save({ version: 1, provider: 'cinex', expires_at: Date.now() + 3600000, saved_at: Date.now() - 1000, cookie_jar: cinexJar });
   const service = new CinemaService(new HttpClient(async () => new Response('<html>Error interno</html>'), 15000, sessions));
   const r = await service.query('prices', { provider: 'cinex', cinema_id: 'SBC', session_id: 's1' });
-  assert.equal(r.status, 'error'); assert.match(r.warnings.join(' '), /de forma inesperada/);
+  assert.equal(r.status, 'error'); assert.match(r.warnings.join(' '), /answered its session check unexpectedly/);
   assert.equal((await sessions.status('cinex')).status, 'configured');
 });
 
@@ -61,7 +61,7 @@ test('a provider refusing the saved session (HTTP 401) marks it expired with a c
   await sessions.save({ version: 1, provider: 'cinesunidos', expires_at: Date.now() + 3600000, saved_at: Date.now() - 1000, access_token: 'SYNTHETIC_TOKEN' });
   const service = new CinemaService(new HttpClient(async () => new Response('', { status: 401 }), 15000, sessions));
   const r = await service.query('prices', { provider: 'cinesunidos', cinema_id: '1002', session_id: 's1' });
-  assert.equal(r.status, 'auth_required'); assert.match(r.warnings.join(' '), /rechazó la sesión guardada/);
+  assert.equal(r.status, 'auth_required'); assert.match(r.warnings.join(' '), /refused the account's saved session/);
   assert.equal((await sessions.status('cinesunidos')).status, 'expired');
 });
 
@@ -82,7 +82,7 @@ test('a cancelled call starts no further provider reads', async () => {
   const before = sessionReads;
   const cancelled = await new CinemaService(http).query('showtimes', { provider: 'cinesunidos', city: 'Valencia' }, { signal: controller.signal });
   assert.equal(cancelled.status, 'error'); assert.equal(sessionReads, before);
-  assert.ok(cancelled.warnings.some(w => /cancelada/.test(w)), cancelled.warnings.join(' | '));
+  assert.ok(cancelled.warnings.some(w => /cancelled by the client/.test(w)), cancelled.warnings.join(' | '));
 });
 
 test('a call starts no provider read past its own deadline, whatever chain of reads it is in', async t => {
@@ -93,7 +93,7 @@ test('a call starts no provider read past its own deadline, whatever chain of re
   assert.equal(c.budget(500), 500);
   await c.get('https://www.cinex.com.ve/cines.html');
   t.mock.timers.tick(1000);
-  await assert.rejects(c.get('https://www.cinex.com.ve/cartelera.html'), (e: DataError) => e.status === 'error' && /Se agotó el tiempo de esta consulta/.test(e.message));
+  await assert.rejects(c.get('https://www.cinex.com.ve/cartelera.html'), (e: DataError) => e.status === 'error' && /This query ran out of time/.test(e.message));
   assert.equal(reads, 1);
 });
 
@@ -101,7 +101,7 @@ test('a call budget counts from when the hosted server received the request', as
   let calls = 0;
   const http = new HttpClient(async () => { calls++; return new Response('["Caracas"]'); });
   const late = new ReadContext(http, false, { startedAt: Date.now() - 61000 });
-  await assert.rejects(late.json('https://gateway.cinesunidos.com/search/cities'), /Se agotó el tiempo de esta consulta/);
+  await assert.rejects(late.json('https://gateway.cinesunidos.com/search/cities'), /This query ran out of time/);
   assert.equal(calls, 0);
   const fresh = new ReadContext(http, false, { startedAt: Date.now() - 1000 });
   assert.ok(fresh.deadline <= Date.now() + 59000);

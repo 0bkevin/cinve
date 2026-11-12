@@ -9,10 +9,10 @@ import { DataError, group } from '../core.js';
 const Envelope = z.object({ v: z.literal(1), iv: z.string(), tag: z.string(), data: z.string() });
 export const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 export function databasePool(url = process.env.DATABASE_URL) {
-  if (!url) throw new Error('Configura DATABASE_URL.');
+  if (!url) throw new Error('Set DATABASE_URL.');
   const pool = new Pool({ connectionString: url, max: 3, connectionTimeoutMillis: 5000, idleTimeoutMillis: 5000,
     statement_timeout: 10000, idle_in_transaction_session_timeout: 10000, allowExitOnIdle: true });
-  pool.on('error', () => { console.error('La conexión de base de datos se cerró.'); });
+  pool.on('error', () => { console.error('The database connection closed.'); });
   return pool;
 }
 export async function transaction<T>(pool: Pool, fn: (client: PoolClient) => Promise<T>): Promise<T> {
@@ -60,9 +60,11 @@ export class HostedUsers {
   }
 }
 export class EncryptedSessionStore extends SessionStore {
+  // The exact stored value each provider's session was read from, in this request.
+  private readonly seen = new Map<AuthProviderId, string>();
   constructor(readonly pool: Pool, readonly user: string, private key: Buffer) {
     super();
-    if (key.length !== 32) throw new Error('La clave de cifrado debe tener 32 bytes.');
+    if (key.length !== 32) throw new Error('The encryption key must be 32 bytes.');
   }
   override accountKey(provider: AuthProviderId) { return `hosted:${this.user}:${provider}`; }
   private aad(provider: AuthProviderId) { return Buffer.from(`cinev:v1:${this.user}:${provider}`); }
@@ -77,6 +79,7 @@ export class EncryptedSessionStore extends SessionStore {
     const { rows: [row] } = await db.query<{ ciphertext: string }>(`SELECT ciphertext FROM cinev_sessions s JOIN cinev_clients c ON c.id=s.user_id
       WHERE s.user_id=$1 AND provider=$2 AND c.revoked_at IS NULL`, [this.user, provider]);
     if (!row) return undefined;
+    this.seen.set(provider, row.ciphertext);
     try {
       const { iv, tag, data } = Envelope.parse(JSON.parse(row.ciphertext));
       const decipher = createDecipheriv('aes-256-gcm', this.key, Buffer.from(iv, 'base64'));
@@ -84,7 +87,7 @@ export class EncryptedSessionStore extends SessionStore {
       const session = Session.parse(JSON.parse(Buffer.concat([decipher.update(Buffer.from(data, 'base64')), decipher.final()]).toString('utf8')));
       if (session.provider !== provider) throw new Error();
       return session;
-    } catch { throw new DataError('auth_required', 'Vuelve a conectar tu cuenta con connect_account.'); }
+    } catch { throw new DataError('auth_required', 'Reconnect your account with connect_account.'); }
   }
   async saveInTransaction(client: PoolClient, value: AuthSession) {
     await client.query(`INSERT INTO cinev_sessions(user_id,provider,ciphertext,expires_at) VALUES($1,$2,$3,$4)
@@ -93,9 +96,20 @@ export class EncryptedSessionStore extends SessionStore {
   }
   override async save(value: AuthSession) {
     await transaction(this.pool, async client => {
-      if (!await lockUser(client, this.user)) throw new Error('Acceso revocado.');
+      if (!await lockUser(client, this.user)) throw new Error('Access revoked.');
       await this.saveInTransaction(client, value);
     });
+  }
+  /**
+   * The cinema rejected the session this request read (it expired upstream
+   * before its stored expiry). Forget exactly that value, so connect_account
+   * offers a new link instead of reporting it connected; a session saved
+   * meanwhile by a reconnection, and any pending link, are kept.
+   */
+  async discardRejected(provider: AuthProviderId) {
+    const value = this.seen.get(provider);
+    if (!value) return;
+    await this.pool.query('DELETE FROM cinev_sessions WHERE user_id=$1 AND provider=$2 AND ciphertext=$3', [this.user, provider, value]);
   }
   override async remove(provider: AuthProviderId) {
     await transaction(this.pool, async client => {

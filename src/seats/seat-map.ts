@@ -26,9 +26,9 @@ export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions)
       const tariffs = Array.isArray(f.tarifas) ? f.tarifas.map(object) : undefined;
       result.seats = parseCinepicSeats(map, tariffs ? cinepicBookableTypes(tariffs) : 'all');
       const special = result.seats.filter(s => s.status === 'unavailable').length;
-      if (!tariffs) c.warnings.push('Cinepic no envió las tarifas de esta función; las butacas libres no se pudieron cruzar con los tipos de entrada a la venta.');
-      else if (!tariffs.length) c.warnings.push('Cinepic no listó tarifas en línea para esta función; las butacas libres no se pudieron cruzar con los tipos de entrada y puede que su web no las venda.');
-      else if (special) c.warnings.push(`${special} butacas libres de un tipo especial no se venden con las tarifas de esta función; la web de Cinepic las muestra no disponibles.`);
+      if (!tariffs) c.warnings.push('Cinepic did not send the fares of this showtime; the free seats could not be checked against the ticket types on sale.');
+      else if (!tariffs.length) c.warnings.push('Cinepic listed no online fares for this showtime; the free seats could not be checked against the ticket types, and its website may not sell them.');
+      else if (special) c.warnings.push(`${special} free seats of a special type are not sold with this showtime\'s fares; Cinepic\'s website shows them as unavailable.`);
       result.layout = seatLayout('cinepic', map);
       const fn = rows(f.datos, 'datos')[0], at = text(fn?.fecha).match(/ - (\d{2}):(\d{2})hs$/);
       result.showing = showing({ movie: clean(fn?.pelicula, 200), cinema_name: cinepicVenueName(result.cinema_id), screen: clean(fn?.sala, 60),
@@ -38,26 +38,26 @@ export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions)
       // A long or missing tariff name only shortens the label; its counter still counts.
       const tariffName = (t: Record<string, unknown>) => { const v = Array.from(text(t.descripcion).replace(/\s+/g, ' ')); return v.length ? (v.length > 60 ? `${v.slice(0, 59).join('').trimEnd()}…` : v.join('')) : 'sin nombre'; };
       const left = (tariffs ?? []).map(t => [tariffName(t), cinepicTicketsLeft(t)] as const).filter((entry): entry is readonly [string, number] => entry[1] !== undefined);
-      if (left.some(([, n]) => n < free)) c.warnings.push(`La web de Cinepic ofrece en línea ${left.map(([name, n]) => `${n} entradas ${name}`).join(', ')}; puede vender menos entradas que las ${free} butacas libres del mapa.`);
-      c.warnings.push('La disponibilidad de Cinepic depende también del tipo de entrada elegido. El campo seleccionada del proveedor no indica una reserva del usuario.');
+      if (left.some(([, n]) => n < free)) c.warnings.push(`Cinepic\'s website offers online ${left.map(([name, n]) => `${n} ${name} tickets`).join(', ')}; it may sell fewer tickets than the ${free} free seats on the map.`);
+      c.warnings.push('Cinepic availability also depends on the chosen ticket type. The provider\'s seleccionada field does not indicate a booking by the user.');
     } else if (q.provider === 'cinesunidos') {
       const url = `https://www.cinesunidos.com/api/seats?${new URLSearchParams({ theaterId: result.cinema_id, showTimeId: result.session_id })}`;
       let data: unknown;
       try { data = JSON.parse(await c.authenticated('cinesunidos', url)); }
-      catch (e) { if (e instanceof DataError) throw e; throw new DataError('error', 'Cines Unidos no devolvió un mapa de asientos en JSON válido.'); }
+      catch (e) { if (e instanceof DataError) throw e; throw new DataError('error', 'Cines Unidos did not return a seat map in valid JSON.'); }
       // A function it no longer sells online (already started, or sales closed) answers only
       // {"maxSeatsPerTransaction": 0}: no map to read, not a change in its format (seen 2026-11-11).
       const body = object(data);
       if (body.seats === undefined && (body.maxSeatsPerTransaction === 0 || body.maxSeatsPerTransaction === '0')) {
-        throw new DataError('unavailable', 'Cines Unidos no vende en línea esta función (puede haber comenzado o cerrado su venta) y no envió el mapa de asientos. Elige otra función con get_showtimes.');
+        throw new DataError('unavailable', 'Cines Unidos does not sell this showtime online (it may have started or its sales closed) and sent no seat map. Pick another showtime with get_showtimes.');
       }
       result.seats = parseCinesUnidosSeats(data);
       // Area descriptions read "SALA 8 - FULL"; only a room number shared by every area names the room.
       const rooms = new Set(rows(object(object(data).seats).areas, 'seats.areas').map(a => text(a.description).match(/^SALA\s+(\d{1,3})\b/i)?.[1]));
       if (rooms.size === 1 && [...rooms][0]) result.showing = { screen: `Sala ${[...rooms][0]}` };
-      c.warnings.push('Los estados especiales se muestran restringidos; verifica sus condiciones en la web del cine.');
+      c.warnings.push('Special states are shown as restricted; check their conditions on the cinema\'s website.');
     } else if (q.provider === 'cinex') {
-      if (!await c.cinexSessionActive()) throw new DataError('auth_required', 'La sesión Cinex expiró; conecta de nuevo tu cuenta.');
+      if (!await c.cinexSessionActive()) throw new DataError('auth_required', 'The Cinex session expired; connect your account again.');
       // Cinex keeps the chosen function in its PHP session: select and read it as one step.
       // Checked in a browser on 2026-11-11: selecting the function on boletos.php is enough
       // for its seat page to draw the map, with no ticket chosen. Read the seat page its own
@@ -95,8 +95,8 @@ export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions)
           // Always reset the order, even when opening it failed half way or the client cancelled the call.
           const closed = await c.closeAuthenticated('cinex', 'https://www.cinex.com.ve/resetpurchase.php');
           c.warnings.push(closed
-            ? 'Cinex muestra el mapa de esta sala solo dentro de un pedido: Cinve abrió uno de 1 boleto sin elegir asiento, leyó el mapa y lo anuló de inmediato. No se reservó ni pagó nada.'
-            : 'Cinex no confirmó la anulación del pedido de 1 boleto que Cinve abrió para leer el mapa; vence solo al terminar su cuenta regresiva (unos 10 minutos). No se eligió ningún asiento.');
+            ? 'Cinex shows this room\'s map only inside an order: Cinve opened one for 1 ticket without choosing a seat, read the map and cancelled it at once. Nothing was booked or paid.'
+            : 'Cinex did not confirm the cancellation of the 1-ticket order Cinve opened to read the map; it expires on its own when its countdown ends (about 10 minutes). No seat was chosen.');
         }
         return seatPage;
       });
@@ -109,17 +109,17 @@ export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions)
       catch (e) {
         // Neither seat page drew a grid; Cinex's own counter is still on the page.
         if (e instanceof EmptyCinexMap && page.available !== undefined) {
-          throw new DataError('unavailable', `Cinex informa ${page.available} asientos disponibles en esta función, pero su web no publicó el mapa de asientos. Consulta el mapa en cinex.com.ve.`);
+          throw new DataError('unavailable', `Cinex reports ${page.available} available seats for this showtime, but its website did not publish the seat map. Check the map at cinex.com.ve.`);
         }
         throw e;
       }
       result.showing = page.showing;
       // Seen 2026-11-05: the counter can lag the grid on the same page (seats just bought or held).
       const mapped = result.seats.filter(s => s.status === 'available').length;
-      if (page.available !== undefined && page.available !== mapped) c.warnings.push(`El contador de asientos disponibles de Cinex (${page.available}) difiere del mapa (${mapped} libres); se conserva el estado de cada asiento del mapa.`);
-      c.warnings.push(ordered ? 'Las categorías especiales pueden requerir una tarifa específica.' : 'Cinex: mapa leído sin seleccionar boletos ni asientos. Las categorías especiales pueden requerir una tarifa específica.');
+      if (page.available !== undefined && page.available !== mapped) c.warnings.push(`Cinex\'s available-seat counter (${page.available}) differs from the map (${mapped} free); each seat\'s state on the map is kept.`);
+      c.warnings.push(ordered ? 'Special categories may require a specific fare.' : 'Cinex: map read without selecting tickets or seats. Special categories may require a specific fare.');
     } else {
-      throw new DataError('unavailable', 'Consulta de asientos no implementada para este proveedor.');
+      throw new DataError('unavailable', 'Seat lookup not implemented for this provider.');
     }
     const seats = result.seats ?? [];
     result.available = seats.filter(s => s.status === 'available').length;
@@ -128,18 +128,18 @@ export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions)
     result.unknown = seats.filter(s => s.status === 'unknown').length;
     result.total = seats.length;
     result.availability_complete = result.unknown === 0 && result.total > 0;
-    if (result.unknown) c.warnings.push(`Mapa parcialmente interpretado por Cinve: ${result.unknown} asientos con estado desconocido (?). Los ${result.available} libres son únicamente los confirmados; cero libres confirmados no significa agotado.`);
+    if (result.unknown) c.warnings.push(`Map partially interpreted by Cinve: ${result.unknown} seats with unknown state (?). The ${result.available} available seats are only the confirmed ones; zero confirmed available seats does not mean sold out.`);
     // Checked here, so a layout the schema refuses fails this lookup with a status instead of throwing.
     result.layout = SeatResult.shape.layout.parse(result.layout);
     result.ascii = renderSeats(seats, result.layout);
     result.status = 'available';
-    c.warnings.push('Lectura sin reserva, sin caché local. La disponibilidad puede cambiar; confirma en la web antes de comprar.');
+    c.warnings.push('Read without booking, without local cache. Availability may change; confirm on the website before buying.');
   } catch (e) {
     result.status = e instanceof DataError ? e.status : 'error';
     result.seats = []; result.showing = undefined; result.available = 0; result.occupied = 0; result.unavailable = 0;
     result.unknown = 0; result.total = 0; result.availability_complete = false; result.ascii = '';
     result.layout = seatLayout(q.provider);
-    c.warnings.push(e instanceof DataError ? e.message : 'No se pudo interpretar un mapa de asientos verificable.');
+    c.warnings.push(e instanceof DataError ? e.message : 'Could not interpret a verifiable seat map.');
   }
   result.sources = c.sources; result.warnings = c.warnings;
   return SeatResult.parse(result);

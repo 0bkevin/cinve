@@ -12,26 +12,26 @@ const CU = 'https://www.cinesunidos.com';
 export async function cinesunidos(op: Operation, q: Query, c: ReadContext): Promise<DataItem[]> {
   if (op === 'cities') {
     const data = await c.json('https://gateway.cinesunidos.com/search/cities', hourTtl);
-    if (!Array.isArray(data) || data.some(r => typeof r !== 'string')) throw new DataError('error', 'Lista de ciudades no reconocida.');
+    if (!Array.isArray(data) || data.some(r => typeof r !== 'string')) throw new DataError('error', 'Unrecognized city list.');
     return data.map(r => ({ kind: 'city', id: r, name: r }));
   }
   if (op === 'prices') {
     const url = `https://gateway.cinesunidos.com/tickets/www/theaters/${encodeURIComponent(requireArg(q, 'cinema_id'))}/sessions/${encodeURIComponent(requireArg(q, 'session_id'))}/`;
     const body = await c.authenticated('cinesunidos', url);
-    let data: unknown; try { data = JSON.parse(body); } catch { throw new DataError('error', 'El proveedor no devolvió JSON de tarifas válido.'); }
-    c.warnings.push('Tarifas de la función autenticada; revisa restricciones de canje/edad. No es un total final de compra.');
+    let data: unknown; try { data = JSON.parse(body); } catch { throw new DataError('error', 'The provider did not return valid price JSON.'); }
+    c.warnings.push('Prices for the authenticated showtime; check redemption/age restrictions. Not a final purchase total.');
     return parseCinesUnidosPrices(data, q, url);
   }
   if (op === 'concessions') {
     const id = requireArg(q, 'cinema_id');
     const url = `https://gateway.cinesunidos.com/concessions/www/cinemas/${encodeURIComponent(id)}/concessions`;
-    c.warnings.push('Precios y stock del catálogo de esta sede; impuestos incluidos y cargos finales no verificados.');
+    c.warnings.push('Prices and stock from this venue\'s catalog; taxes included and final charges not verified.');
     return rows(await c.json(url), 'concessions').map(r => {
       const prices: NonNullable<DataItem['prices']> = [];
       for (const [key, currency] of [['itemPriceUSD', 'USD'], ['itemPriceVE', 'VES']] as const) {
         const amount = number(r[key]); if (amount !== undefined && amount >= 0) prices.push({ currency, amount, basis: 'provider' });
       }
-      if (!prices.length) c.warnings.push(`Producto ${warningLabel(r.itemId)} sin precio verificable.`);
+      if (!prices.length) c.warnings.push(`Product ${warningLabel(r.itemId)} without a verifiable price.`);
       return { kind: 'concession', id: requiredText(r, 'itemId'), name: requiredText(r, 'itemDescription'), cinema_id: id,
         category: text(r.itemClassDescription), stock: number(r.itemStock), prices, final_total_verified: false, image_url: text(r.itemImageUrl), url: `${CU}/carameleria` };
     });
@@ -59,7 +59,7 @@ export async function cinesunidos(op: Operation, q: Query, c: ReadContext): Prom
     if (!(error instanceof DataError) || error.status !== 'blocked') throw error;
     return cinesUnidosGateway(op, q, c, city);
   }
-  if (!fields.length) throw new DataError('error', `No se reconoció el catálogo Cines Unidos: ${key}.`);
+  if (!fields.length) throw new DataError('error', `Unrecognized Cines Unidos catalog: ${key}.`);
   if (op === 'cinemas') return parseCinemaDirectory(fields, city, url, c);
   const movies = fields.flatMap(field => rows(field, 'movies'));
   const items: DataItem[] = [];
@@ -72,7 +72,7 @@ export async function cinesunidos(op: Operation, q: Query, c: ReadContext): Prom
       if (q.cinema_id && cid !== q.cinema_id) continue;
       for (const s of rows(cinema.showTimes, 'theater.showTimes')) {
         const raw = requiredText(s, 'date');
-        if (!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/.test(raw) || !DateInput.safeParse(raw.slice(0, 10)).success) throw new DataError('error', 'Fecha Cines Unidos con formato no reconocido.');
+        if (!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/.test(raw) || !DateInput.safeParse(raw.slice(0, 10)).success) throw new DataError('error', 'Cines Unidos date in an unrecognized format.');
         if (raw.slice(0, 10) !== isoDate(q)) continue;
         sessions.push({ kind: 'showtime', id: requiredText(s, 'id'), name: requiredText(m, 'title'), cinema_id: cid, cinema_name: warningLabel(text(cinema.name), 200) || undefined, movie_id: mid,
           date: raw.slice(0, 10), time: raw.slice(11, 16), starts_at: `${raw}-04:00`, screen: text(s.screen), format: text(s.format),
@@ -110,7 +110,7 @@ export function cuSiteTitle(title: string, language: unknown): string {
 async function cinesUnidosCity(city: string, q: Query, c: ReadContext): Promise<string> {
   const cities = await cinesunidos('cities', q, c);
   const canonical = cities.find(r => folded(r.name) === folded(city))?.name;
-  if (!canonical) throw new DataError('unavailable', 'Ciudad no reconocida por Cines Unidos; consulta list_cities.');
+  if (!canonical) throw new DataError('unavailable', 'City not recognized by Cines Unidos; check list_cities.');
   return canonical;
 }
 
@@ -126,24 +126,24 @@ async function cinesUnidosGateway(op: Operation, q: Query, c: ReadContext, reque
   const city = await cinesUnidosCity(requestedCity, q, c);
   const base = `https://gateway.cinesunidos.com/search/cities/${encodeURIComponent(city)}`;
   const pageUrl = (path: string) => `${CU}/${path}?${new URLSearchParams({ city })}`;
-  c.warnings.push('La web de Cines Unidos rechazó la consulta automatizada; los datos provienen de su API pública de búsqueda.');
+  c.warnings.push('The Cines Unidos website rejected the automated query; the data comes from its public search API.');
   if (op === 'cinemas') return parseCinemaDirectory([rows(await c.json(`${base}/theaters`, hourTtl), 'gateway theaters')], city, pageUrl('cines'), c);
   const films = await c.json(`${base}/films`);
-  if (!Array.isArray(films) || !films.every((t): t is string => typeof t === 'string')) throw new DataError('error', 'Lista de películas de Cines Unidos no reconocida.');
+  if (!Array.isArray(films) || !films.every((t): t is string => typeof t === 'string')) throw new DataError('error', 'Unrecognized Cines Unidos movie list.');
   // The service filters results by name; the session title is the searched
   // film title, so a name filter can skip the searches it would discard.
   const titles = [...new Set(films.map(t => t.trim()).filter(t => t && t.length <= 200))]
     .filter(t => !q.query || folded(t).includes(folded(q.query)));
   if (titles.length > cuGatewayTitles) {
     c.partial = true;
-    c.warnings.push(`Se consultaron ${cuGatewayTitles} de ${titles.length} títulos de Cines Unidos; el resultado es parcial.`);
+    c.warnings.push(`${cuGatewayTitles} of ${titles.length} Cines Unidos titles were queried; the result is partial.`);
   }
   const date = isoDate(q);
   // Normalize each title's sessions inside its own settled task: a title
   // whose records are malformed fails alone instead of taking the others along.
   const normalize = (s: Obj): DataItem | undefined => {
     const raw = requiredText(s, 'showtime');
-    if (!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/.test(raw) || !DateInput.safeParse(raw.slice(0, 10)).success) throw new DataError('error', 'Fecha Cines Unidos con formato no reconocido.');
+    if (!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/.test(raw) || !DateInput.safeParse(raw.slice(0, 10)).success) throw new DataError('error', 'Cines Unidos date in an unrecognized format.');
     const mid = requiredText(s, 'ho'), cid = requiredText(s, 'cinemaId'), name = cuSiteTitle(requiredText(s, 'title'), s.language);
     if (raw.slice(0, 10) !== date || (q.cinema_id && cid !== q.cinema_id) || (q.movie_id && mid !== q.movie_id)) return undefined;
     const item: DataItem = { kind: 'showtime', id: requiredText(s, 'sessionId'), name, cinema_id: cid, movie_id: mid,
@@ -168,7 +168,7 @@ async function cinesUnidosGateway(op: Operation, q: Query, c: ReadContext, reque
           .map(normalize).filter((item): item is DataItem => item !== undefined));
         succeeded++;
       } catch (error) { failures.push(error); }
-      c.progress(`Cines Unidos: ${succeeded + failures.length} de ${work.length} títulos consultados.`);
+      c.progress(`Cines Unidos: ${succeeded + failures.length} of ${work.length} titles queried.`);
     }
   };
   await Promise.all(Array.from({ length: Math.min(cuGatewayWorkers, work.length) }, worker));
@@ -176,13 +176,13 @@ async function cinesUnidosGateway(op: Operation, q: Query, c: ReadContext, reque
   // One failed title must not discard every other title's schedule.
   if (failures.length) {
     c.partial = true;
-    c.warnings.push(`No se pudieron consultar las funciones de ${failures.length} de ${work.length} títulos de Cines Unidos; el resultado es parcial.`);
+    c.warnings.push(`Showtimes could not be queried for ${failures.length} of ${work.length} Cines Unidos titles; the result is partial.`);
   }
   if (skipped) {
     c.partial = true;
-    c.warnings.push(`Se agotó el tiempo de consulta antes de leer ${skipped} de ${work.length} títulos de Cines Unidos; usa query con el título para consultarlos.`);
+    c.warnings.push(`The query timed out before reading ${skipped} of ${work.length} Cines Unidos titles; use query with the title to look them up.`);
   }
-  if (work.length && !succeeded) throw failures[0] ?? new DataError('unavailable', 'Se agotó el tiempo de consulta de Cines Unidos; usa query con el título de la película.');
+  if (work.length && !succeeded) throw failures[0] ?? new DataError('unavailable', 'The Cines Unidos query timed out; use query with the movie title.');
   const movies = new Map<string, DataItem>();
   for (const { movie_id: id, name, url } of showtimes) if (id && !movies.has(id)) movies.set(id, { kind: 'movie', id, name, city, url });
   return op === 'showtimes' ? showtimes : [...movies.values()];

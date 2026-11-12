@@ -16,7 +16,7 @@ export function parseCinexMovies(html: string): DataItem[] {
     const name = decodeLabel($(e).attr('title') || $(e).attr('alt'));
     if (name) items.set(id, { kind: 'movie', id, name, url: `${CX}/sinopsis-${id}.html` });
   });
-  if (!items.size) throw new DataError('error', 'No se reconoció la cartelera HTML de Cinex.');
+  if (!items.size) throw new DataError('error', 'Unrecognized Cinex HTML listings.');
   return [...items.values()];
 }
 export function parseCinexShowtimes(html: string, movieId: string, date: string, c?: ReadContext): DataItem[] {
@@ -26,7 +26,7 @@ export function parseCinexShowtimes(html: string, movieId: string, date: string,
   const ratingItem = $('li').filter((_, li) => /^Censura:/i.test($(li).find('strong').first().text().trim())).first();
   const rating = decodeLabel(ratingItem.text().replace(/^\s*Censura:\s*/i, '')).slice(0, 20) || undefined;
   const nodes = $('[onclick*="checkLogin("]');
-  if (!nodes.length) throw new DataError('unavailable', 'La ficha Cinex no contiene funciones reconocibles.');
+  if (!nodes.length) throw new DataError('unavailable', 'The Cinex movie page contains no recognizable showtimes.');
   let malformed = 0;
   // Read every date on the page first: a session ID reported on two dates is
   // as contradictory as one reported at two times, and filtering by the
@@ -51,14 +51,14 @@ export function parseCinexShowtimes(html: string, movieId: string, date: string,
     const [first] = list;
     if (!first || !list.some(item => item.date === date)) continue;
     if (list.some(item => cinexSessionConflict(first, item))) {
-      if (c) { c.partial = true; providerWarning(c, 'cinex-movie-conflict', () => `Cinex devolvió horarios contradictorios para la función ${warningLabel(first.id)}; se omitió.`); }
+      if (c) { c.partial = true; providerWarning(c, 'cinex-movie-conflict', () => `Cinex returned contradictory times for showtime ${warningLabel(first.id)}; it was omitted.`); }
       continue;
     }
     items.push(first);
   }
   if (malformed && c) {
     c.partial = true;
-    providerWarning(c, 'cinex-movie-malformed-session', 'Cinex devolvió una o más funciones de película con epoch o identificador malformado; se omitieron.');
+    providerWarning(c, 'cinex-movie-malformed-session', 'Cinex returned one or more movie showtimes with a malformed epoch or identifier; they were omitted.');
   }
   if (c) providerWarningSummary(c);
   return items;
@@ -94,7 +94,7 @@ const cinexMovieTitle = (name: string) => folded(name).replace(/[^a-z0-9]/g, '')
 
 /** Parse the calendar-style cinema page, whose blocks have titles but no movie slugs. */
 export function parseCinexCinemaShowtimes(html: string, movies: DataItem[], cinemaId: string, date: string, c: ReadContext, url: string, cinemaName?: string): DataItem[] {
-  if (!Id.safeParse(cinemaId).success) throw new DataError('error', 'Código de sede Cinex inválido.');
+  if (!Id.safeParse(cinemaId).success) throw new DataError('error', 'Invalid Cinex venue code.');
   const byTitle = new Map<string, DataItem[]>();
   for (const movie of movies) {
     const key = cinexMovieTitle(movie.name);
@@ -133,7 +133,7 @@ export function parseCinexCinemaShowtimes(html: string, movies: DataItem[], cine
     const validEpochNodes = sessionNodes.filter((_, e) => validEpoch($(e).attr('alt')) !== undefined);
     if (validEpochNodes.length !== sessionNodes.length) {
       c.partial = true;
-      providerWarning(c, 'cinex-cinema-malformed-epoch', 'Cinex devolvió una o más funciones de sede con hora epoch ausente o malformada; se omitieron.');
+      providerWarning(c, 'cinex-cinema-malformed-epoch', 'Cinex returned one or more venue showtimes with a missing or malformed epoch time; they were omitted.');
     }
     const datedNodes = validEpochNodes.filter((_, e) => {
       const epoch = validEpoch($(e).attr('alt'));
@@ -149,10 +149,10 @@ export function parseCinexCinemaShowtimes(html: string, movies: DataItem[], cine
     if (!movie) {
       c.partial = true;
       providerWarning(c, !title ? 'cinex-cinema-missing-title' : matches.length > 1 ? 'cinex-cinema-ambiguous-title' : 'cinex-cinema-unknown-title', () => !title
-        ? 'Cinex devolvió una función sin título de película; se omitió porque no se puede confirmar su movie_id.'
+        ? 'Cinex returned a showtime without a movie title; it was omitted because its movie_id cannot be confirmed.'
         : matches.length > 1
-          ? `Cinex devolvió una función con título ambiguo (${warningLabel(title)}); se omitió porque no se puede confirmar su movie_id.`
-          : `Cinex no encontró el título de función en su catálogo (${warningLabel(title)}); se omitió porque no se puede confirmar su movie_id.`);
+          ? `Cinex returned a showtime with an ambiguous title (${warningLabel(title)}); it was omitted because its movie_id cannot be confirmed.`
+          : `Cinex did not find the showtime title in its catalog (${warningLabel(title)}); it was omitted because its movie_id cannot be confirmed.`);
       return;
     }
     datedNodes.each((_, e) => {
@@ -160,11 +160,11 @@ export function parseCinexCinemaShowtimes(html: string, movies: DataItem[], cine
       const match = raw.match(/checkLogin\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]\s*\)/i);
       const epoch = number($(e).attr('alt'));
       if (!match || epoch === undefined || !Number.isInteger(epoch) || epoch < 1e9 || epoch > 1e11) {
-        c.partial = true; providerWarning(c, 'cinex-cinema-malformed-session', () => `Cinex omitió una función malformada de ${warningLabel(title || 'película sin título')}.`); return;
+        c.partial = true; providerWarning(c, 'cinex-cinema-malformed-session', () => `Cinex omitted a malformed showtime of ${warningLabel(title || 'untitled movie')}.`); return;
       }
       const sessionId = group(match, 1), sourceCinema = group(match, 2);
       if (!Id.safeParse(sessionId).success || sourceCinema !== cinemaId) {
-        c.partial = true; providerWarning(c, 'cinex-cinema-invalid-id', () => `Cinex omitió una función con identificador de sede o sesión no verificable (${warningLabel(sessionId)}).`); return;
+        c.partial = true; providerWarning(c, 'cinex-cinema-invalid-id', () => `Cinex omitted a showtime with an unverifiable venue or session identifier (${warningLabel(sessionId)}).`); return;
       }
       const local = new Date(epoch * 1000 - 4 * 3600000).toISOString().slice(0, 19);
       if (local.slice(0, 10) !== date) return;
@@ -176,13 +176,13 @@ export function parseCinexCinemaShowtimes(html: string, movies: DataItem[], cine
       if (suppressed.has(key)) return;
       const previous = items.get(key);
       if (contradictory.has(key) || (previous && cinexSessionConflict(previous, item))) {
-        c.partial = true; providerWarning(c, 'cinex-cinema-conflict', () => `Cinex devolvió horarios contradictorios para la función ${warningLabel(sessionId)}; se omitió.`); items.delete(key); suppressed.add(key); return;
+        c.partial = true; providerWarning(c, 'cinex-cinema-conflict', () => `Cinex returned contradictory times for showtime ${warningLabel(sessionId)}; it was omitted.`); items.delete(key); suppressed.add(key); return;
       }
       items.set(key, item);
     });
   });
-  if (!blocks) throw new DataError('error', 'No se reconoció la estructura de funciones de Cinex.');
-  if (!nodes) providerWarning(c, 'cinex-cinema-no-sessions', 'Cinex no devolvió funciones para la fecha solicitada.');
+  if (!blocks) throw new DataError('error', 'Unrecognized Cinex showtime structure.');
+  if (!nodes) providerWarning(c, 'cinex-cinema-no-sessions', 'Cinex returned no showtimes for the requested date.');
   providerWarningSummary(c);
   return [...items.values()];
 }

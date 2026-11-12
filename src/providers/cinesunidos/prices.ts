@@ -6,7 +6,7 @@ import { object, requiredText, rows } from '../parsing.js';
 export function parseCinesUnidosPrices(value: unknown, q: Query, url: string): DataItem[] {
   return rows(value, 'ticket sessions').flatMap(s => {
     if (text(s.cinemaId) !== q.cinema_id || text(s.sessionId) !== q.session_id || (q.movie_id && text(s.scheduledFilmId) !== q.movie_id)) {
-      throw new DataError('unavailable', 'Las tarifas no corresponden a la sede, función o película solicitadas.');
+      throw new DataError('unavailable', 'The prices do not match the requested venue, showtime or movie.');
     }
     return rows(s.tickets, 'tickets').map(t => {
       const p = object(t.price), prices: NonNullable<DataItem['prices']> = [];

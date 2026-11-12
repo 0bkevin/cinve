@@ -7,14 +7,14 @@ import { object } from '../providers/parsing.js';
 // Unicode property escapes (\p{L}) are invalid in Python's re and RE2, and
 // MCP clients such as the Python SDK validate structuredContent against the
 // published outputSchema, so this rule is a server-side refinement.
-const label = z.string().min(1).max(40).refine(value => /^[\p{L}\p{N} _:.()-]+$/u.test(value), 'Etiqueta de asiento no válida.');
+const label = z.string().min(1).max(40).refine(value => /^[\p{L}\p{N} _:.()-]+$/u.test(value), 'Invalid seat label.');
 const coordinate = z.number().int().min(0).max(199);
 export const Seat = z.object({
   id: z.string().min(1).max(200), label, row: label, area: label,
   row_index: coordinate, column_index: coordinate,
   status: z.enum(['available', 'occupied', 'unavailable', 'unknown']),
   provider_status: z.string().max(40), category: z.string().max(100).optional(),
-  accessible: z.boolean().optional().describe('true: asiento para silla de ruedas según la web del cine. Su status no cambia (restringido salvo que esté ocupado).'),
+  accessible: z.boolean().optional().describe('true: a wheelchair space according to the cinema\'s website. Its status does not change (restricted unless it is occupied).'),
 });
 export type SeatData = z.infer<typeof Seat>;
 /** The function as the seat page names it; every field is optional. */
@@ -26,17 +26,17 @@ export const SeatResult = z.object({
   provider: Provider, cinema_id: Id, session_id: Id, status: Status,
   queried_at: z.string(), timezone: z.literal('America/Caracas'),
   sources: z.array(Source), warnings: z.array(z.string()),
-  seats: z.array(Seat).max(10000).optional().describe('Detalle por asiento; solo con include_seats=true. El mapa ascii ya muestra cada etiqueta con su estado.'),
+  seats: z.array(Seat).max(10000).optional().describe('Per-seat detail; only with include_seats=true. The ascii map already shows each label with its state.'),
   available: z.number().int().nonnegative(),
   occupied: z.number().int().nonnegative(), unavailable: z.number().int().nonnegative(),
   unknown: z.number().int().nonnegative(), total: z.number().int().nonnegative(),
   availability_complete: z.boolean().describe('True only when a nonempty map has no unknown seat states. Does not promise purchase eligibility or a reservation.'),
   layout: z.object({
-    screen: z.enum(['top', 'bottom', 'unverified']).describe('Lado de la pantalla en el mapa ascii y en la imagen, como lo dibuja la web del proveedor; unverified si no se pudo confirmar.'),
-    column_order: z.enum(['ascending', 'descending']).describe('descending: la web del proveedor dibuja column_index de derecha a izquierda; el mapa ascii y la imagen lo respetan.'),
-    row_shift: z.record(z.string().max(40), z.number().min(0).max(100)).optional().describe('Filas que la web del proveedor centra por ser más cortas: cuántos asientos (puede ser medio) se desplaza cada una desde column_index 0. El mapa ascii y la imagen ya lo aplican.'),
+    screen: z.enum(['top', 'bottom', 'unverified']).describe('Side of the screen in the ascii map and the image, as the provider\'s website draws it; unverified when it could not be confirmed.'),
+    column_order: z.enum(['ascending', 'descending']).describe('descending: the provider\'s website draws column_index from right to left; the ascii map and the image follow it.'),
+    row_shift: z.record(z.string().max(40), z.number().min(0).max(100)).optional().describe('Rows the provider\'s website centres because they are shorter: how many seats (possibly half a seat) each one is shifted from column_index 0. The ascii map and the image already apply it.'),
   }),
-  showing: ShowingFields.optional().describe('La función según la misma respuesta del mapa (texto del proveedor), para rotular la imagen; los campos ausentes no se pudieron leer.'),
+  showing: ShowingFields.optional().describe('The showtime as the same map response gives it (provider text), to label the image; absent fields could not be read.'),
   ascii: z.string(),
 });
 export type SeatMapResult = z.infer<typeof SeatResult>;

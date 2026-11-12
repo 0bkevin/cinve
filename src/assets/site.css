@@ -1,0 +1,641 @@
+/* Cinve: a dark house seen from the back row. The seat is the unit of the
+   whole design: the hero is a seat map, the coverage board marks each cinema
+   with a seat, and amber always means "this one is for you".
+   Components (buttons, cards, fields, alerts) come from basecoat.css; this
+   file sets shadcn's tokens to the house palette and lays out the pages.
+   The site is dark by design, so <html class="dark"> turns on Basecoat's
+   dark variants directly. */
+
+@font-face { font-family: 'Bricolage Grotesque'; src: url('/assets/bricolage-grotesque.woff2') format('woff2'); font-weight: 200 800; font-display: swap; }
+@font-face { font-family: 'Instrument Sans'; src: url('/assets/instrument-sans.woff2') format('woff2'); font-weight: 400 700; font-display: swap; }
+
+:root, .dark {
+  color-scheme: dark;
+  /* House palette */
+  --night: #120a0e;    /* the room with the lights down */
+  --surface: #1b1016;  /* cards and the message bar */
+  --line: #33212a;     /* rules, borders and taken seats */
+  --seat: #a92037;     /* upholstery: a free seat */
+  --taken: #2e1b23;
+  --seat-shape: 45% 45% 15% 15%;
+  --amber: #ffbd3f;    /* the seats for you, and the main action */
+  --cream: #f6eee4;    /* text in the light of the screen */
+  --dust: #b8a7a1;     /* secondary text */
+
+  --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Bricolage Grotesque', 'Instrument Sans', ui-sans-serif, system-ui, sans-serif;
+  --radius: 0.625rem;
+  --background: var(--night); --foreground: var(--cream);
+  --card: var(--surface); --card-foreground: var(--cream);
+  --popover: var(--surface); --popover-foreground: var(--cream);
+  --primary: var(--amber); --primary-foreground: #1a0d05;
+  --secondary: #2a1820; --secondary-foreground: var(--cream);
+  --muted: #22141b; --muted-foreground: var(--dust);
+  --accent: #2c1a22; --accent-foreground: var(--cream);
+  --destructive: #ff8f7a;
+  --border: var(--line); --input: #57394a; --ring: var(--amber);
+  --success: #8fd19e;
+}
+
+/* Element defaults live in Basecoat's base layer so its component styles,
+   such as card titles, still take precedence over them. */
+@layer base {
+  html { scroll-behavior: smooth; scroll-padding-top: 24px; }
+  body { overflow-x: clip; }
+  body {
+    font: 17px/1.6 var(--font-sans); -webkit-font-smoothing: antialiased; font-synthesis: none;
+    /* The screen's light spills over the first rows and fades to the back. */
+    background: radial-gradient(70% 520px at 50% -120px, rgba(246, 238, 228, 0.07), transparent 70%) no-repeat, var(--night);
+  }
+  ::selection { background: var(--amber); color: #1a0d05; }
+  a { color: inherit; text-underline-offset: 4px; }
+  a:not(.btn):hover { color: var(--amber); }
+  :focus-visible { outline: 2px solid var(--ring); outline-offset: 4px; }
+  .btn:focus-visible, .input:focus-visible, .field > input:focus-visible { outline: none; }
+  button, a, input, select { touch-action: manipulation; }
+
+  h1, h2, h3 { font-family: var(--font-display); font-weight: 750; letter-spacing: -0.035em; line-height: 0.95; color: var(--foreground); text-wrap: balance; }
+  h1 { font-size: clamp(48px, 8vw, 88px); margin-bottom: 24px; }
+  h2 { font-size: clamp(36px, 4.4vw, 60px); margin-bottom: 16px; }
+  h3 { font-size: 24px; margin-bottom: 8px; }
+  p { color: var(--muted-foreground); max-width: 62ch; text-wrap: pretty; }
+  p + p { margin-top: 14px; }
+  strong { color: var(--foreground); font-weight: 600; }
+}
+
+.visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.wrap { width: min(100% - 64px, 1200px); margin: auto; }
+.skip { position: absolute; top: -100px; left: 20px; background: var(--background); padding: 12px; z-index: 2; }
+.skip:focus { top: 12px; }
+.site-header { height: 72px; display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.brand { font: 800 30px/1 var(--font-display); letter-spacing: -0.045em; text-decoration: none; }
+.brand span { color: var(--amber); }
+.site-nav { display: flex; gap: 28px; align-items: center; font-size: 15px; }
+.site-nav a { text-decoration: none; color: var(--dust); padding-block: 10px; }
+.language-switch { display: inline-flex; align-items: center; white-space: nowrap; color: var(--dust); font-size: 13px; }
+.language-menu { position: relative; }
+.language-trigger { display: inline-flex; align-items: center; gap: 8px; color: var(--dust); cursor: pointer; list-style: none; }
+.language-trigger::-webkit-details-marker { display: none; }
+.language-trigger::marker { content: ''; }
+.language-trigger:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
+.language-trigger .chevron { width: 14px; height: 14px; transition: transform .18s ease; }
+.language-menu[open] .language-trigger .chevron { transform: rotate(180deg); }
+.language-options { position: absolute; z-index: 60; top: calc(100% + 6px); right: 0; width: 150px; display: grid; gap: 2px; padding: 5px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--popover); color: var(--popover-foreground); box-shadow: 0 12px 32px rgb(0 0 0 / .32); }
+.site-nav .language-switch .language-options a { display: flex; justify-content: space-between; align-items: center; gap: 12px; min-height: 38px; padding: 7px 9px; border-radius: calc(var(--radius) - 3px); color: var(--muted-foreground); text-decoration: none; }
+.site-nav .language-options a:hover, .site-nav .language-options a:focus-visible { background: var(--muted); color: var(--foreground); }
+.language-check { min-width: 1em; color: var(--amber); text-align: center; }
+.site-footer { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 40px 48px; margin-top: 48px; padding: 56px 0 28px; color: var(--dust); font-size: 14px; }
+.site-footer a { text-decoration: none; color: var(--dust); transition: color .15s; }
+.site-footer a:hover { color: var(--cream); }
+.footer-brand { display: grid; gap: 12px; align-content: start; max-width: 340px; }
+.footer-brand .brand { color: var(--cream); font-size: 28px; justify-self: start; }
+.footer-brand p { margin: 0; line-height: 1.55; }
+.footer-links { display: flex; gap: 64px; }
+.footer-links div { display: grid; gap: 2px; align-content: start; }
+.footer-links a { padding-block: 5px; }
+.footer-links .footer-title { margin: 0 0 4px; font: 600 12px/1 var(--font-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--cream); opacity: .6; }
+.footer-base { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; gap: 16px; padding-top: 24px; font-size: 13px; }
+.footer-base p { margin: 0; font-size: 13px; }
+.footer-base p a { color: var(--cream); }
+.footer-gh svg { width: 20px; height: 20px; }
+.footer-gh { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; margin: -12px -12px -12px 0; }
+
+.lead { font-size: 20px; line-height: 1.5; color: var(--foreground); }
+.fine, .note { font-size: 14px; }
+.note { margin-top: 18px; }
+p a, .note a { text-decoration: underline; text-decoration-color: var(--input); }
+p a:hover, .note a:hover { text-decoration-color: currentColor; }
+.note:empty { display: none; }
+.btn { border-radius: 12px; }
+.password-row .btn { border-radius: var(--radius); }
+.btn svg { width: 16px; height: 16px; }
+.btn[data-size=lg] { height: 52px; padding-inline: 26px; font-size: 16px; font-weight: 600; border-radius: 14px; }
+
+/* ── Hero: the house, then one question ──────────────────────────────── */
+.hero { padding: 24px 0 112px; }
+.house { margin: 0; display: grid; justify-items: center; }
+
+/* Sizes scale with the viewport so all 18 seats fit a phone. */
+.seating {
+  --size: clamp(12px, 2.45vw, 36px); --gap: clamp(3px, 0.62vw, 9px); --aisle: clamp(9px, 2.6vw, 38px); --curve: clamp(4px, 1vw, 15px);
+  display: grid; gap: calc(var(--gap) * 1.5);
+  transform: perspective(1100px) rotateX(30deg); transform-origin: 50% 0;
+}
+/* The screen: a thin lit arc, not a wall of white. */
+.screen {
+  position: relative; justify-self: stretch; height: calc(var(--curve) + 10px); margin: 0 calc(var(--aisle) * 0.6) max(calc(var(--size) * 0.9), 22px);
+  border-bottom: 2px solid rgba(246, 238, 228, 0.85); border-radius: 0 0 50% 50% / 0 0 100% 100%;
+  box-shadow: 0 10px 28px -10px rgba(246, 238, 228, 0.45);
+}
+.screen span {
+  position: absolute; left: 50%; bottom: calc(-1.6em - 6px); translate: -50% 0;
+  font: 600 clamp(9px, 0.9vw, 11px)/1 var(--font-sans); letter-spacing: 0.32em; text-transform: uppercase; color: var(--dust);
+}
+.row { display: flex; align-items: center; gap: var(--gap); animation: row-in 0.6s calc(var(--r) * 70ms) ease-out both; }
+.row-label { width: 14px; font: 600 clamp(9px, 1vw, 13px)/1 var(--font-sans); color: var(--dust); text-align: center; }
+/* Row letters hang outside the seats, so the seats and the screen above
+   them are centred on the page at every width. */
+.seating { justify-items: center; }
+.row-label { margin-left: calc(-14px - var(--gap)); }
+.seat {
+  --k: 0; --s: 0;
+  width: var(--size); aspect-ratio: 1 / 0.86; border-radius: var(--seat-shape);
+  background: var(--seat); box-shadow: inset 0 -0.24em 0 rgba(0, 0, 0, 0.32), inset 0 0.1em 0 rgba(255, 255, 255, 0.1);
+  /* Rows curve around the screen. */
+  translate: 0 calc(var(--k) * var(--curve) * -1); rotate: calc(var(--s) * 7deg);
+}
+.seat:nth-child(6), .seat:nth-child(16) { margin-left: calc(var(--aisle) - var(--gap)); }
+.seat:nth-child(2) { --k: 1; --s: 1; } .seat:nth-child(19) { --k: 1; --s: -1; }
+.seat:nth-child(3) { --k: 0.78; --s: 0.88; } .seat:nth-child(18) { --k: 0.78; --s: -0.88; }
+.seat:nth-child(4) { --k: 0.59; --s: 0.76; } .seat:nth-child(17) { --k: 0.59; --s: -0.76; }
+.seat:nth-child(5) { --k: 0.42; --s: 0.65; } .seat:nth-child(16) { --k: 0.42; --s: -0.65; }
+.seat:nth-child(6) { --k: 0.28; --s: 0.53; } .seat:nth-child(15) { --k: 0.28; --s: -0.53; }
+.seat:nth-child(7) { --k: 0.17; --s: 0.41; } .seat:nth-child(14) { --k: 0.17; --s: -0.41; }
+.seat:nth-child(8) { --k: 0.09; --s: 0.29; } .seat:nth-child(13) { --k: 0.09; --s: -0.29; }
+.seat:nth-child(9) { --k: 0.03; --s: 0.18; } .seat:nth-child(12) { --k: 0.03; --s: -0.18; }
+.seat:nth-child(10) { --k: 0; --s: 0.06; } .seat:nth-child(11) { --k: 0; --s: -0.06; }
+.row:nth-child(2) { --r: 0; } .row:nth-child(3) { --r: 1; } .row:nth-child(4) { --r: 2; } .row:nth-child(5) { --r: 3; }
+.row:nth-child(6) { --r: 4; } .row:nth-child(7) { --r: 5; } .row:nth-child(8) { --r: 6; }
+
+/* People sit in the middle first, so the centre fills before the edges. */
+.seat[data-state=taken] { background: var(--taken); box-shadow: inset 0 -0.24em 0 rgba(0, 0, 0, 0.3); animation: take 0.4s calc(500ms + var(--k) * 700ms + var(--r) * 50ms) ease-in both; }
+.seat[data-state=unknown] { background: transparent; box-shadow: inset 0 0 0 1.5px rgba(184, 167, 161, 0.55); }
+.seat[data-state=pair] { background: var(--amber); box-shadow: 0 0 22px rgba(255, 189, 63, 0.65), inset 0 -0.24em 0 rgba(120, 70, 0, 0.35); animation: light 0.7s 1.7s ease-out both; }
+
+@keyframes row-in { from { opacity: 0; transform: translateY(12px); } }
+@keyframes take { from { background: var(--seat); } }
+@keyframes light { from { background: var(--seat); box-shadow: none; scale: 1; } 55% { scale: 1.18; } }
+
+/* The legend is real text; its keys reuse the seat shape. */
+.legend { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px 22px; margin-top: 20px; font-size: 13px; color: var(--dust); }
+.legend span { display: inline-flex; align-items: center; gap: 8px; }
+.legend i, .glyph { display: inline-block; flex-shrink: 0; width: 16px; aspect-ratio: 1 / 0.86; border-radius: var(--seat-shape); background: var(--seat); }
+.legend i[data-state=taken] { background: var(--taken); box-shadow: inset 0 0 0 1px #4a3039; }
+.legend i[data-state=unknown] { background: transparent; box-shadow: inset 0 0 0 1.5px rgba(184, 167, 161, 0.7); }
+
+.hero-copy { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 32px 64px; align-items: end; margin-top: clamp(40px, 6vw, 72px); }
+.hero h1 { margin: 0; font-size: clamp(60px, 9vw, 128px); line-height: 0.88; letter-spacing: -0.032em; font-weight: 800; }
+.hero h1 span { display: block; }
+.hero-copy .lead { margin: 0 0 28px; max-width: 34ch; }
+.hero-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+
+/* ── Sections ─────────────────────────────────────────────────────────── */
+.section { padding: 84px 0; }
+.section-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: end; gap: 12px 48px; margin-bottom: 48px; }
+.section-head h2 { margin: 0; }
+.section-head p { max-width: 44ch; margin: 0; }
+
+/* What each cinema answers: a board of seats. */
+.board { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.board th, .board td { text-align: left; vertical-align: middle; }
+.board thead th { padding: 0 16px 18px; font: 700 clamp(17px, 1.9vw, 26px)/1.1 var(--font-display); letter-spacing: -0.03em; color: var(--foreground); }
+.board thead td { width: 28%; }
+
+.board tbody tr { border-top: 1px solid var(--border); }
+.board tbody :is(th, td) { transition: background-color 0.2s; }
+.board tbody tr:last-child { border-bottom: 1px solid var(--border); }
+.board tbody tr:hover,
+.board:has(:is(th, td):nth-child(2):hover) :is(th, td):nth-child(2),
+.board:has(:is(th, td):nth-child(3):hover) :is(th, td):nth-child(3),
+.board:has(:is(th, td):nth-child(4):hover) :is(th, td):nth-child(4),
+.board:has(:is(th, td):nth-child(5):hover) :is(th, td):nth-child(5),
+.board:has(:is(th, td):nth-child(6):hover) :is(th, td):nth-child(6) { background: rgba(246, 238, 228, 0.03); }
+.board tbody th { padding: 26px 24px 26px 0; font-weight: inherit; }
+.board .topic { display: block; font: 700 clamp(19px, 2.1vw, 30px)/1.05 var(--font-display); letter-spacing: -0.03em; color: var(--foreground); }
+.board .ask { display: block; margin-top: 6px; font-size: 15px; color: var(--dust); }
+.board td { padding: 26px 16px; font-size: 15px; color: var(--foreground); }
+.board .mark { display: flex; align-items: center; gap: 10px; }
+.cell-cinema { display: none; }
+.glyph { width: 22px; display: inline-grid; place-items: center; }
+.board td[data-access=open] .glyph { background: var(--amber); box-shadow: 0 0 14px rgba(255, 189, 63, 0.45); }
+.board td[data-access=account] .glyph { background: var(--seat); }
+.board td[data-access=account] .glyph svg { width: 11px; height: 11px; color: var(--cream); stroke-width: 2.6; }
+.board td[data-access=none] { color: var(--dust); }
+.board td[data-access=none] .glyph { background: transparent; box-shadow: inset 0 0 0 1.5px rgba(184, 167, 161, 0.6); }
+
+/* What you can ask: four examples, with the per-cinema table one click away. */
+/* Open summary columns: no boxes, each item marked with a small amber seat. */
+.asks { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 32px 40px; }
+.asks li::before { content: ''; display: block; width: 18px; aspect-ratio: 1 / 0.86; margin-bottom: 16px; border-radius: var(--seat-shape); background: var(--amber); box-shadow: 0 0 14px rgba(255, 189, 63, 0.4); }
+.asks .topic { display: block; font: 700 clamp(21px, 2vw, 27px)/1.1 var(--font-display); letter-spacing: -0.03em; color: var(--foreground); }
+.asks .ask { display: block; margin-top: 8px; font-size: 15px; color: var(--dust); }
+.more { margin-top: 36px; }
+.more > summary { display: flex; align-items: center; gap: 10px; width: fit-content; padding: 18px 0 4px; list-style: none; cursor: pointer; font-weight: 600; color: var(--foreground); }
+.more > summary::-webkit-details-marker { display: none; }
+.more > summary:hover { color: var(--amber); }
+.more > summary .chevron { width: 18px; height: 18px; transition: transform 0.25s ease; }
+.more[open] > summary .chevron { transform: rotate(180deg); }
+.more[open] > .board-scroll { margin-top: 28px; animation: unfold 0.35s ease-out; }
+@keyframes unfold { from { opacity: 0; transform: translateY(-6px); } }
+
+/* How visitor data is handled. */
+.safeguards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px 48px; }
+.safeguards svg { width: 22px; height: 22px; color: var(--amber); margin-bottom: 14px; }
+.safeguards h3 { margin: 0 0 8px; font: 700 20px/1.15 var(--font-display); letter-spacing: -0.02em; color: var(--foreground); }
+.safeguards p { margin: 0; font-size: 15px; }
+.more > .safeguards { margin-top: 32px; }
+.more > .note { margin-top: 32px; }
+
+.notes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px 48px; margin-top: 40px; }
+.notes p { margin: 0; font-size: 15px; }
+
+/* How to start: the message itself, then three steps. */
+.install { display: flex; align-items: center; gap: 16px; padding: 10px 10px 10px 20px; background: var(--card); border: 1px solid var(--line); border-radius: 18px; }
+/* Monospace, like the command snippets: it reads as text to copy as is. */
+.install #install-message { flex: 1; min-width: 0; margin: 0; max-width: none; font: 500 15px/1.5 var(--font-mono); color: var(--foreground); overflow-wrap: break-word; }
+.install .btn { height: 38px; padding-inline: 14px; border-radius: 10px; }
+.install + .note { margin-top: 12px; }
+.steps { list-style: none; counter-reset: step; margin: 28px 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px 48px; }
+.steps > li { counter-increment: step; color: var(--foreground); font-size: 16px; }
+.steps > li::before { content: counter(step); display: block; margin-bottom: 8px; font: 800 28px/1 var(--font-display); letter-spacing: -0.04em; color: var(--amber); }
+
+/* "Cómo empezar" sits on a full-width band, the page's one call to act. */
+.band { position: relative; isolation: isolate; }
+.band::before { content: ''; position: absolute; z-index: -1; inset: 0 calc(50% - 50vw); background: var(--surface); }
+.band .install { background: var(--night); }
+
+/* FAQ: heading on the left, questions on the right; one answer open at a time is not enforced. */
+.split { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 7fr); gap: 32px 64px; align-items: start; }
+.split > .section-head { margin: 0; position: sticky; top: 32px; }
+.faq { display: grid; gap: 6px; }
+.faq details { border-radius: 14px; transition: background-color 0.2s; }
+.faq details[open], .faq details:hover { background: var(--surface); }
+.faq summary { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 18px 20px; list-style: none; cursor: pointer; font: 600 18px/1.35 var(--font-sans); color: var(--foreground); }
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary .plus { flex-shrink: 0; width: 20px; height: 20px; color: var(--amber); transition: transform 0.25s ease; }
+.faq details[open] summary .plus { transform: rotate(45deg); }
+.faq details > p { margin: 0; padding: 0 20px 20px; font-size: 16px; }
+/* site.js animates the height; the answer stays open until it has collapsed. */
+.faq details { overflow: hidden; transition: background-color 0.3s ease; }
+.faq details[data-closing] { background: transparent; }
+.faq details[data-closing] summary .plus { transform: none; }
+/* Basecoat transitions every details' content, which fights site.js. */
+.faq details::details-content, details.more::details-content { transition: none; }
+.faq summary, .more > summary { user-select: none; -webkit-user-select: none; }
+details.more { overflow: hidden; }
+details.more[data-closing] > summary .chevron { transform: none; }
+
+/* Closing: what Cinve is, and where to see or improve it. */
+.closing { padding: 112px 0 120px; text-align: center; display: grid; justify-items: center; }
+.closing h2 { max-width: 16ch; margin: 0; font-size: clamp(36px, 5vw, 64px); }
+.closing p { margin: 22px auto 0; max-width: 54ch; font-size: 17px; }
+.closing-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 32px; }
+
+/* Header: section links, with the start action highlighted. */
+.site-nav a:hover { color: var(--foreground); }
+
+/* ── Compact pages: install, authorization and account connection ────── */
+.compact { max-width: 600px; margin: 64px auto 96px; }
+.compact h1 { font-size: clamp(44px, 9vw, 72px); margin-bottom: 20px; letter-spacing: -0.045em; }
+.compact > .card, .compact > .alert, .compact > .install { margin: 32px 0 20px; }
+.compact > noscript { display: block; margin: 32px 0 20px; }
+.compact > .card[hidden] { display: none; }
+.compact > .btn { margin-top: 12px; }
+.compact .install #install-message { font-size: 17px; }
+.card { border-radius: 18px; border: 1px solid var(--line); box-shadow: 0 30px 60px -40px rgba(0, 0, 0, 0.9); }
+.card > header h2 { font: 700 26px/1.05 var(--font-display); letter-spacing: -0.03em; }
+.card > section p + .code, .card > section .code + p { margin-top: 12px; }
+.card > footer { gap: 12px; flex-wrap: wrap; }
+.code { display: block; font: 600 15px/1.5 var(--font-sans); color: var(--foreground); background: var(--muted); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; overflow-wrap: anywhere; }
+.stack { display: grid; gap: 20px; }
+
+/* Account connection */
+.password-row { display: flex; gap: 8px; }
+.password-row .input { flex: 1; min-width: 0; }
+.status-panel { display: grid; justify-items: start; gap: 8px; }
+.status-panel svg { width: 34px; height: 34px; margin-bottom: 4px; }
+.status-panel[data-tone=success] svg { color: var(--success); }
+.status-panel[data-tone=error] svg { color: var(--destructive); }
+.status-panel[data-tone=muted] svg { color: var(--dust); }
+.status-panel h2 { font: 750 32px/1 var(--font-display); letter-spacing: -0.035em; margin: 0; }
+.loading { display: flex; align-items: center; gap: 10px; color: var(--dust); font-size: 15px; }
+.spinner { width: 16px; height: 16px; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.full { width: 100%; }
+.alert svg { flex-shrink: 0; }
+.alert > h2 { font: 600 15px/1.4 var(--font-sans); letter-spacing: normal; margin: 0; }
+.alert p { font-size: 15px; }
+.fine svg { display: inline; width: 14px; height: 14px; vertical-align: -2px; margin-right: 2px; }
+
+/* Side by side, the two hero buttons need about 400px; below 1180px the
+   copy column is narrower than that, so the copy goes under the title. */
+@media (max-width: 1180px) {
+  .hero-copy { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+}
+
+@media (max-width: 900px) {
+  .site-nav a:not(.nav-cta) { display: none; }
+  .site-nav .language-switch a { display: inline; }
+  /* Below 900px the five columns don't fit: each topic becomes a short list, one line per cinema, so the
+     table never scrolls sideways. */
+  .board, .board tbody, .board tr, .board th, .board td { display: block; }
+  .board thead { display: none; }
+  .board tbody tr { padding: 22px 0 14px; }
+  .board tbody tr:hover { background: none; }
+  .board tbody th { padding: 0 0 10px; }
+  .board .topic { font-size: 22px; }
+  .board .ask { font-size: 14px; }
+  .board td { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; font-size: 14px; }
+  .board td .cell-cinema { display: block; font-weight: 600; color: var(--foreground); }
+  .board td[data-access=none] .cell-cinema { color: var(--dust); }
+  .board .mark { gap: 8px; }
+  .board tbody { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 40px; }
+  .board tbody tr:last-child { border-bottom: 0; }
+  .board tbody { border-bottom: 1px solid var(--border); }
+  .notes, .steps { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .asks, .safeguards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .split { grid-template-columns: minmax(0, 1fr); }
+  .split > .section-head { position: static; }
+  .steps > li { display: grid; grid-template-columns: 40px minmax(0, 1fr); align-items: baseline; }
+  .steps > li::before { margin: 0; font-size: 24px; }
+}
+
+@media (max-width: 640px) {
+  /* Phones: the assistant chips fill an even grid instead of ragged rows. */
+  ul.works-with { display: grid; grid-template-columns: repeat(auto-fill, minmax(136px, 1fr)); gap: 8px; }
+  ul.works-with li { padding-right: 10px; font-size: 13.5px; gap: 8px; }
+  .board tbody { grid-template-columns: minmax(0, 1fr); }
+  /* .manual raises specificity above the base .snippet rules, which come later in the file. */
+  .manual .snippet { flex-direction: column; align-items: stretch; gap: 0; padding: 6px 6px 6px 14px; }
+  .manual .snippet pre { font-size: 13px; padding: 8px 0 4px; }
+  .manual .snippet .btn { align-self: flex-end; }
+  .wrap { width: calc(100% - 32px); }
+  .site-nav a:not(.nav-cta) { display: none; }
+  .site-nav .language-switch a { display: inline; }
+  /* Small screens keep the desktop order (brand left, two titled link
+     columns right) with tighter spacing. */
+  .site-footer { gap: 32px 28px; padding: 40px 0 24px; }
+  .footer-links { gap: 28px; }
+  .footer-links div { gap: 0; }
+  .footer-links a { padding-block: 6px; }
+  .consent-actions { flex-direction: column; }
+  .consent-actions .btn { width: 100%; }
+  .site-header { min-height: 64px; height: auto; padding-block: 10px; }
+  .site-nav { flex-wrap: wrap; justify-content: flex-end; gap: 8px 14px; }
+  .hero { padding: 16px 0 72px; }
+  /* Phones: 20 seats, 19 gaps and two aisles fill the content width (100vw
+     minus the 16px gutters), with a little slack for the seats' tilt, and
+     never grow past the desktop size just above this breakpoint. */
+  .seating { --gap: 3px; --aisle: 10px; --size: min(16px, calc((100vw - 112px) / 20)); }
+  .legend { gap: 8px 14px; font-size: 12px; }
+  .legend i { width: 13px; }
+  .hero .btn { width: 100%; }
+  .lead { font-size: 18px; }
+  .section { padding: 64px 0; }
+  .section-head { margin-bottom: 32px; }
+  .asks { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 20px; }
+  .asks li::before { margin-bottom: 12px; }
+  .safeguards { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+  .faq summary { padding: 16px; font-size: 17px; }
+  .faq details > p { padding: 0 16px 18px; }
+  /* Phones: left-aligned like the other sections; the code button keeps its
+     size and the two secondary actions sit side by side as plain links. */
+  .closing { padding: 72px 0 80px; text-align: left; justify-items: start; }
+  .closing h2 { font-size: 36px; }
+  .closing p { margin: 16px 0 0; font-size: 16px; }
+  .closing-links { display: grid; grid-template-columns: auto auto; justify-content: start; gap: 10px 24px; margin-top: 28px; }
+  .closing-links .btn:first-child { grid-column: 1 / -1; justify-self: start; }
+  .closing-links .btn[data-variant=ghost] { height: auto; padding: 8px 0; font-weight: 500; color: var(--dust); text-decoration: underline; text-decoration-color: var(--input); text-underline-offset: 4px; background: none; }
+  .install { flex-direction: column; align-items: stretch; padding: 18px; }
+  .install .btn { width: 100%; }
+  .install #install-message { font-size: 13.5px; }
+  .compact { margin: 40px auto 64px; }
+  .card > footer .btn { flex: 1; }
+}
+
+/* Phones: brand on top, then the two titled columns side by side. */
+@media (max-width: 560px) {
+  .site-footer { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+  .footer-brand { max-width: none; }
+  .footer-links { display: grid; grid-template-columns: auto auto; justify-content: start; column-gap: 40px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .row, .seat[data-state=taken], .seat[data-state=pair] { animation: none; }
+  .board tbody :is(th, td) { transition: none; }
+  .more > summary .chevron, .more[open] > .board-scroll, .faq details, .faq summary .plus, .picker-panel { transition: none; animation: none !important; }
+  .spinner { animation-duration: 2.4s; }
+}
+
+/* Everything clickable shows the pointer cursor. */
+a[href], button:not(:disabled), summary, label[for], [role=button], .btn:not(:disabled) { cursor: pointer; }
+button:disabled, .btn:disabled { cursor: not-allowed; }
+
+/* Instructions page: each text exactly as the assistant receives it. */
+.prompt { margin-top: 36px; }
+.prompt h2 { margin: 0 0 12px; font: 600 13px/1 var(--font-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--dust); }
+.prompt pre { margin: 0; padding: 20px 22px; background: var(--surface); border-radius: 14px; font: 400 14px/1.65 var(--font-sans); color: var(--foreground); white-space: pre-wrap; overflow-wrap: break-word; }
+.snippet pre span { white-space: nowrap; }
+.more .prompt:first-of-type { margin-top: 20px; }
+
+/* Consent page */
+.warning { margin: 16px 0; padding: 10px 0 10px 14px; border-left: 3px solid var(--destructive); color: var(--foreground); }
+#login-account.warning { margin: 4px 0 0; }
+.consent-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 20px 0 16px; }
+/* Basecoat draws the arrow from a data: image, which the CSP (img-src 'self') blocks. */
+.select-wrap { position: relative; }
+.select-wrap .select { width: 100%; background-image: none; padding-right: 36px; }
+.select-wrap .chevron { position: absolute; right: 12px; top: 50%; width: 16px; height: 16px; translate: 0 -50%; pointer-events: none; color: var(--muted-foreground); }
+
+/* Install page: pick an app, see its one step. */
+.manual { margin-top: 56px; }
+.policy { margin-top: 44px; }
+.policy h2 { margin: 0 0 14px; font: 700 24px/1.2 var(--font-display); letter-spacing: -0.03em; }
+.policy ul { margin: 0; padding-left: 20px; list-style: disc; display: grid; gap: 10px; color: var(--muted-foreground); max-width: 62ch; }
+.policy ul + p, .policy p + ul { margin-top: 14px; }
+.policy code { font-size: .92em; color: var(--foreground); }
+.manual h2 { margin: 0 0 20px; font: 700 26px/1.15 var(--font-display); letter-spacing: -0.03em; }
+.picker-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.picker-options label { display: inline-flex; align-items: center; gap: 9px; padding: 5px 14px 5px 5px; border-radius: 999px; background: var(--surface); box-shadow: inset 0 0 0 1px transparent; font-size: 14px; font-weight: 500; color: var(--dust); cursor: pointer; user-select: none; transition: color .15s, box-shadow .15s, background-color .15s; }
+.picker-options label:hover { color: var(--foreground); }
+.picker-options input:checked + label { color: var(--foreground); box-shadow: inset 0 0 0 1.5px var(--amber); }
+.picker-options input:focus-visible + label { outline: 2px solid var(--amber); outline-offset: 3px; }
+.picker-options .app-mark-other { background: var(--night); color: var(--cream); }
+.picker-options .app-mark-other svg { width: 16px; height: 16px; stroke-width: 3; }
+.picker-panels { margin-top: 20px; }
+.picker-panel { display: none; }
+.picker-panel p { margin: 0 0 10px; font-size: 15px; }
+.picker-panel code { font-size: 14px; color: var(--foreground); }
+.picker:has(.picker-options input:nth-of-type(1):checked) .picker-panel:nth-child(1) { display: block; animation: unfold .25s ease-out; }
+.picker:has(.picker-options input:nth-of-type(2):checked) .picker-panel:nth-child(2) { display: block; animation: unfold .25s ease-out; }
+.picker:has(.picker-options input:nth-of-type(3):checked) .picker-panel:nth-child(3) { display: block; animation: unfold .25s ease-out; }
+.picker:has(.picker-options input:nth-of-type(4):checked) .picker-panel:nth-child(4) { display: block; animation: unfold .25s ease-out; }
+.picker:has(.picker-options input:nth-of-type(5):checked) .picker-panel:nth-child(5) { display: block; animation: unfold .25s ease-out; }
+.picker:has(.picker-options input:nth-of-type(6):checked) .picker-panel:nth-child(6) { display: block; animation: unfold .25s ease-out; }
+.picker:has(.picker-options input:nth-of-type(7):checked) .picker-panel:nth-child(7) { display: block; animation: unfold .25s ease-out; }
+.picker:has(.picker-options input:nth-of-type(8):checked) .picker-panel:nth-child(8) { display: block; animation: unfold .25s ease-out; }
+.snippet { display: flex; align-items: center; gap: 8px; padding: 4px 4px 4px 16px; background: var(--surface); border-radius: 12px; }
+.snippet pre { flex: 1; min-width: 0; margin: 0; padding: 10px 0; font: 500 14px/1.5 var(--font-mono); color: var(--foreground); white-space: pre-wrap; overflow-wrap: break-word; }
+.snippet pre span { white-space: nowrap; }
+.snippet .btn { flex-shrink: 0; }
+
+/* Assistants Cinve works with: logo (or initial) and name. */
+.works-with { list-style: none; margin: 0 0 28px; padding: 0; display: flex; flex-wrap: wrap; gap: 10px; }
+.works-with li { display: inline-flex; align-items: center; gap: 10px; padding: 6px 14px 6px 6px; border-radius: 999px; background: var(--night); font-size: 14px; font-weight: 500; color: var(--foreground); }
+.app-mark { display: inline-grid; place-items: center; flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%; background: #f6eee4; }
+.app-mark img { width: 18px; height: 18px; object-fit: contain; }
+.app-mark { overflow: hidden; }
+/* Optical sizes: each box is set so the visible mark comes out around 15px
+   across (measured from each file's ink), a little less for the solid,
+   heavy marks. Codex's file is a padded app icon, so it is scaled up and
+   clipped by the disc. */
+.app-mark [data-logo=openclaw] { width: 16px; height: 16px; }
+.app-mark [data-logo=opencode], .app-mark [data-logo=hermes] { width: 17px; height: 17px; }
+.app-mark [data-logo=antigravity] { width: 22px; height: 22px; }
+.app-mark [data-logo=codex] { width: 22px; height: 22px; border-radius: 50%; }
+/* Claude Code's brand colour (#D97757, per simple-icons) through its vendored shape. */
+.logo-claudecode { width: 19px; height: 19px; background: #d97757; mask: url(/assets/logos/claudecode.svg) center / contain no-repeat; -webkit-mask: url(/assets/logos/claudecode.svg) center / contain no-repeat; }
+
+/* The install page's command snippets turn amber once copied; the main
+   install message button keeps its look and only changes its label. */
+/* Specific enough to beat Basecoat's dark-mode ghost hover rule. */
+.manual .snippet .btn[data-variant=ghost][data-copied] { color: var(--amber); }
+
+/* 404: the page fills the first screen. "404" is spelled in lit seats on a
+   full house, under the same lit screen as the hero. */
+.lost {
+  min-height: calc(100svh - 72px); padding: clamp(32px, 7vh, 88px) 0;
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 56px clamp(40px, 6vw, 96px); align-items: center;
+}
+.lost-code { display: inline-flex; align-items: center; gap: 10px; margin: 0 0 22px; font: 600 13px/1 var(--font-sans); letter-spacing: .14em; text-transform: uppercase; color: var(--amber); }
+.lost-code::before { content: ''; width: 14px; aspect-ratio: 1 / 0.86; border-radius: var(--seat-shape); background: var(--amber); box-shadow: 0 0 12px rgba(255, 189, 63, 0.55); }
+.lost h1 { margin: 0 0 24px; font-size: clamp(44px, 5vw, 76px); line-height: .9; letter-spacing: -0.04em; font-weight: 800; }
+.lost .lead { margin: 0; max-width: 36ch; color: var(--dust); }
+.lost-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 36px; }
+
+.lost-house { position: relative; margin: 0; container-type: inline-size; }
+/* The lit seats cast a soft amber glow on the house. */
+.lost-house::before {
+  content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: radial-gradient(50% 50% at 50% 60%, rgba(255, 189, 63, 0.08), transparent);
+}
+.lost-seats {
+  /* 15 seats, 12 gaps and two aisles fill the column, with room for the
+     row letters on both sides so the seats stay centred. The tilt pivots on
+     the front row, so it keeps this width and the rows behind it shrink. */
+  --gap: clamp(3px, 1.3cqi, 9px); --aisle: calc(var(--gap) * 3.2); --label: 18px;
+  --size: min(44px, calc((100cqi - var(--label) * 2 - var(--gap) * 12 - var(--aisle) * 2) / 15));
+  display: grid; justify-items: center; gap: calc(var(--gap) * 1.3);
+  transform: perspective(1400px) rotateX(16deg); transform-origin: 50% 100%;
+}
+.lost-screen {
+  position: relative; height: 22px; margin: 0 6% 40px;
+  border-bottom: 2px solid rgba(246, 238, 228, 0.85); border-radius: 0 0 50% 50% / 0 0 100% 100%;
+  box-shadow: 0 12px 32px -10px rgba(246, 238, 228, 0.5);
+}
+.lost-screen span { position: absolute; left: 50%; bottom: -24px; translate: -50% 0; font: 600 11px/1 var(--font-sans); letter-spacing: .32em; text-transform: uppercase; color: var(--dust); }
+.lost-row { --r: 0; display: flex; align-items: center; gap: var(--gap); animation: row-in .5s calc(var(--r) * 50ms) ease-out both; }
+.lost-row b { width: var(--label); margin-left: calc(var(--label) * -1 - var(--gap)); font: 600 clamp(9px, 2.2cqi, 13px)/1 var(--font-sans); color: var(--dust); text-align: center; opacity: .7; }
+.lost-row i {
+  --b: 0; width: var(--size); aspect-ratio: 1 / 0.86; border-radius: var(--seat-shape);
+  background: var(--taken); box-shadow: inset 0 -0.24em 0 rgba(0, 0, 0, 0.3);
+}
+.lost-row i:nth-child(n+7) { --b: 1; } .lost-row i:nth-child(n+12) { --b: 2; }
+.lost-row i:nth-child(7), .lost-row i:nth-child(12) { margin-left: calc(var(--aisle) - var(--gap)); }
+/* The digits light up one after another, top row first. */
+.lost-row i[data-state=lit] {
+  background: var(--amber); box-shadow: 0 0 18px rgba(255, 189, 63, 0.5), inset 0 -0.24em 0 rgba(120, 70, 0, 0.35);
+  animation: lost-light .45s calc(450ms + var(--b) * 260ms + var(--r) * 45ms) ease-out both;
+}
+.lost-row:nth-child(2) { --r: 1; } .lost-row:nth-child(3) { --r: 2; } .lost-row:nth-child(4) { --r: 3; }
+.lost-row:nth-child(5) { --r: 4; } .lost-row:nth-child(6) { --r: 5; } .lost-row:nth-child(7) { --r: 6; }
+.lost-row:nth-child(8) { --r: 7; } .lost-row:nth-child(9) { --r: 8; }
+@keyframes lost-light { from { background: var(--taken); box-shadow: none; scale: 1; } 60% { scale: 1.15; } }
+
+/* Narrow screens: the house comes first, then the copy under it. */
+@media (max-width: 900px) {
+  .lost { grid-template-columns: minmax(0, 1fr); align-content: center; gap: 40px; }
+  .lost h1 { font-size: clamp(44px, 7vw, 64px); }
+  .lost-house { order: -1; width: 100%; max-width: 720px; justify-self: center; }
+}
+@media (max-width: 640px) {
+  .lost { min-height: calc(100svh - 64px); padding: 12px 0 32px; gap: 28px; }
+  .lost-screen { margin-bottom: 28px; height: 16px; }
+  .lost-code { margin-bottom: 16px; }
+  .lost h1 { margin-bottom: 16px; font-size: clamp(36px, 11vw, 44px); }
+  .lost-screen span { font-size: 10px; bottom: -20px; }
+  .lost-seats { --label: 12px; }
+  .lost .lead { font-size: 17px; }
+  .lost-actions { margin-top: 28px; }
+  .lost-actions .btn { width: 100%; }
+}
+/* Phones turned sideways: side by side again, so the copy and buttons stay
+   on the first screen instead of under the seats. */
+@media (max-width: 900px) and (orientation: landscape) and (max-height: 520px) {
+  .lost { grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: normal; gap: 24px 32px; padding: 12px 0 24px; }
+  .lost-house { order: 0; }
+  .lost h1 { font-size: clamp(28px, 5.4vw, 36px); margin-bottom: 12px; }
+  .lost-code { margin-bottom: 12px; }
+  .lost .lead { font-size: 15px; }
+  .lost-actions { margin-top: 20px; }
+  .lost-actions .btn[data-size=lg] { height: 44px; padding-inline: 18px; font-size: 15px; }
+}
+@media (prefers-reduced-motion: reduce) { .lost-row, .lost-row i[data-state=lit] { animation: none; } }
+
+/* "Qué puedes preguntar": the four examples beside a sample conversation. */
+.ask-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 460px); gap: 40px 64px; align-items: center; }
+.ask-grid .asks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+.demo { margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0; }
+.demo-me { justify-self: end; max-width: min(320px, 92%); min-height: 1.3em; margin: 0; padding: 13px 18px; border-radius: 20px 20px 6px 20px; background: var(--amber); color: #1a0d05; font: 600 17px/1.35 var(--font-sans); }
+.demo-bot { padding: 18px 20px 16px; border-radius: 20px 20px 20px 6px; background: var(--surface); box-shadow: 0 20px 60px rgba(0, 0, 0, .35); }
+.demo-who { display: flex; align-items: center; font-size: 13px; color: var(--dust); }
+.demo-dot { width: 7px; height: 7px; margin-right: 8px; border-radius: 50%; background: var(--amber); }
+.demo-sep { margin: 0 6px; opacity: .7; }
+.demo-bot { position: relative; }
+.demo-thinking { display: none; position: absolute; left: 20px; top: 50px; gap: 5px; }
+.demo .demo-thinking i { width: 7px; height: 7px; aspect-ratio: auto; border-radius: 50%; background: var(--dust); animation: think 1s ease-in-out infinite; }
+.demo .demo-thinking i:nth-child(2) { animation-delay: .15s; } .demo .demo-thinking i:nth-child(3) { animation-delay: .3s; }
+@keyframes think { 0%, 60%, 100% { opacity: .3; translate: 0 0; } 30% { opacity: 1; translate: 0 -4px; } }
+.demo-answer > p { margin: 10px 0 12px; font-size: 16px; color: var(--cream); }
+.demo-map { display: grid; gap: 6px; justify-content: center; }
+.demo-screen { height: 5px; margin: 0 8px 6px 28px; border-radius: 0 0 50% 50% / 0 0 100% 100%; border-top: 2px solid rgba(246, 238, 228, .5); }
+.demo-row { display: flex; align-items: center; gap: 5px; }
+.demo-row b { width: 20px; font-size: 12px; font-weight: 700; color: var(--dust); }
+.demo i { display: inline-block; width: 22px; aspect-ratio: 1 / .86; border-radius: var(--seat-shape); }
+.demo i[data-state=free] { background: var(--seat); }
+.demo i[data-state=taken] { background: rgba(246, 238, 228, .1); }
+.demo i[data-state=pair] { background: var(--amber); box-shadow: 0 0 14px rgba(255, 189, 63, .6); }
+.demo-key { display: flex; gap: 16px; margin-top: 12px; font-size: 12px; color: var(--dust); }
+.demo-key span { display: inline-flex; align-items: center; gap: 6px; }
+.demo .demo-key i { width: 12px; max-width: none; box-shadow: none !important; }
+
+/* Played by site.js: data-stage moves idle → typing → thinking → answer.
+   Its starting state comes from CSS on the first frame when scripts run, so
+   the finished conversation never flashes before the script loads. If the
+   script never arrives, the conversation shows itself after 3s. */
+@media (scripting: enabled) and (prefers-reduced-motion: no-preference) {
+  .demo:not([data-stage]) .demo-me, .demo:not([data-stage]) .demo-bot { opacity: 0; animation: demo-fallback .4s 3s forwards; }
+}
+@keyframes demo-fallback { to { opacity: 1; } }
+.demo[data-stage=idle] .demo-me { visibility: hidden; }
+/* Text types into a bubble already at its final size, so nothing shifts. */
+.demo[data-stage] .demo-me { text-align: left; }
+.demo[data-stage=idle] .demo-bot, .demo[data-stage=typing] .demo-bot { opacity: 0; translate: 0 8px; }
+.demo-bot { transition: opacity .35s ease, translate .35s ease, background-color .4s ease, box-shadow .4s ease; }
+/* While thinking only the dots show; the card fills in with the answer. */
+.demo[data-stage=thinking] .demo-bot { background-color: transparent; box-shadow: none; }
+.demo[data-stage=typing] .demo-me::after { content: ''; display: inline-block; width: 2px; height: 1.05em; margin-left: 2px; vertical-align: -0.15em; background: currentColor; animation: caret .8s steps(1) infinite; }
+@keyframes caret { 50% { opacity: 0; } }
+.demo[data-stage=thinking] .demo-thinking { display: flex; }
+.demo[data-stage=thinking] .demo-answer { visibility: hidden; }
+.demo[data-stage=answer] .demo-answer > p { animation: unfold .35s ease-out both; }
+.demo[data-stage=answer] .demo-row { animation: row-in .4s ease-out both; }
+.demo[data-stage=answer] .demo-row:nth-child(3) { animation-delay: .08s; } .demo[data-stage=answer] .demo-row:nth-child(4) { animation-delay: .16s; } .demo[data-stage=answer] .demo-row:nth-child(5) { animation-delay: .24s; }
+.demo[data-stage=answer] i[data-state=pair] { animation: light .7s .6s ease-out both; }
+.demo[data-stage=answer] .demo-key { animation: unfold .35s .5s ease-out both; }
+
+@media (max-width: 1000px) {
+  .ask-grid { grid-template-columns: minmax(0, 1fr); }
+  .demo { max-width: 460px; width: 100%; justify-self: center; }
+}
+@media (max-width: 640px) {
+  /* 12 seats fill the card: page gutters 32, card padding 40, row letter 20,
+     12 gaps of 5 (one after the letter) and 4px of slack. */
+  .demo i { width: calc((100vw - 156px) / 12); max-width: 22px; }
+  .demo-me { font-size: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .demo-thinking i, .demo[data-stage] * { animation: none !important; }
+}

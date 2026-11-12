@@ -22,7 +22,7 @@ test('a 200 body that is empty or not the expected JSON is reported but never ca
   let calls = 0;
   const bodies = ['', '<html>Mantenimiento</html>', '["Caracas"]'];
   const http = new HttpClient(async () => new Response(bodies[calls++]));
-  for (const expected of [/JSON válido/, /JSON válido/]) {
+  for (const expected of [/valid JSON/, /valid JSON/]) {
     await assert.rejects(new ReadContext(http).json(cities), e => e instanceof DataError && expected.test(e.message));
   }
   assert.deepEqual(await new ReadContext(http).json(cities), ['Caracas']);
@@ -107,5 +107,5 @@ test('one city read through the search API fits in the cache alongside another c
   // 62 cited URLs would cost more tokens than the schedule; the result lists 10, oldest included.
   assert.equal(again.sources.length, 10);
   const oldest = again.sources.reduce((a, b) => (b.fetched_at < a.fetched_at ? b : a)).fetched_at;
-  assert.ok(again.warnings.some(w => w.includes('Se consultaron 62 fuentes') && w.includes(oldest)), again.warnings.join(' | '));
+  assert.ok(again.warnings.some(w => w.includes('62 sources were queried') && w.includes(oldest)), again.warnings.join(' | '));
 });

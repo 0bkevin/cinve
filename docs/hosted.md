@@ -1,260 +1,112 @@
-# Servicio alojado de Cinve: Vercel y PostgreSQL
+# Hosting Cinve
 
-Esta guía explica cómo desplegar el servidor HTTP de Cinve. Para usar la
-instancia pública no necesitas desplegar nada: conecta tu cliente a
-`https://cinve.kevinbravo.com/mcp`.
+How to deploy your own Cinve HTTP server. You don't need any of this to use the
+public service.
 
-El servicio alojado usa PostgreSQL para autorizaciones, sesiones cifradas,
-enlaces temporales y límites de uso. No guarda el estado de autenticación en
-memoria, Blob ni archivos locales persistentes. El modo `stdio` conserva su
-almacenamiento local independiente.
+## Requirements
 
-## Acceso público
+- Node.js 22 or later.
+- A dedicated PostgreSQL database (for example, Neon).
+- A domain with HTTPS.
 
-Un cliente MCP puede conectarse a `https://<dominio>/mcp` sin cabecera
-`Authorization` y consultar ciudades, sedes, películas, funciones y los precios
-o la caramelería que sean públicos.
+## Environment variables
 
-Las operaciones protegidas de Cinex y Cines Unidos devuelven
-`auth_required`. Un token inválido devuelve HTTP 401; el servidor nunca degrada
-silenciosamente una conexión autenticada a acceso anónimo.
+| Variable                | Required  | Description                                         |
+| ----------------------- | --------- | --------------------------------------------------- |
+| `DATABASE_URL`          | Yes       | PostgreSQL connection with TLS.                     |
+| `DATABASE_URL_UNPOOLED` | No        | Direct connection used for migrations.              |
+| `CINEV_PUBLIC_URL`      | Yes       | HTTPS origin, no path: `https://cine.example.com`.  |
+| `CINEV_ENCRYPTION_KEY`  | Yes       | Generate it with `openssl rand -hex 32`.            |
+| `CRON_SECRET`           | On Vercel | Protects the daily cleanup. Generate it the same way. |
+| `PORT`                  | No        | Port outside Vercel (default `3000`).               |
 
-## Conectar una cuenta de cine
+Keep `CINEV_ENCRYPTION_KEY` stable: if it changes, everyone must reconnect
+their accounts.
 
-El usuario no necesita una cuenta adicional de Cinve ni un token emitido por el
-operador. El flujo normal es:
+## Deploy on Vercel
 
-1. El asistente llama `connect_account`.
-2. Si la conexión MCP aún no está autorizada, el cliente descubre el servidor
-   OAuth, se identifica (con un documento de metadatos o mediante registro
-   dinámico) y abre la aprobación en el navegador.
-3. El cliente intercambia el código de un solo uso mediante PKCE y repite la
-   llamada.
-4. Cinve devuelve un enlace privado, válido durante diez minutos, para conectar
-   Cinex o Cines Unidos.
-5. El usuario introduce sus credenciales únicamente en ese formulario.
-6. El asistente consulta `get_auth_status` y repite la operación original.
-
-Cada autorización crea una conexión vacía e independiente. No hereda sesiones
-de otros clientes ni del navegador. Autorizar otra aplicación, perder sus tokens
-o crear una conexión nueva requiere volver a conectar los cines.
-
-El cliente debe admitir MCP sobre HTTP, OAuth, PKCE S256 y un documento de
-metadatos de cliente o el registro dinámico.
-Los clientes sin OAuth pueden seguir usando los datos públicos. Nunca se deben
-pegar contraseñas, cookies o tokens en el chat.
-
-### Codex local
-
-Si el cliente no abre automáticamente la autorización, puede iniciarse desde la
-instalación local del usuario:
-
-```sh
-codex mcp login cinve
-```
-
-Este comando autoriza al cliente MCP; no solicita la contraseña del cine. El
-proceso debe permanecer activo mientras el usuario aprueba la URL. Una
-conversación ya abierta puede requerir recargar sus conexiones después del
-login. `get_auth_status.connection.client_authorized` permite distinguir este
-caso de una cuenta de cine todavía no conectada.
-
-Si después la conversación sigue anónima, el asistente usa la acción nativa del
-cliente para recargar conexiones cuando existe (en Codex,
-`config/mcpServer/reload`). Si no existe, pide al usuario abrir una
-conversación nueva o reconectar Cinve en su cliente y repite la consulta.
-
-Cinve exige consentimiento informado: el asistente nunca ejecuta comandos en el
-equipo del usuario sin explicarle antes qué hará y para qué, y obtener su
-aprobación explícita. Si el usuario no aprueba, el asistente no lo hace y usa el
-control de conexión del propio cliente. Cinve nunca pide al asistente descargar
-ni ejecutar otro código para conectar una cuenta.
-
-No ejecutes este flujo en una terminal remota ajena al usuario y no sustituyas
-el flujo alojado con `npm run login`: ese comando pertenece exclusivamente al
-modo local `stdio`.
-
-## Endpoints OAuth
-
-- `/.well-known/oauth-protected-resource/mcp`: metadatos del recurso MCP.
-- `/.well-known/oauth-authorization-server`: metadatos del servidor OAuth.
-- `POST /oauth/register`: registro dinámico de clientes públicos (Dynamic Client
-  Registration) con sus redirecciones exactas. Se aceptan HTTPS y HTTP de
-  loopback. El protocolo 2026-07-28 lo declara obsoleto; se mantiene para los
-  clientes que todavía no usan documentos de metadatos. Su retirada se sigue en
-  [#21](https://github.com/0bkevin/cinve/issues/21).
-- `GET|POST /oauth/authorize`: muestra y procesa la aprobación explícita.
-
-### Documentos de metadatos de cliente
-
-El método de registro preferido es el *Client ID Metadata Document*: el
-`client_id` es una URL HTTPS cuyo documento JSON declara `client_id` (la misma
-URL), `client_name` y `redirect_uris`. Los metadatos del servidor lo anuncian con
-`client_id_metadata_document_supported: true`. Al autorizar, Cinve:
-
-- acepta solo URL HTTPS con ruta, sin credenciales, fragmento (ni vacío) ni
-  segmentos `.`/`..` (tampoco codificados), y compara el `client_id` como cadena
-  exacta. Por decisión propia, más estricta que el borrador, tampoco admite IP
-  literales ni puertos distintos de 443;
-- resuelve el dominio y se conecta únicamente a una dirección comprobada, sin
-  segunda resolución, para evitar SSRF y DNS rebinding. Solo admite unicast
-  global, decidido sobre los bytes de la dirección: en IPv4 rechaza los rangos
-  de uso especial (privadas, loopback, link-local, CGNAT, documentación,
-  multidifusión, reservadas); en IPv6 solo admite `2000::/3` sin documentación,
-  asignaciones de protocolo del IETF ni 6to4. Una IPv4 mapeada (`::ffff:a.b.c.d`)
-  se juzga como su IPv4, y cualquier otra IPv4 incrustada se rechaza;
-- no sigue redirecciones, exige `application/json`, lee como máximo 16 KiB,
-  corta de inmediato una respuesta rechazada sin leer su cuerpo y abandona a
-  los 5 s;
-- exige que el documento coincida con su URL, que sea un cliente público
-  (`token_endpoint_auth_method` y `token_endpoint_auth_methods_supported`
-  coherentes con `none`), que no incluya secretos ni claves privadas o
-  simétricas (ni `jwks` junto a `jwks_uri`) y que la redirección solicitada
-  figure en `redirect_uris`;
-- guarda en caché los documentos válidos según `max-age`, entre 1 minuto y
-  24 horas (5 minutos por defecto), sin reutilizar los marcados `no-store`,
-  `no-cache` o `max-age=0`, y con un cupo de 20 lecturas por minuto e IP;
-- muestra en la aprobación el dominio que publica el documento, porque el nombre
-  lo declara el propio cliente.
-
-Un documento inválido o inaccesible nunca redirige al cliente.
-- `POST /oauth/token`: intercambia códigos y renueva tokens.
-- `POST /oauth/revoke`: revoca toda la conexión y elimina sus sesiones de cine.
-
-Los códigos duran cinco minutos y las aprobaciones pendientes, diez. Los tokens
-de acceso duran una hora; los tokens de renovación rotan en cada uso dentro de
-una autorización absoluta de 30 días. Reutilizar un token de renovación o un
-código consumido revoca la conexión para contener una posible repetición.
-
-Los tokens opacos se guardan únicamente como resúmenes SHA-256. Las sesiones de
-cine se cifran con AES-256-GCM y se vinculan criptográficamente a su propietario
-y proveedor. El registro, la aprobación y la emisión de tokens tienen límites
-persistentes por IP y globales. El límite global solo se consume cuando la IP
-todavía tiene cupo, para que una sola dirección no agote el servicio para todos.
-
-En `/mcp`, cada conexión admite hasta 120 solicitudes por minuto y cuatro
-simultáneas; el proceso admite 32 simultáneas. La plaza se reserva antes de leer
-el cuerpo, que debe llegar completo en diez segundos. Las llamadas con
-`refresh: true` evitan la caché pública compartida y pueden generar varias
-lecturas al proveedor, por lo que tienen un cupo propio de diez por minuto.
-
-`/mcp` admite solicitudes desde cualquier origen web, porque la autorización es
-solo mediante token Bearer y nunca usa cookies; la comprobación exacta de `Host`
-impide el DNS rebinding. Se aceptan orígenes de cualquier esquema, como los de
-extensiones de navegador (`chrome-extension://`) o aplicaciones (`tauri://`); una
-cabecera `Origin` mal formada (con ruta, consulta o credenciales) recibe 403. El
-endpoint no guarda estado: solo acepta POST (GET y DELETE reciben 405) y nunca
-crea sesiones, así que CORS permite `Authorization`, `Content-Type`,
-`MCP-Protocol-Version`, `Mcp-Method` y `Mcp-Name`, sin las cabeceras de sesión y
-reanudación que el protocolo 2026-07-28 eliminó.
-
-## Despliegue
-
-1. Crea un proyecto en Vercel y conecta una base PostgreSQL dedicada. Neon desde
-   el Marketplace funciona; usa la misma región que la función. Separa las bases
-   y claves de producción y preview.
-2. Configura `DATABASE_URL` con una conexión agrupada y TLS verificado.
-3. Configura `CINEV_PUBLIC_URL` con el origen HTTPS exacto,
-   `CINEV_ENCRYPTION_KEY` con 32 bytes aleatorios codificados como 64 caracteres
-   hexadecimales y `CRON_SECRET` con otro secreto aleatorio. Nunca confirmes
-   estos valores en el repositorio ni en un chat.
-4. Ejecuta las migraciones con las variables de la base cargadas:
-
-   ```sh
-   npm run db:migrate
-   ```
-
-   Usa `DATABASE_URL_UNPOOLED` cuando el proveedor ofrezca una conexión directa.
-   La migración es transaccional, idempotente y usa un bloqueo de coordinación;
-   no se ejecuta durante solicitudes HTTP ni arranques en frío.
-
-   Si la red local no permite conexiones PostgreSQL directas a Neon, usa:
+1. Create a project and connect a PostgreSQL database in the same region.
+2. Set the environment variables.
+3. Run the migrations: `npm run db:migrate`. If your network blocks direct
+   PostgreSQL connections to Neon:
 
    ```sh
    node --env-file=.env.production.local --import tsx scripts/migrate-neon.ts
    ```
 
-5. Despliega y verifica la salud del proceso:
+4. Deploy and check: `vercel --prod` and `curl https://<domain>/health`.
 
-   ```sh
-   vercel --prod
-   curl https://<dominio>/health
-   ```
+`vercel.json` already includes the routes and the daily cleanup.
 
-6. Prueba `/mcp` por separado para cubrir base de datos y protocolo. Comprueba
-   consultas reales desde la infraestructura publicada: que un proveedor
-   responda desde tu equipo no garantiza que responda desde Vercel.
-
-`server.ts` exporta el handler HTTP. `npm run build:hosted` compila la función en
-`.hosted/index.js`, separada de la entrada `stdio` en `dist/index.js`. El archivo
-`vercel.json` contiene las rutas y el límite de ejecución.
-
-## Acceso manual del operador
-
-Los clientes antiguos sin OAuth pueden usar una conexión emitida manualmente:
+## Deploy on another server
 
 ```sh
+npm ci
 npm run build
-npm run hosted:admin -- issue
+npm run db:migrate
+npm run start:hosted
 ```
 
-El comando muestra una vez un identificador y un bearer token. Guárdalo en la
-configuración privada del cliente, nunca en una URL. Para revocarlo y eliminar
-sus sesiones y enlaces:
+Schedule `npm run db:cleanup` once a day (for example, with cron).
+
+Put it behind an HTTPS reverse proxy, keeping in mind that:
+
+- The proxy must preserve the `Host` header; if it doesn't match
+  `CINEV_PUBLIC_URL`, the server responds 403. In Nginx:
+  `proxy_set_header Host $host;`.
+- Cinve doesn't read `X-Forwarded-For`: all users share the proxy IP's rate
+  limits (for example, 20 sign-ins per minute). It suits personal or small-group
+  use.
+- Don't install with `--omit=dev`: migrations and cleanup use `tsx`.
+
+## Protect the service
+
+- Rate-limit requests per IP in your firewall or CDN for `/mcp`, `/oauth/*` and
+  `/connect/*`.
+- Set a maximum compute size for the database.
+- Don't log SQL parameters or request bodies.
+
+## Verify
 
 ```sh
+npm run smoke -- --url https://<domain>/mcp
+```
+
+Runs real queries and checks that protected routes require authentication.
+
+## Update
+
+Run `npm run db:migrate` before deploying a version with new migrations. They
+are idempotent.
+
+## Manual tokens
+
+For clients without OAuth (requires `npm run build`):
+
+```sh
+npm run hosted:admin -- issue              # shows the token only once
 npm run hosted:admin -- revoke <client-id>
 ```
 
-Cinve no implementa cuentas propias basadas en email y contraseña.
+## Web languages and discovery
 
-## Datos y concurrencia
+Browser pages support Spanish and English. `?lang=es` or `?lang=en` overrides
+`Accept-Language`; unsupported or missing preferences fall back to Spanish.
+Public pages that negotiate English redirect temporarily, with no caching, to
+`?lang=en` so shared links and social crawlers keep the selected language.
+Responses vary by `Accept-Language` and declare `Content-Language`. Internal
+links keep the chosen language.
 
-- `cinev_clients`: conexiones, resumen del token y fecha de revocación.
-- `cinev_sessions`: sesiones cifradas por conexión y proveedor.
-- `cinev_links`: enlaces temporales, etapa, propietario y estado de uso.
-- `cinev_budgets`: límites de solicitudes por ventana de un minuto.
-- `cinev_oauth_apps`: clientes públicos y redirecciones permitidas.
-- `cinev_oauth_requests`: aprobaciones, CSRF, PKCE y códigos temporales.
-- `cinev_oauth_grants`: autorización, cliente, recurso y vencimiento.
-- `cinev_oauth_tokens`: resúmenes de tokens, tipo, uso y vencimiento.
+`/install` also varies by `Accept`. An explicit `lang` serves HTML even without
+an HTML Accept header; `?format=text` always serves the English agent guide.
+MCP instructions and results remain independent of the web language; the
+assistant is instructed to answer in the language of the user's prompt.
 
-Las mutaciones de una conexión bloquean la misma fila y usan transacciones. El
-login HTTP al cine ocurre fuera de la transacción; una respuesta tardía no puede
-guardar una sesión después de cancelar, reemplazar, vencer o revocar el enlace.
-Ante una caída de la base, las operaciones protegidas fallan de forma cerrada.
+Typed catalogs live in `src/web/locales/es.ts` and `en.ts`. `/connect` switches
+languages in place to retain its single-use invitation or exchanged token.
+Indexable pages have localized canonical URLs, reciprocal `hreflang` links,
+social metadata and sitemap entries. Landing-page JSON-LD matches the visible
+content and Venezuelan coverage. Private pages and errors remain `noindex`.
 
-Una tarea diaria autenticada elimina sesiones, enlaces, límites y objetos OAuth
-vencidos. El registro OAuth es anónimo, así que también elimina los clientes
-registrados sin autorizaciones vigentes que llevan 90 días sin emitir tokens; un
-cliente que vuelva se registra de nuevo. Ejecuta `npm run db:migrate` antes de
-desplegar una versión con migraciones nuevas. La validez se comprueba al acceder y no depende de esa limpieza. La
-limpieza manual se ejecuta con:
-
-```sh
-npm run db:cleanup
-```
-
-Conserva `CINEV_ENCRYPTION_KEY` entre despliegues; cambiarla obliga a reconectar
-las cuentas. No habilites logs de parámetros SQL ni cuerpos de solicitudes.
-
-## Verificación local
-
-```sh
-npm run check
-npm test
-npm run build
-```
-
-Las pruebas usan un clúster PostgreSQL temporal por socket privado, o una base de
-pruebas indicada por `TEST_DATABASE_URL`. Crean y eliminan esquemas con nombres
-aleatorios: nunca uses una base de producción. Las credenciales empleadas en las
-pruebas son sintéticas.
-
-La prueba en vivo del servicio público es:
-
-```sh
-npm run smoke -- --url https://cinve.kevinbravo.com/mcp
-```
-
-Comprueba consultas anónimas y que las rutas protegidas soliciten autenticación.
+Regenerate the two 1200 × 630 social PNGs with `npm run build:og`. They share
+`scripts/build-og.ts` and the vendored fonts and logos; only catalog copy differs.

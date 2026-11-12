@@ -1,0 +1,25 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "com.kevinbravo.cinve/mcp",
+  "title": "Cinve",
+  "description": "Showtimes, ticket prices, concessions and seat maps for cinemas in Venezuela.",
+  "version": "0.1.0",
+  "websiteUrl": "https://cinve.kevinbravo.com",
+  "repository": {
+    "url": "https://github.com/0bkevin/cinve",
+    "source": "github"
+  },
+  "icons": [
+    {
+      "src": "https://cinve.kevinbravo.com/favicon.svg",
+      "mimeType": "image/svg+xml",
+      "sizes": ["any"]
+    }
+  ],
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://cinve.kevinbravo.com/mcp"
+    }
+  ]
+}

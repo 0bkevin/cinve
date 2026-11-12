@@ -1,4 +1,5 @@
 import { HttpClient } from '../http/client.js';
+import type { Ttl } from '../http/client.js';
 import { SessionStore } from '../auth/sessions.js';
 
 /**
@@ -22,5 +23,11 @@ export class HostedHttpClient extends HttpClient {
 
   override get(url: string, ttl = 120000, refresh = false, accept?: (body: string) => boolean) {
     return this.publicClient.get(url, ttl, refresh, accept);
+  }
+
+  // Public form reads (Supercines) share the cache, the anonymous visitor
+  // session and the per-origin request limit with every other hosted call.
+  override post(url: string, fields: Record<string, string>, ttl: Ttl = 120000, refresh = false) {
+    return this.publicClient.post(url, fields, ttl, refresh);
   }
 }

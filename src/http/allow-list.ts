@@ -1,12 +1,14 @@
 // Every URL Cinve may fetch from a provider. HttpClient refuses any other
 // host; adapters may read only these public routes, and the saved account
-// sessions only the authenticated read routes below. Nothing here selects,
-// holds or buys seats or tickets: boletos_datadev.php, which starts a timed
-// Cinex order, is deliberately absent.
+// sessions only the authenticated routes below. Nothing here selects, holds
+// or buys a seat or pays: the only purchase steps are a one-ticket order that
+// a seat lookup opens and always closes, on Cinex (assertCinexSeatOrder) and
+// Supercines (assertSupercinesSeatPage). Cinex's boletos_datadev.php and
+// asientos_datadevx.php are deliberately absent.
 import { DataError, group, Id } from '../core.js';
 import type { AuthProviderId } from '../auth/sessions.js';
 
-export const publicHosts = new Set(['www.cinex.com.ve', 'www.cinesunidos.com', 'gateway.cinesunidos.com', 'cinepiccandelaria.com', 'cinepicvip.com', 'apifront.cinexo.com.ar', 'api.cinexo.com.ar']);
+export const publicHosts = new Set(['www.cinex.com.ve', 'www.cinesunidos.com', 'gateway.cinesunidos.com', 'cinepiccandelaria.com', 'cinepicvip.com', 'apifront.cinexo.com.ar', 'api.cinexo.com.ar', 'supercines.com.ve', 'www.grancine.net']);
 const ids = (value: string | null) => value !== null && Id.safeParse(value).success;
 /** Each listed query key appears exactly once, and no other key appears. */
 function exactQuery(u: URL, rules: Record<string, (value: string | null) => boolean>) {
@@ -59,11 +61,35 @@ export function assertPublicRead(value: string) {
           exactQuery(u, { idComplejo: ids, fecha: v => !!v && /^\d{2}\/\d{2}\/\d{4}$/.test(v) });
       case 'api.cinexo.com.ar':
         { const m = path.match(/^\/api\/complejo\/([^/]+)\/(?:candy|configuration)$/); return !!m && none && Id.safeParse(m[1]).success; }
+      case 'supercines.com.ve':
+        return none && (path === '/cartelera' || /^\/booking\/\d{1,12}$/.test(path));
+      case 'www.grancine.net':
+        if (path === '/salas') return none;
+        return path === '/sedes/sede.php' && exactQuery(u, { slug: v => !!v && /^[a-z0-9-]{1,80}$/.test(v), fecha: v => !!v && /^\d{4}-\d{2}-\d{2}$/.test(v) });
       default:
         return false;
     }
   })();
-  if (!allowed) throw new DataError('error', 'Ruta de consulta pública no permitida.');
+  if (!allowed) throw new DataError('error', 'Public query path not allowed.');
+}
+
+const digits = (value: string | undefined) => value !== undefined && /^\d{1,12}$/.test(value);
+const isoDay = (value: string | undefined) => value !== undefined && /^\d{4}-\d{2}-\d{2}$/.test(value);
+const supercinesForms: Record<string, Record<string, (value: string | undefined) => boolean>> = {
+  '/dame_empresas': {},
+  '/api/app/cartelera/list': { type: value => value === 'all', idEmpresa: value => value === undefined || digits(value) },
+  '/listCartelerafecha': { fecha: isoDay, id: digits },
+  '/listBoletos': { idFuncion: digits, fecha: isoDay, unico: digits, tresD: value => value === '0' || value === '1', idEmpresa: digits },
+  '/listCarameleria': { idEmpresa: digits },
+};
+/**
+ * Public form reads. Only the listing routes Supercines' own pages call, with
+ * exactly their fields: never login, registration, cart, booking or payment.
+ */
+export function assertPublicForm(value: string, fields: Record<string, string>) {
+  const u = new URL(value), rules = u.hostname === 'supercines.com.ve' && !u.search && !u.hash ? supercinesForms[u.pathname] : undefined;
+  const allowed = !!rules && Object.keys(fields).every(key => Object.hasOwn(rules, key)) && Object.entries(rules).every(([key, valid]) => valid(fields[key]));
+  if (!allowed) throw new DataError('error', 'Public query path not allowed.');
 }
 
 export function assertPrivateRead(p: AuthProviderId, value: string) {
@@ -72,10 +98,18 @@ export function assertPrivateRead(p: AuthProviderId, value: string) {
   const expected = ['/boletos.php', '/boletosdev.php'].includes(u.pathname) ? ['cinemaid', 'sessionid'] : u.pathname === '/concesiones.php' ? ['cinemaid'] : [];
   const params = [...u.searchParams];
   const cinexParams = params.length === expected.length && expected.every(key => u.searchParams.getAll(key).length === 1 && /^[A-Za-z0-9_-]{1,100}$/.test(u.searchParams.get(key) ?? ''));
+  if (p === 'supercines') {
+    // The reads made with a Supercines account: the fare list of one function
+    // (fields checked by assertPublicForm), and the seat map, which the site
+    // shows only inside a purchase: /bookSeat opens it with one ticket and no
+    // seat (fields checked by assertSupercinesSeatPage), /cancelaCompra closes it.
+    if (!safe || u.hostname !== 'supercines.com.ve' || !['/listBoletos', '/bookSeat', '/cancelaCompra'].includes(u.pathname) || u.search) throw new DataError('error', 'Authenticated route is not allowed.');
+    return;
+  }
   const route = p === 'cinesunidos'
     ? (u.hostname === 'www.cinesunidos.com' && u.pathname === '/api/seats' && params.length === 2 && ['theaterId', 'showTimeId'].every(key => u.searchParams.getAll(key).length === 1 && /^[A-Za-z0-9_-]{1,100}$/.test(u.searchParams.get(key) ?? ''))) || (u.hostname === 'gateway.cinesunidos.com' && /^\/tickets\/www\/theaters\/[\w-]+\/sessions\/[\w-]+\/$/.test(u.pathname) && !u.search)
     : u.hostname === 'www.cinex.com.ve' && ['/checklogin.php', '/boletos.php', '/boletosdev.php', '/asientos.php', '/asientosdev.php', '/concesiones.php', '/boletos_data.php', '/resetpurchase.php'].includes(u.pathname) && cinexParams;
-  if (!safe || !route) throw new DataError('error', 'Ruta autenticada no permitida.');
+  if (!safe || !route) throw new DataError('error', 'Authenticated route is not allowed.');
 }
 
 /**
@@ -89,6 +123,29 @@ export function assertCinexSeatOrder(fields: Record<string, string>) {
   const keys = Object.keys(fields).sort().join(',');
   if (keys !== 'bookingfeetotal,cantboletos,indicetickets,tickettotal,total,totalticketsusd' || fields.cantboletos !== '1'
     || !/^,{1,30}1$/.test(fields.indicetickets ?? '') || !['total', 'bookingfeetotal', 'tickettotal', 'totalticketsusd'].every(k => number(fields[k]))) {
-    throw new DataError('error', 'Pedido Cinex no permitido.');
+    throw new DataError('error', 'Cinex order not allowed.');
   }
+}
+
+/**
+ * The other purchase step Cinve takes: Supercines draws a function's seat map
+ * only after a ticket count is submitted to /bookSeat, which opens a purchase
+ * with a countdown. Exactly one ticket of one type, no seat, no courtesy code,
+ * no product: the fields its booking form sends, nothing that pays or picks.
+ */
+export function assertSupercinesSeatPage(entries: Array<[string, string]>) {
+  const digits = (v: string) => /^\d{1,12}$/.test(v);
+  const single: Record<string, (v: string) => boolean> = { id: digits, cartelera: digits, flagForm: v => v === '1', espectaculo: digits, cortesia_boleto: v => v === '' };
+  const seen = new Set<string>(); let tickets = 0, types = 0, ids = 0;
+  for (const [key, value] of entries) {
+    const quantity = key.match(/^quantityBoleto\[(\d{1,12})\]$/);
+    if (quantity) { types++; if (value === '1') tickets++; else if (value !== '0') tickets += 2; continue; }
+    if (key === 'idBoleto[]' && digits(value)) { ids++; continue; }
+    if (key === 'promoCombinada[]' && /^\d{0,12}$/.test(value)) continue;
+    if (key === 'quantityBoletoCortesia[]' && value === '0') continue;
+    const valid = single[key];
+    if (!valid || seen.has(key) || !valid(value)) throw new DataError('error', 'Supercines seat page request not allowed.');
+    seen.add(key);
+  }
+  if (tickets !== 1 || types < 1 || ids !== types || !['id', 'cartelera', 'flagForm'].every(k => seen.has(k))) throw new DataError('error', 'Supercines seat page request not allowed.');
 }

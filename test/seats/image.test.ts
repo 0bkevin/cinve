@@ -34,8 +34,8 @@ test('seat maps follow each provider website: Cinepic screen on top, numbered ri
   assert.match(svg, /Consultado 05\/11\/2026, 12:52/);
   // The ASCII map uses the same orientation.
   const ascii = renderSeats(seats, layout).split('\n');
-  assert.equal(ascii[2], '[ PANTALLA ]');
-  assert.ok(nth(ascii, 4).indexOf('A:1O') < nth(ascii, 4).indexOf('A:5O'), ascii[4]);
+  assert.equal(ascii[2], '[ SCREEN ]');
+  assert.ok(nth(ascii, 4).indexOf('A:1O') < nth(ascii, 4).indexOf('A:5O'), nth(ascii, 4));
   assert.deepEqual(seatLayout('cinepic', { butacas: [{ ...cp('1', 'A:1'), invertida: '0' }] }).column_order, 'ascending');
 });
 
@@ -46,13 +46,13 @@ test('Cines Unidos and Cinex maps put the screen below; an unverified side is ne
   assert.ok(cu.indexOf('PANTALLA') > cu.indexOf('<title>B:1'), 'the screen is drawn below the last row');
   assert.match(cu, /Cines Unidos · Sede 1005/);
   assert.match(cu, /Desconocido \(1\)/); assert.match(cu, /no significa libre ni agotado/);
-  assert.equal(renderSeats(seats, seatLayout('cinesunidos')).split('\n').at(-1), '[ PANTALLA ]');
+  assert.equal(renderSeats(seats, seatLayout('cinesunidos')).split('\n').at(-1), '[ SCREEN ]');
   // cinex.com.ve draws its screen image right after the grid, below row A.
   const cinex = renderSeatMapSvg(seats, seatLayout('cinex'), { ...header, provider: 'cinex', cinema: 'Sede SBC' });
   assert.ok(cinex.indexOf('PANTALLA') > cinex.indexOf('<title>B:1')); assert.doesNotMatch(cinex, /no indica el lado/);
   const unverified = { screen: 'unverified' as const, column_order: 'ascending' as const };
   assert.doesNotMatch(renderSeatMapSvg(seats, unverified, header), /PANTALLA/); assert.match(renderSeatMapSvg(seats, unverified, header), /La web del cine no indica el lado de la pantalla/);
-  assert.match(renderSeats(seats, unverified), /que no indica el lado de la pantalla/);
+  assert.match(renderSeats(seats, unverified), /which does not show the screen side/);
   // Seat numbers come from the label, and provider text is escaped.
   assert.equal(seatNumber({ label: 'B12', row: 'B' }), '12'); assert.equal(seatNumber({ label: 'A:5', row: 'A' }), '5');
   assert.doesNotMatch(renderSeatMapSvg(seats, seatLayout('cinex'), { ...header, cinema: '<script>' }), /<script>/);
@@ -108,7 +108,7 @@ test('the seat result names the function from the same provider response, and ch
   const matched = await cinex.seats(q);
   assert.equal(matched.showing?.movie, 'LAS ALTAGRACIAS EN NAVIDAD'); assert.doesNotMatch(matched.warnings.join(' '), /difiere/);
   info = cinexInfo(5);
-  assert.match((await cinex.seats(q)).warnings.join(' '), /contador de asientos disponibles de Cinex \(5\) difiere del mapa \(1 libres\)/);
+  assert.match((await cinex.seats(q)).warnings.join(' '), /available-seat counter \(5\) differs from the map \(1 free\)/);
   // Cines Unidos only names the room, and only when every area shares it.
   let areas = ['SALA 8 - FULL'];
   const cu = new CinemaService(new HttpClient(async () => Response.json({ seats: { areas: areas.map((description, a) => ({ number: a + 1, description, rows: [{ rowIndexZeroBased: 0, physicalName: 'A', seats: [{ id: '1', status: 0, position: { areaNumber: a + 1, rowIndex: 0, columnIndex: 0 } }] }] })) } }), 15000, sessions));
@@ -149,8 +149,8 @@ test('Cinepic seats and ticket counters follow the purchase page', async t => {
   const args = { provider: 'cinepic', cinema_id: '123300', session_id: 'f1', movie_id: 'p1', image: 'none' };
   const seats = SeatResult.parse((await client.callTool({ name: 'get_seats', arguments: args })).structuredContent);
   assert.deepEqual([seats.available, seats.unavailable, seats.occupied], [196, 2, 1]);
-  assert.match(seats.warnings.join(' '), /2 butacas libres de un tipo especial/);
-  assert.match(seats.warnings.join(' '), /ofrece en línea 146 entradas COMPLETO, 146 entradas NIÑOS; puede vender menos entradas que las 196 butacas libres/);
+  assert.match(seats.warnings.join(' '), /2 free seats of a special type/);
+  assert.match(seats.warnings.join(' '), /offers online 146 COMPLETO tickets, 146 NIÑOS tickets; it may sell fewer tickets than the 196 free seats/);
   const { image: _, ...priceArgs } = args;
   const prices = Result.parse((await client.callTool({ name: 'get_ticket_prices', arguments: priceArgs })).structuredContent);
   assert.deepEqual(prices.items.map(i => [i.name, i.tickets_available]), [['COMPLETO', 146], ['NIÑOS', 146]]);
@@ -193,7 +193,7 @@ test('get_seats warns instead of failing when a map is too large to draw', async
   const data = SeatResult.parse(r.structuredContent);
   assert.equal(data.status, 'available'); assert.equal(data.total, 120);
   assert.deepEqual(r.content.map(c => c.type), ['text']);
-  assert.match(data.warnings.join(' '), /demasiado grande para dibujarlo como imagen/);
+  assert.match(data.warnings.join(' '), /too large to draw as an image/);
 });
 
 test('Cinepic seats tolerate odd tariff lists, and Cinex drops impossible dates and times', async () => {
@@ -207,14 +207,14 @@ test('Cinepic seats tolerate odd tariff lists, and Cinex drops impossible dates 
   for (const missing of [undefined, null]) {
     const r = await run(missing);
     assert.equal(r.status, 'available', 'a missing tariff list no longer fails the map');
-    assert.equal(r.available, 2); assert.match(r.warnings.join(' '), /no envió las tarifas/);
+    assert.equal(r.available, 2); assert.match(r.warnings.join(' '), /did not send the fares/);
   }
   const none = await run([]);
-  assert.deepEqual([none.available, none.unavailable], [2, 0]); assert.match(none.warnings.join(' '), /no listó tarifas en línea/);
+  assert.deepEqual([none.available, none.unavailable], [2, 0]); assert.match(none.warnings.join(' '), /listed no online fares/);
   // A function served under another film's movie_id names the right one.
   const other = page({ ...cpBuy, functionData: { datos: [{ id: 'f1', codigo: 'p9' }], tarifas: [] } });
   const wrong = await new CinemaService(new HttpClient(async () => new Response(other), 15000, new EmptySessionStore())).seats({ provider: 'cinepic', cinema_id: '123300', session_id: 'f1', movie_id: 'p1' });
-  assert.equal(wrong.status, 'unavailable'); assert.match(wrong.warnings.join(' '), /otra película \(movie_id p9\); usa session_id y movie_id de una misma función/);
+  assert.equal(wrong.status, 'unavailable'); assert.match(wrong.warnings.join(' '), /another movie \(movie_id p9\); use the session_id and movie_id of one showtime/);
   // Cinex: impossible values are left out rather than passed on.
   const info = (fecha: string, hora: string) => `<div>CINEX X | Sala 1 | <b>Fecha:</b> ${fecha} | <b>Hora:</b> ${hora} | <b>Asientos disponibles:</b> 3 asiento(s)</div>`;
   assert.deepEqual([parseCinexShowing(info('31-02-2026', '02:99pm')).showing?.date, parseCinexShowing(info('31-02-2026', '02:99pm')).showing?.time], [undefined, undefined]);
@@ -236,7 +236,7 @@ test('second review: raster budget, real glyph widths, and long tariff names', a
   const seat = { butaca: 'A-1-1', nombre_butaca: 'A:1', fila: '1', columna: '1', libre: '1', seleccionada: '1', tipo_butaca_id: '1', invertida: '0' };
   const body = page({ ...cpBuy, butacasData: { butacas: [seat] }, functionData: { datos: [{ id: 'f1', codigo: 'p1' }], tarifas: [{ _id: '2', id: '1', descripcion: 'GENERAL '.repeat(9), precio: '1', tot: '0', vend: '0', temp: '0' }] } });
   const r = await new CinemaService(new HttpClient(async () => new Response(body), 15000, new EmptySessionStore())).seats({ provider: 'cinepic', cinema_id: '123300', session_id: 'f1', movie_id: 'p1' });
-  assert.match(r.warnings.join(' '), /ofrece en línea 0 entradas GENERAL GENERAL.*…; puede vender menos entradas que las 1 butacas libres/);
+  assert.match(r.warnings.join(' '), /offers online 0 GENERAL GENERAL.*… tickets; it may sell fewer tickets than the 1 free seats/);
   t.diagnostic(`40-area PNG ${png.readUInt32BE(16)}x${png.readUInt32BE(20)}`);
 });
 
@@ -246,11 +246,11 @@ test('an empty Cinex grid reports Cinex\'s own count instead of "no seats"', asy
   const sessions = new class extends EmptySessionStore { override async headers() { return { Cookie: 'synthetic' }; } };
   const r = await new CinemaService(new HttpClient(async url => new Response(String(url).endsWith('checklogin.php') ? 'on' : /\/asientos(dev)?\.php$/.test(String(url)) ? empty : ''), 15000, sessions)).seats({ provider: 'cinex', cinema_id: 'SBC', session_id: 's1' });
   assert.equal(r.status, 'unavailable'); assert.equal(r.total, 0);
-  assert.match(r.warnings.join(' '), /Cinex informa 145 asientos disponibles en esta función, pero su web no publicó el mapa/);
+  assert.match(r.warnings.join(' '), /Cinex reports 145 available seats for this showtime, but its website did not publish the seat map/);
   // Another function's empty page is still rejected by the identity guard first.
   const other = empty.replace('sessionid=s1', 'sessionid=s2');
   const wrong = await new CinemaService(new HttpClient(async url => new Response(String(url).endsWith('checklogin.php') ? 'on' : /\/asientos(dev)?\.php$/.test(String(url)) ? other : ''), 15000, sessions)).seats({ provider: 'cinex', cinema_id: 'SBC', session_id: 's1' });
-  assert.match(wrong.warnings.join(' '), /no corresponde a la sede y función/);
+  assert.match(wrong.warnings.join(' '), /does not match the requested venue and showtime/);
 });
 
 /** A strict reader for the PNGs Cinve writes: checks every CRC and returns straight RGBA. */
@@ -345,7 +345,7 @@ test('seat numbers share one size and fit their seats; long row names are cut in
   const width = Number(capture(rows, /width="(\d+)"/)), seatX = xOf(rows, `${name}:1`);
   for (const m of rows.matchAll(/<text x="([\d.]+)"[^>]*font-size="12" fill="#8c7d7a">([^<]*)</g)) {
     const center = Number(m[1]), half = textWidth(nth(m, 2), 12, 'strong') / 2;
-    assert.ok(nth(m, 2).endsWith('…'), m[2]);
+    assert.ok(nth(m, 2).endsWith('…'), nth(m, 2));
     assert.ok(center - half >= 0 && center + half <= width, `${m[2]} inside the card`);
     assert.ok(center + half <= seatX || center - half >= seatX + 26 * 2 + 4, `${m[2]} clear of the seats`);
   }

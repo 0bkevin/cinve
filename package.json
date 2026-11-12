@@ -20,11 +20,16 @@
     "cinev-mcp": "dist/index.js"
   },
   "scripts": {
-    "build": "tsc && mkdir -p dist/assets && cp src/assets/* dist/assets/ && cp node_modules/@resvg/resvg-wasm/index_bg.wasm dist/assets/resvg.wasm",
+    "build": "npm run build:client && tsc && mkdir -p dist/assets && cp -R src/assets/. dist/assets/ && cp node_modules/@resvg/resvg-wasm/index_bg.wasm dist/assets/resvg.wasm",
+    "build:og": "tsx scripts/build-og.ts",
     "start": "node dist/index.js",
+    "predev": "npm run build:client",
     "dev": "tsx src/index.ts",
+    "pretest": "npm run build:client",
     "test": "tsx scripts/test-postgres.ts",
-    "check": "tsc -p tsconfig.check.json",
+    "test:og": "tsx --test test/og.test.ts",
+    "check": "tsc -p tsconfig.check.json && tsc -p tsconfig.client.json --noEmit",
+    "presmoke": "npm run build:client",
     "smoke": "tsx scripts/smoke.ts",
     "login": "tsx src/auth-cli.ts login",
     "logout": "tsx src/auth-cli.ts logout",
@@ -34,23 +39,33 @@
     "start:remote": "node dist/remote-main.js",
     "db:migrate": "tsx src/hosted-admin.ts migrate",
     "db:cleanup": "tsx src/hosted-admin.ts cleanup",
-    "build:hosted": "tsc -p tsconfig.hosted.json && cp .hosted/server.js .hosted/index.js && mkdir -p .hosted/src/assets && cp src/assets/* .hosted/src/assets/ && cp node_modules/@resvg/resvg-wasm/index_bg.wasm .hosted/src/assets/resvg.wasm"
+    "build:hosted": "npm run build:client && tsc -p tsconfig.hosted.json && cp .hosted/server.js .hosted/index.js && mkdir -p .hosted/src/assets && cp -R src/assets/. .hosted/src/assets/ && cp node_modules/@resvg/resvg-wasm/index_bg.wasm .hosted/src/assets/resvg.wasm",
+    "build:client": "tsc -p tsconfig.client.json"
   },
   "dependencies": {
-    "@modelcontextprotocol/client": "^2.0.0",
-    "@modelcontextprotocol/node": "^2.0.0",
-    "@modelcontextprotocol/server": "^2.0.0",
+    "@modelcontextprotocol/client": "^2.4.0",
+    "@modelcontextprotocol/node": "^2.1.2",
+    "@modelcontextprotocol/server": "^2.4.0",
     "@resvg/resvg-wasm": "2.6.2",
     "cheerio": "^1.2.0",
-    "pg": "^8.23.0",
-    "tough-cookie": "^6.0.2",
-    "zod": "^4.6.2"
+    "pg": "^8.23.1",
+    "tough-cookie": "^6.1.0",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@neondatabase/serverless": "^1.1.0",
-    "@types/node": "^22.20.2",
+    "@fontsource-variable/bricolage-grotesque": "5.3.0",
+    "@fontsource-variable/instrument-sans": "5.3.0",
+    "@neondatabase/serverless": "^1.2.0",
+    "@resvg/resvg-js": "2.6.2",
+    "@types/fontkit": "2.0.9",
+    "@types/node": "^26.6.6",
     "@types/pg": "^8.23.1",
-    "tsx": "^4.23.13",
-    "typescript": "^7.0.2"
+    "basecoat-css": "1.1.0",
+    "fontkit": "2.0.4",
+    "linkedom": "0.18.15",
+    "simple-icons": "16.35.0",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "wawoff2": "2.0.1"
   }
 }

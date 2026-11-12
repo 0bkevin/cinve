@@ -19,7 +19,7 @@ try {
   const child = spawn(process.execPath, ['--import', 'tsx', '--test', ...files], { stdio: 'inherit', env: { ...process.env, TEST_DATABASE_URL: url } });
   process.exitCode = await new Promise<number>(resolve => child.on('exit', code => resolve(code ?? 1)));
 } catch {
-  console.error('Las pruebas requieren PostgreSQL local (initdb/pg_ctl) o TEST_DATABASE_URL. No uses una base de datos de producción.');
+  console.error('Tests require local PostgreSQL (initdb/pg_ctl) or TEST_DATABASE_URL. Do not use a production database.');
   process.exitCode = 1;
 } finally {
   if (directory) {

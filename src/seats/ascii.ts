@@ -3,9 +3,9 @@ import type { Layout, SeatData } from './schema.js';
 
 export function renderSeats(seats: SeatData[], layout: Layout = { screen: 'unverified', column_order: 'ascending' }): string {
   const symbols = { available: 'O', occupied: 'X', unavailable: '-', unknown: '?' };
-  const lines = ['O libre | X ocupado | - restringido/no disponible | ? desconocido',
-    layout.screen === 'unverified' ? 'Filas y columnas como la web del proveedor, que no indica el lado de la pantalla.' : `Orientado como la web del proveedor: pantalla ${layout.screen === 'top' ? 'arriba' : 'abajo'}.`];
-  const screen = '[ PANTALLA ]';
+  const lines = ['O available | X occupied | - restricted/unavailable | ? unknown',
+    layout.screen === 'unverified' ? 'Rows and columns as on the provider\'s website, which does not show the screen side.' : `Oriented like the provider\'s website: screen at the ${layout.screen === 'top' ? 'top' : 'bottom'}.`];
+  const screen = '[ SCREEN ]';
   if (layout.screen === 'top') lines.push(screen);
   let cells = 0;
   for (const area of [...new Set(seats.map(s => s.area))]) {
@@ -17,7 +17,7 @@ export function renderSeats(seats: SeatData[], layout: Layout = { screen: 'unver
     const highest = Math.max(...group.map(place));
     const shownAt = (s: SeatData) => layout.column_order === 'descending' ? highest - place(s) : place(s);
     cells += (maxColumn + 1) * (Math.max(...group.map(s => s.row_index)) + 1);
-    if (cells > 40000) throw new DataError('unavailable', 'El mapa excede el tamaño máximo de representación ASCII.');
+    if (cells > 40000) throw new DataError('unavailable', 'The map exceeds the maximum ASCII rendering size.');
     lines.push(`Area ${area}`);
     for (let row = 0; row <= Math.max(...group.map(s => s.row_index)); row++) {
       const rowSeats = group.filter(s => s.row_index === row);

@@ -15,6 +15,6 @@ test('Flight scanner skips markers inside JSON strings and bounds deeply nested 
   const nested = 'self.__next_f.push(' + JSON.stringify([1, 'b:{"injected":true}\n']) + ')';
   assert.equal(findField(flight(page({ label: nested })), 'injected'), undefined);
   let value: unknown = { movies: [] }; for (let i = 0; i < 80; i++) value = [value];
-  assert.throws(() => findField([value], 'movies'), (e: unknown) => e instanceof DataError && /límites/.test(e.message));
+  assert.throws(() => findField([value], 'movies'), (e: unknown) => e instanceof DataError && /structure limits/.test(e.message));
   assert.throws(() => flight('<script>' + 'self.__next_f.push(['.repeat(5000) + '</script>'), DataError);
 });

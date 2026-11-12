@@ -45,7 +45,7 @@ test('service caps distinct and repeated provider warnings with an explicit aggr
   assert.equal(result.total, 200);
   assert.ok(result.warnings.length <= 64);
   assert.ok(result.warnings.join('').length <= 8192);
-  assert.ok(result.warnings.some(w => /Se omitieron/.test(w)));
+  assert.ok(result.warnings.some(w => /repeated or excess warnings were omitted/.test(w)));
 });
 
 test('all providers block nonqueryable directory identifiers before network or authentication', async () => {
@@ -54,7 +54,7 @@ test('all providers block nonqueryable directory identifiers before network or a
   for (const provider of ['cinesunidos', 'cinepic', 'cinex'] as const) {
     for (const op of ['prices', 'concessions', 'showtimes'] as const) {
       const r = await s.query(op, { provider, cinema_id: 'directory-unknown', city: 'Caracas', movie_id: 'm', session_id: 's' });
-      assert.equal(r.status, 'unavailable'); assert.match(r.warnings.join(' '), /código/);
+      assert.equal(r.status, 'unavailable'); assert.match(r.warnings.join(' '), /query code/);
     }
   }
   assert.equal(calls, 0);
@@ -89,5 +89,5 @@ test('conflicting duplicate session IDs are suppressed and marked partial instea
   const r = await new CinemaService(new HttpClient(async () => new Response(html))).query('showtimes', { provider: 'cinesunidos', city: 'Caracas', date: '2026-11-04' });
   assert.equal(r.status, 'available'); assert.equal(r.partial, true);
   assert.deepEqual(r.items.map(i => i.id), ['OK'], 'identical duplicates collapse; conflicting IDs are dropped');
-  assert.ok(r.warnings.some(w => /contradictorios para la función S/.test(w)));
+  assert.ok(r.warnings.some(w => /provider returned contradictory data for showtime S/.test(w)));
 });
