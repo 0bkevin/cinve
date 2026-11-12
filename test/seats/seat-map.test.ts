@@ -99,9 +99,12 @@ test('Cinex VIP availability accepts empty selected-ticket count without relaxin
 test('Cines Unidos reports confirmed and unknown counts independently, including selectable state 7', async () => {
   let codes: unknown[] = [0, 7, 1, 2, 3, 4, 5, 6, 99, null];
   const sessions = new class extends EmptySessionStore { override async headers() { return { Authorization: 'Bearer synthetic' }; } };
+  let session: unknown = [{ cinemaId: '1005', sessionId: 's1', movieName: 'Película de prueba', theaterName: 'Sambil', screenName: 'Sala 3', showtime: '2026-11-12T13:15:00' }];
   const http = new HttpClient(async (url, init) => {
-    assert.equal(String(url), 'https://www.cinesunidos.com/api/seats?theaterId=1005&showTimeId=s1');
     assert.ok(!init?.method || init.method === 'GET');
+    // The session read ticket prices use names the film and venue for the image.
+    if (String(url) === 'https://gateway.cinesunidos.com/tickets/www/theaters/1005/sessions/s1/') return session === undefined ? new Response('', { status: 500 }) : Response.json(session);
+    assert.equal(String(url), 'https://www.cinesunidos.com/api/seats?theaterId=1005&showTimeId=s1');
     return Response.json({ seats: { areas: [{ number: 1, areaCategoryCode: 'general', rows: [{ rowIndexZeroBased: 0, physicalName: 'G', seats: codes.map((status, columnIndex) => ({ id: String(columnIndex + 1), status, position: { areaNumber: 1, rowIndex: 0, columnIndex } })) }] }] } });
   }, 15000, sessions);
   const q = { provider: 'cinesunidos' as const, cinema_id: '1005', session_id: 's1' };
@@ -110,6 +113,13 @@ test('Cines Unidos reports confirmed and unknown counts independently, including
   assert.deepEqual([result.available, result.occupied, result.unavailable, result.unknown, result.total], [2, 2, 4, 2, 10]);
   assert.equal(result.availability_complete, false);
   assert.match(result.ascii, /G:1O\s+G:2O\s+G:3X/);
+  assert.deepEqual(result.showing, { movie: 'Película de prueba', cinema_name: 'Sambil', screen: 'Sala 3', date: '2026-11-12', time: '13:15' });
+  // Another function's entry, or a failed session read, leaves the map as it is, without a name.
+  for (const other of [[{ cinemaId: '1005', sessionId: 's2', movieName: 'Otra', theaterName: 'Otro' }], undefined]) {
+    session = other;
+    const unnamed = await new CinemaService(http).seats(q);
+    assert.equal(unnamed.status, 'available'); assert.equal(unnamed.total, 10); assert.equal(unnamed.showing, undefined);
+  }
   codes = [7, 1];
   const complete = await new CinemaService(http).seats(q);
   assert.equal(complete.availability_complete, true); assert.equal(complete.available, 1);

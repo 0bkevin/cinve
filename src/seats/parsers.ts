@@ -98,6 +98,22 @@ export function parseCinepicSeats(data: unknown, bookable: Set<string> | 'all' =
   })));
 }
 
+/**
+ * Cines Unidos' seat API names neither the film nor the venue; its session
+ * read (the one ticket prices use) does: [{ cinemaId, sessionId, movieName,
+ * theaterName, screenName, showtime: "2026-11-12T13:15:00" }] (seen 2026-11-12).
+ * Only the entry for the requested venue and showtime is used.
+ */
+export function parseCinesUnidosShowing(data: unknown, cinemaId: string, sessionId: string): Showing | undefined {
+  if (!Array.isArray(data)) return undefined;
+  const entry = data.map(object).find(e => text(e.cinemaId) === cinemaId && text(e.sessionId) === sessionId);
+  if (!entry) return undefined;
+  const when = text(entry.showtime).match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(?::\d{2})?$/);
+  const screen = clean(entry.screenName, 60);
+  return showing({ movie: clean(entry.movieName, 200), cinema_name: clean(entry.theaterName, 120),
+    screen: screen && /^Sala\b/i.test(screen) ? screen : undefined, date: when?.[1], time: when?.[2] });
+}
+
 export function parseCinesUnidosSeats(data: unknown): SeatData[] {
   return validateSeats(rows(object(object(data).seats).areas, 'seats.areas').flatMap(a =>
     rows(a.rows, 'area.rows').flatMap(r => rows(r.seats, 'row.seats').map(s => {

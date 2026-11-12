@@ -8,7 +8,7 @@ import { cinepicTicketsLeft, cinepicVenueName, cpBuy } from '../providers/cinepi
 import { supercinesSeatPage } from '../providers/supercines/adapter.js';
 import { findField, object, rows } from '../providers/parsing.js';
 import { SeatResult, seatLayout } from './schema.js';
-import { cinepicBookableTypes, cinexRowShifts, cinexSeatOrderFields, clean, EmptyCinexMap, parseCinepicSeats, parseCinesUnidosSeats, parseCinexSeats, parseCinexShowing, parseSupercinesSeats, showing } from './parsers.js';
+import { cinepicBookableTypes, cinexRowShifts, cinexSeatOrderFields, clean, EmptyCinexMap, parseCinepicSeats, parseCinesUnidosSeats, parseCinesUnidosShowing, parseCinexSeats, parseCinexShowing, parseSupercinesSeats, showing } from './parsers.js';
 import { renderSeats } from './ascii.js';
 
 export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions): Promise<z.infer<typeof SeatResult>> {
@@ -43,9 +43,14 @@ export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions)
       c.warnings.push('Cinepic availability also depends on the chosen ticket type. The provider\'s seleccionada field does not indicate a booking by the user.');
     } else if (q.provider === 'cinesunidos') {
       const url = `https://www.cinesunidos.com/api/seats?${new URLSearchParams({ theaterId: result.cinema_id, showTimeId: result.session_id })}`;
+      // The film and venue for the image come from the session read ticket prices use, sent
+      // alongside the seat read; the map never depends on it.
+      const sessionUrl = `https://gateway.cinesunidos.com/tickets/www/theaters/${encodeURIComponent(result.cinema_id)}/sessions/${encodeURIComponent(result.session_id)}/`;
+      const naming = c.authenticated('cinesunidos', sessionUrl).then(body => parseCinesUnidosShowing(JSON.parse(body), result.cinema_id, result.session_id)).catch(() => undefined);
       let data: unknown;
       try { data = JSON.parse(await c.authenticated('cinesunidos', url)); }
-      catch (e) { if (e instanceof DataError) throw e; throw new DataError('error', 'Cines Unidos did not return a seat map in valid JSON.'); }
+      catch (e) { await naming; if (e instanceof DataError) throw e; throw new DataError('error', 'Cines Unidos did not return a seat map in valid JSON.'); }
+      const named = await naming;
       // A function it no longer sells online (already started, or sales closed) answers only
       // {"maxSeatsPerTransaction": 0}: no map to read, not a change in its format (seen 2026-11-11).
       const body = object(data);
@@ -55,7 +60,7 @@ export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions)
       result.seats = parseCinesUnidosSeats(data);
       // Area descriptions read "SALA 8 - FULL"; only a room number shared by every area names the room.
       const rooms = new Set(rows(object(object(data).seats).areas, 'seats.areas').map(a => text(a.description).match(/^SALA\s+(\d{1,3})\b/i)?.[1]));
-      if (rooms.size === 1 && [...rooms][0]) result.showing = { screen: `Sala ${[...rooms][0]}` };
+      result.showing = showing({ ...named, screen: rooms.size === 1 && [...rooms][0] ? `Sala ${[...rooms][0]}` : named?.screen });
       c.warnings.push('Special states are shown as restricted; check their conditions on the cinema\'s website.');
     } else if (q.provider === 'cinex') {
       if (!await c.cinexSessionActive()) throw new DataError('auth_required', 'The Cinex session expired; connect your account again.');

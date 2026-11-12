@@ -126,8 +126,10 @@ published, Cinex's own "available seats" counter is reported instead.
 Besides the data, `get_seats` returns the map as a PNG image (up to 1200 px
 wide) to show or share, with the legend, counters and lookup time. Its header
 names the showtime from `showing` (movie, venue, room, date and time), read from
-the same map response: complete at Cinex and Cinepic, only the room at Cines
-Unidos. `image=svg` returns the same map as embedded SVG and `image=none` only
+the same map response at Cinex, Cinepic and Supercines. Cines Unidos' seat API
+names only the room, so Cinve also reads that showtime's session (the read ticket
+prices use) alongside it; if that read fails, the map is returned without the
+names. `image=svg` returns the same map as embedded SVG and `image=none` only
 the data. If the image can't be drawn, the response keeps the data and warns.
 The image uses Cinve's brand style, with Spanish labels for the people it is
 shown to, and is drawn with resvg (WebAssembly) and the Instrument Sans and

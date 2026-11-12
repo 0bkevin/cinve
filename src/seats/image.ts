@@ -18,7 +18,7 @@ export type MapLayout = { screen: 'top' | 'bottom' | 'unverified'; column_order:
 /** cinema: the venue's name when known, else its ID. The rest, when the provider named them, label the function. */
 export type MapHeader = { provider: string; cinema: string; session: string; queriedAt: string; movie?: string | undefined; screen?: string | undefined; date?: string | undefined; time?: string | undefined };
 
-const providerNames: Record<string, string> = { cinex: 'Cinex', cinesunidos: 'Cines Unidos', cinepic: 'Cinepic' };
+const providerNames: Record<string, string> = { cinex: 'Cinex', cinesunidos: 'Cines Unidos', cinepic: 'Cinepic', supercines: 'Supercines' };
 /**
  * Cinve's house palette (site.css on the public site): a dark room, upholstery
  * red for a free seat, and amber only for what is "for you", here the free count.
