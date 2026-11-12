@@ -21,6 +21,46 @@ const show = element<HTMLButtonElement>('show');
 const connect = element<HTMLButtonElement>('connect');
 const cancel = element<HTMLButtonElement>('cancel');
 const feedback = element<HTMLDivElement>('feedback');
+const fields = { email: username, password } as const;
+type Field = keyof typeof fields;
+const fieldErrors: Record<Field, HTMLElement> = { email: element('username-error'), password: element('password-error') };
+
+// The rules of src/auth/credentials.ts, repeated so a mistake is explained
+// before anything is sent; the server checks the same rules again.
+const localPart = /^[A-Za-z0-9_+-]+(?:\.[A-Za-z0-9_+-]+)*$/;
+const domainLabel = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
+const topLevel = /^(?:[A-Za-z]{2,63}|xn--[A-Za-z0-9-]{1,59})$/;
+const untypable = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+function emailProblem(raw: string) {
+  const email = raw.trim();
+  if (!email || email.length > 254) return true;
+  const at = email.lastIndexOf('@');
+  const local = email.slice(0, at), labels = email.slice(at + 1).split('.');
+  if (at < 1 || local.length > 64 || !localPart.test(local)) return true;
+  return labels.length < 2 || !labels.every(label => domainLabel.test(label)) || !topLevel.test(labels[labels.length - 1]!);
+}
+const passwordProblem = (raw: string) => !raw || raw.length > 256 || untypable.test(raw) || loneSurrogate.test(raw);
+const problems: Record<Field, (value: string) => boolean> = { email: emailProblem, password: passwordProblem };
+
+function markField(field: Field, invalid: boolean) {
+  const message = fieldErrors[field];
+  if (invalid) fields[field].setAttribute('aria-invalid', 'true'); else fields[field].removeAttribute('aria-invalid');
+  message.textContent = invalid ? catalogs[currentLocale].errors[field] ?? copy().genericError : '';
+  message.hidden = !invalid;
+}
+/** Marks every field that breaks a rule and returns the first one. */
+function invalidField(): Field | undefined {
+  let first: Field | undefined;
+  for (const field of ['email', 'password'] as const) {
+    const invalid = problems[field](fields[field].value);
+    markField(field, invalid);
+    if (invalid) first ??= field;
+  }
+  return first;
+}
+const isField = (key: unknown): key is Field => key === 'email' || key === 'password';
+
 const providerNames = { cinex: 'Cinex', cinesunidos: 'Cines Unidos', supercines: 'Supercines' } as const;
 let token = '';
 let provider = '';
@@ -48,9 +88,9 @@ function translatePage() {
     if (node.id !== 'login-title') node.textContent = copy()[key] ?? '';
   }
   const showPassword = password.type === 'password';
-  show.textContent = showPassword ? copy().show : copy().hide;
   show.setAttribute('aria-label', copy()[showPassword ? 'showPassword' : 'hidePassword'] ?? '');
   setBusy(connect.getAttribute('aria-busy') === 'true');
+  for (const field of ['email', 'password'] as const) if (!fieldErrors[field].hidden) markField(field, true);
   const errorKey = feedback.dataset.errorKey;
   if (errorKey) element('feedback-text').textContent = catalogs[currentLocale].errors[errorKey] ?? copy().genericError;
   if (provider) updateAppCopy();
@@ -140,23 +180,34 @@ async function request<T>(path: string, body: Record<string, string> = {}, crede
 
 show.addEventListener('click', () => {
   const visible = password.type === 'password'; password.type = visible ? 'text' : 'password';
-  show.textContent = visible ? copy().hide : copy().show;
   show.setAttribute('aria-label', copy()[visible ? 'hidePassword' : 'showPassword'] ?? '');
   show.setAttribute('aria-pressed', String(visible)); password.focus();
 });
-for (const input of [username, password]) input.addEventListener('input', clearError);
+for (const field of ['email', 'password'] as const) {
+  const input = fields[field];
+  // Once a field is marked, it is rechecked as the person types, so the
+  // message goes away as soon as the value is fixed.
+  input.addEventListener('input', () => { clearError(); if (input.hasAttribute('aria-invalid')) markField(field, problems[field](input.value)); });
+}
+username.addEventListener('blur', () => { if (username.value.trim()) markField('email', emailProblem(username.value)); });
 
 form.addEventListener('submit', async event => {
   event.preventDefault();
-  const body = { username: username.value, password: password.value };
-  password.value = ''; clearError(); setBusy(true); let connected = false;
+  const invalid = invalidField();
+  if (invalid) { clearError(); fields[invalid].focus(); return; }
+  const body = { username: username.value.trim(), password: password.value };
+  password.value = ''; clearError(); setBusy(true); let connected = false, retry: HTMLInputElement = password;
   try {
     const pending = request<Login>('/connect/login', body); body.password = '';
     const data = await pending; connected = true; token = ''; form.reset();
     showResult('success', 'success', 'successText');
     if (data.profile_update_requested) { result.dataset.profileUpdate = 'true'; element('result-text').textContent += copy().profileUpdate; }
-  } catch (error) { showError((error as Error).message || copy().failure, (error as Error & { key?: string }).key); }
-  finally { body.password = ''; if (!connected) { setBusy(false); password.focus(); } }
+  } catch (error) {
+    const key = (error as Error & { key?: string }).key;
+    if (isField(key)) { markField(key, true); retry = fields[key]; }
+    else showError((error as Error).message || copy().failure, key);
+  }
+  finally { body.password = ''; if (!connected) { setBusy(false); retry.focus(); } }
 });
 
 cancel.addEventListener('click', async () => {
