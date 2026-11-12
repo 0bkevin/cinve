@@ -89,7 +89,7 @@ test('the purchase request Cinve may send carries exactly one ticket and nothing
   for (const bad of [
     swap('quantityBoleto[79]', '1'), swap('quantityBoleto[77]', '2'), swap('quantityBoleto[77]', '0'), swap('cortesia_boleto', 'CODIGO'),
     swap('quantityBoletoCortesia[]', '1'), [...base, ['cb[]', 'A5']], [...base, ['idCanje[]', '3']], [...base, ['id', '1']],
-    base.filter(([k]) => k !== 'cartelera'), [...base, ['idBoleto[]', '80']],
+    base.filter(([k]) => k !== 'cartelera'), [...base, ['idBoleto[]', '80']], swap('promoCombinada[]', '5'),
   ] as Array<Array<[string, string]>>) assert.throws(() => assertSupercinesSeatPage(bad), /not allowed/);
 });
 
@@ -195,4 +195,12 @@ test('final review: Supercines seat lists must be declared, and each account rou
   await assert.rejects(http.getAuthenticated('supercines', `${SC}/bookSeat`), /not allowed/);
   await assert.rejects(http.getAuthenticated('supercines', `${SC}/listBoletos`), /not allowed/);
   await assert.rejects(http.postAuthenticated('supercines', `${SC}/cancelaCompra`, {}), /not allowed/);
+});
+
+test('no purchase is opened when too little of the call\'s time is left to cancel it', async t => {
+  const { calls, service } = await site(t);
+  // The call started 35 s ago: 25 s of its 60 s budget remain, under the 30 s an order needs.
+  const r = await service.seats({ provider: 'supercines', cinema_id: '7', session_id: '100', movie_id: '3991', date: D1 }, { startedAt: Date.now() - 35000 });
+  assert.equal(r.status, 'error'); assert.match(r.warnings.join(' '), /none was opened/);
+  assert.ok(!calls.some(c => /bookSeat|cancelaCompra/.test(c)), calls.join(', '));
 });

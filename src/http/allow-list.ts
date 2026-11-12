@@ -141,7 +141,7 @@ export function assertSupercinesSeatPage(entries: Array<[string, string]>) {
     const quantity = key.match(/^quantityBoleto\[(\d{1,12})\]$/);
     if (quantity) { types++; if (value === '1') tickets++; else if (value !== '0') tickets += 2; continue; }
     if (key === 'idBoleto[]' && digits(value)) { ids++; continue; }
-    if (key === 'promoCombinada[]' && /^\d{0,12}$/.test(value)) continue;
+    if (key === 'promoCombinada[]' && value === '') continue;
     if (key === 'quantityBoletoCortesia[]' && value === '0') continue;
     const valid = single[key];
     if (!valid || seen.has(key) || !valid(value)) throw new DataError('error', 'Supercines seat page request not allowed.');

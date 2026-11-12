@@ -88,6 +88,7 @@ export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions)
         const order = cinexSeatOrderFields(ticket);
         if (!order) return first;
         let seatPage = first;
+        c.assertTimeForOrder();
         ordered = true;
         try {
           await c.cinexSeatOrder(order);
@@ -123,7 +124,7 @@ export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions)
       const page = await supercinesSeatPage(q, c);
       if (!page.cancelled) c.warnings.push('Supercines did not confirm that the purchase Cinve opened to read the map was cancelled; it expires on its own when its countdown (about 10 minutes) ends. No seat was chosen.');
       result.seats = parseSupercinesSeats(page.html, { cinemaId: result.cinema_id, date: page.date, time: page.time, movie: page.movie });
-      result.showing = showing({ movie: clean(page.movie, 200), cinema_name: clean(page.venue, 200), date: page.date, time: page.time });
+      result.showing = showing({ movie: clean(page.movie, 200), cinema_name: clean(page.venue, 120), date: page.date, time: page.time });
       c.warnings.push('Supercines shows its seat map only inside a purchase: Cinve opened one with a single ticket, chose no seat, read the map and cancelled it right away. Nothing was reserved or paid.');
       if (result.seats.some(s => s.provider_status === 'restringido')) c.warnings.push('Seats marked restricted are reserved for special tickets on Supercines\' website.');
     } else {

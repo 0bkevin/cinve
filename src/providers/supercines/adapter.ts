@@ -364,6 +364,7 @@ export async function supercinesSeatPage(q: Query, c: ReadContext): Promise<{ ht
     types.forEach((type, i) => fields.push([`quantityBoleto[${type}]`, i === 0 ? '1' : '0'], ['idBoleto[]', type], ['promoCombinada[]', '']));
     fields.push(['cortesia_boleto', ''], ['quantityBoletoCortesia[]', '0']);
     let html = '', cancelled = false;
+    c.assertTimeForOrder();
     try { html = await c.authenticatedForm('supercines', `${SC}/bookSeat`, fields); }
     finally {
       // Always close the purchase, even when opening it failed half way or the client cancelled the call.

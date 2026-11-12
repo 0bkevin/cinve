@@ -33,6 +33,8 @@ export class CallStopped extends DataError {
  * its reads are chained or fanned out.
  */
 const operationBudgetMs = 60000;
+/** Time an order-backed seat read needs left: the order, the seat page, then the cancel. */
+const orderReserveMs = 30000;
 export class ReadContext {
   sources: EvidenceSource[] = [];
   warnings: string[] = [];
@@ -98,6 +100,7 @@ export class ReadContext {
     let page: Page;
     try { page = await this.http.postAuthenticated(provider, url, fields); }
     catch (error) {
+      if (provider === 'cinex') this.http.forgetSessionCheck(this.http.sessions.accountKey('cinex'));
       if (error instanceof DataError && error.status === 'auth_required') {
         try { await this.http.sessions.expire(provider, started); } catch { /* the answer is auth_required either way */ }
       }
@@ -109,13 +112,27 @@ export class ReadContext {
   /**
    * An account read that must go out even after the client cancelled the call
    * or its deadline passed: resetting an order the same call opened. It skips
-   * those checks and is tried a second time if the first attempt fails.
+   * those checks and is tried a second time if the first attempt failed fast
+   * (a refused connection, not a timeout), so the call keeps its time limit.
    */
   async closeAuthenticated(provider: AuthProviderId, url: string): Promise<boolean> {
     for (let attempt = 0; attempt < 2; attempt++) {
-      try { await this.http.getAuthenticated(provider, url); return true; } catch { /* tried again once */ }
+      const started = Date.now();
+      try { await this.http.getAuthenticated(provider, url); return true; }
+      catch { if (Date.now() - started > 5000) break; }
     }
+    if (provider === 'cinex') this.http.forgetSessionCheck(this.http.sessions.accountKey('cinex'));
     return false;
+  }
+  /**
+   * Before opening an order that must be cancelled in the same call: refuse when
+   * too little of the call's time is left to open it, read the map and cancel it
+   * (about two reads and the cancel), so the cancel is never cut off by the
+   * hosted time limit.
+   */
+  assertTimeForOrder() {
+    this.checkCanRead();
+    if (this.deadline - Date.now() < orderReserveMs) throw new CallStopped('Too little of this query\'s time was left to open and cancel the one-ticket order that shows the seat map, so none was opened; repeat get_seats.');
   }
   async authenticated(provider: AuthProviderId, url: string): Promise<string> {
     this.checkCanRead();
