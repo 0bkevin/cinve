@@ -153,7 +153,10 @@ export function parseCinexSeats(html: string, q: Query): SeatData[] {
     $(r).children().not('.rowletter').each((columnIndex, el) => {
       const seat = $(el);
       const classes = (seat.attr('class') ?? '').split(/\s+/);
-      const occupied = classes.some(c => /^(?:seat|seatestandar|seatvipbed|seatvipplus|seatvipstandar)-occupied$/.test(c));
+      // The newer page marks a sold seat "seatestandar-occupied"; the regular one "seat occupied"
+      // (2026-11-11). Either way it has no id and names the seat in its title.
+      const occupied = classes.some(c => /^(?:seat|seatestandar|seatvipbed|seatvipplus|seatvipstandar)-occupied$/.test(c))
+        || (classes.includes('occupied') && classes.some(c => freeClasses.has(c)));
       const id = seat.attr('id') ?? (occupied ? seat.attr('title') : undefined);
       if (!id) {
         if (!seat.hasClass('blankspace')) throw new DataError('error', 'Elemento desconocido en el mapa Cinex.');
@@ -170,7 +173,7 @@ export function parseCinexSeats(html: string, q: Query): SeatData[] {
         provider_status: seat.attr('alt') ?? 'unknown', category: call?.[5] });
     });
   });
-  if (result.length !== $('#mapcontent [id], #mapcontent [class$="-occupied"]').length) throw new DataError('error', 'El mapa Cinex contiene asientos fuera de filas reconocidas.');
+  if (result.length !== $('#mapcontent [id], #mapcontent [class$="-occupied"], #mapcontent .occupied:not([id])').length) throw new DataError('error', 'El mapa Cinex contiene asientos fuera de filas reconocidas.');
   if (!result.length) throw new EmptyCinexMap('unavailable', 'Cinex no devolvió asientos para esta función.');
   return validateSeats(result);
 }

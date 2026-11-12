@@ -59,16 +59,19 @@ export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions)
     } else if (q.provider === 'cinex') {
       if (!await c.cinexSessionActive()) throw new DataError('auth_required', 'La sesión Cinex expiró; conecta de nuevo tu cuenta.');
       // Cinex keeps the chosen function in its PHP session: select and read it as one step.
-      // Checked in a browser on 2026-11-11: its regular checkout (boletos.php, then
-      // asientos.php) draws the map of every room as soon as the function is selected,
-      // without choosing tickets; the newer asientosdev.php drew only some rooms (VIPs)
-      // and stayed empty for the rest even after tickets were chosen. boletos.php
-      // redirects VIP functions to boletosdev.php, which the client follows. If
-      // asientos.php ever comes back without a grid, asientosdev.php is read as before.
+      // Checked in a browser on 2026-11-11: selecting the function on boletos.php is enough
+      // for its seat page to draw the map, with no ticket chosen. Read the seat page its own
+      // checkout leads to: boletos.php sends VIP functions on to the newer checkout
+      // (boletosdev.php, followed by the client, whose form posts to boletos_datadev.php
+      // and continues to asientosdev.php); every other room continues to asientos.php.
+      // The two pages can differ for the same function (a VIP row only the newer one
+      // draws), and asientosdev.php draws no grid for regular rooms. If the page chosen
+      // draws no grid, the other one is read.
       const html = await c.exclusive('cinex', async () => {
-        await c.authenticated('cinex', `https://www.cinex.com.ve/boletos.php?${new URLSearchParams({ cinemaid: result.cinema_id, sessionid: result.session_id })}`);
-        const page = await c.authenticated('cinex', 'https://www.cinex.com.ve/asientos.php');
-        return /class=["']rowletter["']/.test(page) ? page : c.authenticated('cinex', 'https://www.cinex.com.ve/asientosdev.php');
+        const ticket = await c.authenticated('cinex', `https://www.cinex.com.ve/boletos.php?${new URLSearchParams({ cinemaid: result.cinema_id, sessionid: result.session_id })}`);
+        const pages = /boletos_datadev\.php/.test(ticket) ? ['asientosdev.php', 'asientos.php'] : ['asientos.php', 'asientosdev.php'];
+        const first = await c.authenticated('cinex', `https://www.cinex.com.ve/${pages[0]}`);
+        return /class=["']rowletter["']/.test(first) ? first : c.authenticated('cinex', `https://www.cinex.com.ve/${pages[1]}`);
       });
       const page = parseCinexShowing(html);
       try {

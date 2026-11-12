@@ -199,3 +199,30 @@ test('Cinex: the regular seat page is read first, and the newer one only when it
     assert.deepEqual(paths, expected);
   }
 });
+
+test("Cinex regular seat page: sold seats are \"seat occupied\" without id, wheelchair seats stay restricted", () => {
+  // As asientos.php served it on 2026-11-11 (Sotavento La Guaira, Los Proceres).
+  const html = `<a id="btnasientosatras" href="boletos.php?cinemaid=STV&sessionid=s1">Atras</a><div id="mapcontent"><div class="row centermap">`
+    + `<div class="row centermap"><div class="rowletter">E</div>`
+    + `<div class="seat" alt="0" id="E4" name="E4" onclick="javascript:decideAsientoNew(\x27E4\x27,\x270\x27,\x270\x27,\x271\x27,\x270000000001\x27,\x271\x27,\x27N\x27);" title="Asiento E4"></div>`
+    + `<div class="seat occupied" title="E5" alt="E5"></div><div class="blankspace"></div>`
+    + `<div class="seat wheelchair" alt="3" id="E6" name="E6" onclick="javascript:decideAsientoNew(\x27E6\x27,\x270\x27,\x273\x27,\x271\x27,\x270000000001\x27,\x271\x27,\x27N\x27);" title="Asiento E6"></div>`
+    + `</div></div></div>`;
+  const seats = parseCinexSeats(html, { provider: "cinex", cinema_id: "STV", session_id: "s1" });
+  assert.deepEqual(seats.map(s => [s.id, s.status, s.column_index]), [["E4", "available", 0], ["E5", "occupied", 1], ["E6", "unavailable", 3]]);
+  // An unrecognized cell still fails visibly.
+  assert.throws(() => parseCinexSeats(html.replace(`class="blankspace"`, `class="mystery"`), { provider: "cinex", cinema_id: "STV", session_id: "s1" }), /Cinex/);
+});
+
+test("Cinex VIP functions are read from the seat page their own checkout leads to", async () => {
+  // boletos.php sends VIP functions to boletosdev.php, whose form posts to boletos_datadev.php, then asientosdev.php.
+  const sessions = new class extends EmptySessionStore { override async headers() { return { Cookie: "synthetic" }; } };
+  const paths: string[] = [];
+  const http = new HttpClient(async url => {
+    const path = new URL(String(url)).pathname; paths.push(path);
+    return new Response(path === "/checklogin.php" ? "on" : path === "/asientosdev.php" ? cinexMap : path === "/asientos.php" ? "<div id=\"mapcontent\"></div>" : "<script>post_to_url(\"boletos_datadev.php\", {}, \"post\");</script>");
+  }, 15000, sessions);
+  const r = await new CinemaService(http).seats({ provider: "cinex", cinema_id: "SBC", session_id: "s1" });
+  assert.equal(r.status, "available"); assert.equal(r.total, 3);
+  assert.deepEqual(paths, ["/checklogin.php", "/boletos.php", "/asientosdev.php"]);
+});
