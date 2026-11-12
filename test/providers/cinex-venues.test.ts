@@ -403,3 +403,22 @@ test('Cinex venue discovery checks its budget before each follow-up read of an a
   assert.equal(r.partial, true); assert.equal(nth(r.items, 0).code_status, 'unverified');
   assert.ok(r.warnings.some(w => /check of A timed out/.test(w)), r.warnings.join(' | '));
 });
+
+test('a verified Cinex venue carries the address its official metadata publishes', async () => {
+  // Fields as served on 2026-11-12 by datasource.php?method=getcinemadatafromcinemaid.
+  const { s } = service(() => card('sanignacio', 'San Ignacio', 'xcsi.jpg') + card('sambil', 'Sambil', 'xsbc.jpg') + card('tolon', 'Tolón', 'xtln.jpg') + card('other', 'Other', 'xoth.jpg'), {}, {
+    CSI: [{ siglas: 'CSI', name: 'SAN IGNACIO', desc: 'Centro San Ignacio,  Avenida El Samán, Caracas, Miranda', localidad: 'gran caracas' }],
+    TLN: [{ siglas: 'TLN', name: 'TOLON', desc: '' }],
+    SBC: [{ siglas: 'SBC', name: 'SAMBIL', desc: 'Nivel Feria<br/>Av. Libertador &amp; Calle <b>Chacao</b>' }],
+    OTH: [{ siglas: 'OTH', name: 'Someone else', desc: 'Not this venue' }],
+  });
+  const result = await s.query('cinemas', { provider: 'cinex', city: 'Caracas' });
+  const byName = Object.fromEntries(result.items.map(i => [i.name, i]));
+  assert.equal(byName['San Ignacio']?.address, 'Centro San Ignacio, Avenida El Samán, Caracas, Miranda');
+  // Markup and entities in the text are not part of the address.
+  assert.equal(byName['Sambil']?.address, 'Nivel Feria Av. Libertador & Calle Chacao');
+  assert.equal(byName['Tolón']?.address, undefined);
+  // A venue the metadata does not confirm gets neither a code nor its address.
+  assert.equal(byName['Other']?.address, undefined); assert.equal(byName['Other']?.code_status, 'unverified');
+  assert.deepEqual(outputSchema('cinemas').parse(result).items, result.items);
+});

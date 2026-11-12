@@ -1,7 +1,10 @@
 import { getSeatMap } from './seats/seat-map.js';
 import { CinexCinemaCatalog } from './providers/cinex/venues.js';
 import { DataError, folded, operationItemSchema, PublicUrl, Result, today, Id } from './core.js';
-import type { DataItem, Operation, Query, QueryResult } from './core.js';
+import type { DataItem, Operation, ProviderId, Query, QueryResult } from './core.js';
+import { distanceKm, nearestCity, resolvePlace, venueLocation } from './locations.js';
+import type { Point } from './locations.js';
+import { warningLabel } from './providers/diagnostics.js';
 import { HttpClient } from './http/client.js';
 import { ReadContext } from './http/read-context.js';
 import type { CallOptions } from './http/read-context.js';
@@ -70,6 +73,34 @@ export const capabilities = {
   grancine: { seats: 'not_published', cities: 'html_directory_with_known_cities', cinemas: 'html', movies: 'html_titles_with_functions', showtimes: 'html_per_venue_and_date_no_upstream_ids', prices: 'not_published', concessions: 'not_published' },
   cinex: { seats: 'authenticated_html_ascii', cities: 'public_api', cinemas: 'html', movies: 'html_general_catalog', showtimes: 'html_requires_cinema_or_movie', prices: 'authenticated_html_requires_session', concessions: 'authenticated_html' },
 };
+/**
+ * Each venue's area and, from a place, its distance; nearest first. Venues
+ * Cinve has not located keep their order after the located ones.
+ */
+function locateVenues(provider: ProviderId, items: DataItem[], place: { point: Point } | undefined): DataItem[] {
+  const located = items.map(item => {
+    const where = venueLocation(provider, item.id);
+    if (!where) return { item, km: Infinity };
+    const km = place ? Math.round(distanceKm(place.point, where) * 10) / 10 : Infinity;
+    return { item: { ...item, area: where.area, ...(place ? { distance_km: km } : {}) }, km };
+  });
+  return (place ? located.sort((a, b) => a.km - b.km) : located).map(l => l.item);
+}
+const farKm = 30;
+/** What a reader of the returned venues must know about their distances; nothing for an empty page. */
+function distanceWarnings(provider: ProviderId, page: DataItem[], nearest: number | undefined, place: { name: string }): string[] {
+  const warnings: string[] = [];
+  if (!page.length) return warnings;
+  warnings.push(`distance_km is the straight line from ${place.name}, not the travel distance or time.`);
+  // A chain with no venue in the user's region still sorts one first: it is not "near".
+  if (nearest !== undefined && nearest > farKm) warnings.push(`No ${provider} venue is within ${farKm} km of ${place.name}: the nearest is ${nearest} km away.`);
+  const rough = page.filter(i => venueLocation(provider, i.id)?.approximate).map(i => warningLabel(i.name, 60));
+  if (rough.length) warnings.push(`Only the area of ${rough.join(', ')} is known, so its distance is approximate.`);
+  const unknown = page.filter(i => i.distance_km === undefined).length;
+  if (unknown) warnings.push(`${unknown} venues have no known location and are listed last, without distance_km.`);
+  return warnings;
+}
+
 export class CinemaService {
   constructor(private http = new HttpClient(), private cinexCatalog = new CinexCinemaCatalog()) {}
   async seats(q: Query, call?: CallOptions) { return getSeatMap(this.http, q, call); }
@@ -81,6 +112,19 @@ export class CinemaService {
     const result: QueryResult = { provider: q.provider, status: 'empty', queried_at: new Date().toISOString(), timezone: 'America/Caracas', sources: [], items: [], warnings: [], total: 0, next_offset: null, partial: false };
     try {
       if (q.cinema_id?.startsWith('directory-')) throw new DataError('unavailable', 'This venue has no verified query code. Check the official link returned by list_cinemas; the directory- ID only identifies the known venue.');
+      // "Near Chacao": the place is resolved before the read, because Cines
+      // Unidos lists venues only by city and the place decides which one.
+      const place = op === 'cinemas' && q.near ? resolvePlace(q.near) : undefined;
+      if (op === 'cinemas' && q.near && !place) {
+        if (q.provider === 'cinesunidos' && !q.city) throw new DataError('unavailable', `Cinve does not know the place "${warningLabel(q.near, 120)}". Pass city (list_cities), or near as a neighbourhood or town (Chacao, Las Mercedes, Naguanagua) or "lat,lng".`);
+        c.warnings.push(`Cinve does not know the place "${warningLabel(q.near, 120)}", so venues are not sorted by distance. Use a neighbourhood or town (Chacao, Las Mercedes, Naguanagua) or "lat,lng".`);
+      }
+      if (place && q.provider === 'cinesunidos' && !q.city) {
+        const city = nearestCity('cinesunidos', place.point);
+        if (!city) throw new DataError('unavailable', 'Cines Unidos lists venues by city; pass city (list_cities).');
+        q = { ...q, city };
+        c.warnings.push(`Cines Unidos lists venues by city: ${city}, the one nearest to ${place.name}, was used.`);
+      }
       const data = q.provider === 'cinex' ? await cinex(op, q, c, this.cinexCatalog)
         : await ({ cinepic, cinesunidos, supercines, grancine })[q.provider](op, q, c);
       const unique = new Map<string, DataItem>();
@@ -114,11 +158,14 @@ export class CinemaService {
         if (op === 'movies' && q.movie_id && item.id !== q.movie_id) continue;
         if (!q.query || folded(item.name).includes(folded(q.query))) unique.set(key, item);
       }
-      const items = [...unique.values()].sort((a, b) => (a.starts_at ?? a.name).localeCompare(b.starts_at ?? b.name) || a.id.localeCompare(b.id));
+      let items = [...unique.values()].sort((a, b) => (a.starts_at ?? a.name).localeCompare(b.starts_at ?? b.name) || a.id.localeCompare(b.id));
+      if (op === 'cinemas') items = locateVenues(q.provider, items, place);
       const offset = q.offset ?? 0, limit = q.limit ?? 50;
       result.total = items.length;
       result.items = items.slice(offset, offset + limit);
       result.next_offset = offset + limit < items.length ? offset + limit : null;
+      // First, so that the provider's own warnings cannot crowd them out of the bounded list.
+      if (place) c.warnings.unshift(...distanceWarnings(q.provider, result.items, items[0]?.distance_km, place));
       result.status = items.length ? 'available' : 'empty';
     } catch (error) {
       result.items = []; result.total = 0; result.next_offset = null;

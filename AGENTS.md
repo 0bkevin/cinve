@@ -25,6 +25,8 @@ src/
   core.ts            shared contract: zod schemas (Query, Item, Result), DataError, value helpers
   service.ts         CinemaService: runs an adapter, validates, dedupes, filters, pages results
   agent-instructions.ts  the server instructions and the saved cinema preference text
+  locations.ts       venue coordinates and areas, known places, and the distance behind
+                     list_cinemas near (looked up in OpenStreetMap; a new venue needs an entry)
   local-limit.ts     in-process rate limiter for the hosted app; discovery.ts: robots, sitemap
   public-web.tsx     the hosted site's pages (re-exports src/web/pages); auth-web.tsx: connect page
   mcp/               server.ts: tools, argument schemas, instructions; bridge.ts: stdio proxy
