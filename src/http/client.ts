@@ -2,7 +2,7 @@ import { DataError } from '../core.js';
 import type { z } from 'zod';
 import type { Source } from '../core.js';
 import { SessionStore } from '../auth/sessions.js';
-import { assertPrivateRead, publicHosts } from './allow-list.js';
+import { assertCinexSeatOrder, assertPrivateRead, publicHosts } from './allow-list.js';
 import { cancelBody, cancelReader, decodeBody, withSignal } from './response.js';
 import { cinexCinemaRedirect, cinexTicketRedirect } from './redirects.js';
 import type { AuthProviderId } from '../auth/sessions.js';
@@ -75,7 +75,16 @@ export class HttpClient {
   private readTimeout(origin: string) { return slowHosts.has(new URL(origin).hostname) ? Math.round(this.timeout * slowHostFactor) : this.timeout; }
   async getAuthenticated(provider: AuthProviderId, url: string): Promise<Page> {
     assertPrivateRead(provider, url);
+    // Cinex's order route takes only the checked POST below.
+    if (new URL(url).pathname === '/boletos_data.php') throw new DataError('error', 'Ruta autenticada no permitida.');
     return this.read(url, new URL(url).origin, target => this.sessions.headers(provider, target));
+  }
+  /** Opens the one-ticket Cinex order assertCinexSeatOrder allows; see seats/seat-map.ts. */
+  async postCinexSeatOrder(url: string, fields: Record<string, string>): Promise<Page> {
+    assertPrivateRead('cinex', url);
+    if (new URL(url).pathname !== '/boletos_data.php') throw new DataError('error', 'Ruta autenticada no permitida.');
+    assertCinexSeatOrder(fields);
+    return this.read(url, new URL(url).origin, target => this.sessions.headers('cinex', target), false, undefined, new URLSearchParams(fields).toString());
   }
   /**
    * @param accept Whether a successful body is worth caching. A 200 response
@@ -245,18 +254,18 @@ export class HttpClient {
     });
   }
   private async read(url: string, origin: string, authorize?: (target: string) => Promise<Record<string, string>>, refresh = false,
-    onPublicRedirect?: (alias: string, canonical: string) => void): Promise<Page> {
+    onPublicRedirect?: (alias: string, canonical: string) => void, postBody?: string): Promise<Page> {
     // AbortSignal.timeout() uses an unreferenced timer: when the only pending
     // work is a stalled promise (a hung transport, session store or body
     // reader), Node may exit or drop the task before the deadline fires. A
     // referenced timer, always cleared, makes the deadline deterministic.
     const controller = new AbortController(), timeout = this.readTimeout(origin);
     const timer = setTimeout(() => controller.abort(new DOMException('The operation timed out.', 'TimeoutError')), timeout);
-    try { return await this.readUntil(controller.signal, timeout, url, origin, authorize, refresh, onPublicRedirect); }
+    try { return await this.readUntil(controller.signal, timeout, url, origin, authorize, refresh, onPublicRedirect, postBody); }
     finally { clearTimeout(timer); }
   }
   private async readUntil(signal: AbortSignal, timeout: number, url: string, origin: string, authorize?: (target: string) => Promise<Record<string, string>>, refresh = false,
-    onPublicRedirect?: (alias: string, canonical: string) => void): Promise<Page> {
+    onPublicRedirect?: (alias: string, canonical: string) => void, postBody?: string): Promise<Page> {
     const requested = url;
     const deadline = Date.now() + timeout;
     const release = await this.acquire(origin, signal, deadline, timeout);
@@ -270,8 +279,9 @@ export class HttpClient {
         at.phase = 'provider';
         signal.throwIfAborted();
         return withSignal(this.request(target, {
-          headers: { 'User-Agent': 'cinev-mcp/0.1', ...(refresh ? { 'Cache-Control': 'no-cache' } : {}), ...(origin.includes('gateway.cinesunidos.com') ? { xChannel: 'www' } : {}), ...auth },
-          signal, redirect: 'manual',
+          headers: { 'User-Agent': 'cinev-mcp/0.1', ...(refresh ? { 'Cache-Control': 'no-cache' } : {}), ...(origin.includes('gateway.cinesunidos.com') ? { xChannel: 'www' } : {}),
+            ...(postBody !== undefined ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}), ...auth },
+          signal, redirect: 'manual', ...(postBody !== undefined ? { method: 'POST', body: postBody } : {}),
         }), signal, response => cancelBody(response.body));
       };
       // Public reads are idempotent GETs: retry once, after a short pause, a
@@ -315,6 +325,12 @@ export class HttpClient {
       if (response.status >= 300 && response.status < 400) {
         const destination = response.headers.get('location'); cancelBody(response.body);
         const redirect = destination ? new URL(destination, url) : undefined;
+        // Cinex's order answers with its seat page and its reset with its ticket page: both are done, read
+        // separately by the caller (seats/seat-map.ts); neither redirect is followed here.
+        const from = new URL(url).pathname;
+        if (authorize && redirect?.origin === origin && ((from === '/boletos_data.php' && redirect.pathname === '/asientos.php') || (from === '/resetpurchase.php' && redirect.pathname === '/boletos.php'))) {
+          return { body: '', source: { url, fetched_at: new Date().toISOString(), cached: false } };
+        }
         if (authorize && redirect?.origin === origin && /^\/(?:clearsession\.html|api\/auth\/signin|login)(?:\/|$)/.test(redirect.pathname)) throw new DataError('auth_required', 'El proveedor redirigió al login; conecta de nuevo tu cuenta en la terminal local.');
         throw new DataError('unavailable', 'El proveedor redirigió la consulta; no se siguió el destino.');
       }

@@ -83,6 +83,22 @@ export class ReadContext {
     try { await this.http.sessions.expire('cinex', started); } catch { /* the answer is auth_required either way */ }
     return false;
   }
+  /** Opens the one-ticket Cinex order a seat lookup may need (see seats/seat-map.ts); its body is empty. */
+  async cinexSeatOrder(fields: Record<string, string>): Promise<void> {
+    this.checkCanRead();
+    await this.http.postCinexSeatOrder('https://www.cinex.com.ve/boletos_data.php', fields);
+  }
+  /**
+   * An account read that must go out even after the client cancelled the call
+   * or its deadline passed: resetting an order the same call opened. It skips
+   * those checks and is tried a second time if the first attempt fails.
+   */
+  async closeAuthenticated(provider: AuthProviderId, url: string): Promise<boolean> {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try { await this.http.getAuthenticated(provider, url); return true; } catch { /* tried again once */ }
+    }
+    return false;
+  }
   async authenticated(provider: AuthProviderId, url: string): Promise<string> {
     this.checkCanRead();
     const started = Date.now();

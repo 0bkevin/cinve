@@ -7,7 +7,7 @@ import type { CallOptions } from '../http/read-context.js';
 import { cinepicTicketsLeft, cinepicVenueName, cpBuy } from '../providers/cinepic/sites.js';
 import { findField, object, rows } from '../providers/parsing.js';
 import { SeatResult, seatLayout } from './schema.js';
-import { clean, cinepicBookableTypes, cinexRowShifts, EmptyCinexMap, parseCinepicSeats, parseCinesUnidosSeats, parseCinexSeats, parseCinexShowing, showing } from './parsers.js';
+import { cinepicBookableTypes, cinexRowShifts, cinexSeatOrderFields, clean, EmptyCinexMap, parseCinepicSeats, parseCinesUnidosSeats, parseCinexSeats, parseCinexShowing, showing } from './parsers.js';
 import { renderSeats } from './ascii.js';
 
 export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions): Promise<z.infer<typeof SeatResult>> {
@@ -67,12 +67,38 @@ export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions)
       // The two pages can differ for the same function (a VIP row only the newer one
       // draws), and asientosdev.php draws no grid for regular rooms. If the page chosen
       // draws no grid, the other one is read.
+      // Found 2026-11-11: asientos.php draws a regular room's map only for an account
+      // session that has opened an order at least once; a fresh login gets the page
+      // without its grid. When neither page draws one for a regular room, Cinve opens a
+      // one-ticket order on this function (as its ticket form would), reads the seat
+      // page, and always resets the order with resetpurchase.php, the route Cinex itself
+      // uses when the order's countdown ends. No seat is chosen and nothing is paid; the
+      // session then draws maps directly, so this happens about once per login.
+      const grid = (body: string) => /class\s*=\s*["']?[^"'>]*\browletter\b/i.test(body);
+      let ordered = false;
       const html = await c.exclusive('cinex', async () => {
         const ticket = await c.authenticated('cinex', `https://www.cinex.com.ve/boletos.php?${new URLSearchParams({ cinemaid: result.cinema_id, sessionid: result.session_id })}`);
-        const pages = /boletos_datadev\.php/.test(ticket) ? ['asientosdev.php', 'asientos.php'] : ['asientos.php', 'asientosdev.php'];
+        const vip = /boletos_datadev\.php/.test(ticket);
+        const pages = vip ? ['asientosdev.php', 'asientos.php'] : ['asientos.php', 'asientosdev.php'];
         const first = await c.authenticated('cinex', `https://www.cinex.com.ve/${pages[0]}`);
-        // Any class list or quoting the parser's .rowletter selector would accept counts as a grid.
-        return /class\s*=\s*["']?[^"'>]*\browletter\b/i.test(first) ? first : c.authenticated('cinex', `https://www.cinex.com.ve/${pages[1]}`);
+        if (grid(first)) return first;
+        const second = await c.authenticated('cinex', `https://www.cinex.com.ve/${pages[1]}`);
+        if (grid(second) || vip) return grid(second) ? second : first;
+        const order = cinexSeatOrderFields(ticket);
+        if (!order) return first;
+        let seatPage = first;
+        ordered = true;
+        try {
+          await c.cinexSeatOrder(order);
+          seatPage = await c.authenticated('cinex', 'https://www.cinex.com.ve/asientos.php');
+        } finally {
+          // Always reset the order, even when opening it failed half way or the client cancelled the call.
+          const closed = await c.closeAuthenticated('cinex', 'https://www.cinex.com.ve/resetpurchase.php');
+          c.warnings.push(closed
+            ? 'Cinex muestra el mapa de esta sala solo dentro de un pedido: Cinve abrió uno de 1 boleto sin elegir asiento, leyó el mapa y lo anuló de inmediato. No se reservó ni pagó nada.'
+            : 'Cinex no confirmó la anulación del pedido de 1 boleto que Cinve abrió para leer el mapa; vence solo al terminar su cuenta regresiva (unos 10 minutos). No se eligió ningún asiento.');
+        }
+        return seatPage;
       });
       const page = parseCinexShowing(html);
       try {
@@ -91,7 +117,7 @@ export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions)
       // Seen 2026-11-05: the counter can lag the grid on the same page (seats just bought or held).
       const mapped = result.seats.filter(s => s.status === 'available').length;
       if (page.available !== undefined && page.available !== mapped) c.warnings.push(`El contador de asientos disponibles de Cinex (${page.available}) difiere del mapa (${mapped} libres); se conserva el estado de cada asiento del mapa.`);
-      c.warnings.push('Cinex: mapa leído sin seleccionar boletos ni asientos. Las categorías especiales pueden requerir una tarifa específica.');
+      c.warnings.push(ordered ? 'Las categorías especiales pueden requerir una tarifa específica.' : 'Cinex: mapa leído sin seleccionar boletos ni asientos. Las categorías especiales pueden requerir una tarifa específica.');
     } else {
       throw new DataError('unavailable', 'Consulta de asientos no implementada para este proveedor.');
     }

@@ -136,6 +136,24 @@ export function cinexRowShifts(html: string): Record<string, number> {
   return shifts;
 }
 
+/**
+ * The fields cinex.com.ve's ticket form (doValidateTickets in scripts.min.js,
+ * 2026-11-11) posts to boletos_data.php for ONE ticket of the first type that
+ * can be bought alone (a child ticket needs another one with it), computed as
+ * its updateCount() does. Undefined when the page offers no such ticket.
+ */
+export function cinexSeatOrderFields(ticketPage: string): Record<string, string> | undefined {
+  for (const m of ticketPage.matchAll(/updateCount\('qty(\d{1,6})', 'total\d{1,6}', 'amount\d{1,6}', 'plus', '(\d{1,3})', '[\d.]+', '([\d.,]+)', '(\d+(?:\.\d+)?)', '(\d+(?:\.\d+)?)', '\d+', '([^']*)'\)/g)) {
+    const [, item, index, ticketCost, bookingFee, usd, name] = m as unknown as [string, string, string, string, string, string, string];
+    if (/niñ/i.test(name)) continue;
+    const amount = ticketPage.match(new RegExp(`id="amount${item}"[^>]*value="(\\d+(?:\\.\\d+)?)"`))?.[1];
+    if (!amount) continue;
+    return { total: amount, cantboletos: '1', indicetickets: `${','.repeat(Number(index))}1`,
+      bookingfeetotal: String(parseFloat(bookingFee)), tickettotal: String(parseFloat(ticketCost)), totalticketsusd: String(parseFloat(usd)) };
+  }
+  return undefined;
+}
+
 /** The right function's page arrived with an empty grid. */
 export class EmptyCinexMap extends DataError {}
 

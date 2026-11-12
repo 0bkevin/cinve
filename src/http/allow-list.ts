@@ -74,6 +74,21 @@ export function assertPrivateRead(p: AuthProviderId, value: string) {
   const cinexParams = params.length === expected.length && expected.every(key => u.searchParams.getAll(key).length === 1 && /^[A-Za-z0-9_-]{1,100}$/.test(u.searchParams.get(key) ?? ''));
   const route = p === 'cinesunidos'
     ? (u.hostname === 'www.cinesunidos.com' && u.pathname === '/api/seats' && params.length === 2 && ['theaterId', 'showTimeId'].every(key => u.searchParams.getAll(key).length === 1 && /^[A-Za-z0-9_-]{1,100}$/.test(u.searchParams.get(key) ?? ''))) || (u.hostname === 'gateway.cinesunidos.com' && /^\/tickets\/www\/theaters\/[\w-]+\/sessions\/[\w-]+\/$/.test(u.pathname) && !u.search)
-    : u.hostname === 'www.cinex.com.ve' && ['/checklogin.php', '/boletos.php', '/boletosdev.php', '/asientos.php', '/asientosdev.php', '/concesiones.php'].includes(u.pathname) && cinexParams;
+    : u.hostname === 'www.cinex.com.ve' && ['/checklogin.php', '/boletos.php', '/boletosdev.php', '/asientos.php', '/asientosdev.php', '/concesiones.php', '/boletos_data.php', '/resetpurchase.php'].includes(u.pathname) && cinexParams;
   if (!safe || !route) throw new DataError('error', 'Ruta autenticada no permitida.');
+}
+
+/**
+ * The only order Cinve opens on Cinex: its regular seat page draws a room's map
+ * only for an account session that has opened an order (seen 2026-11-11), so a
+ * seat lookup may open one with exactly the fields cinex.com.ve's ticket form
+ * posts for ONE ticket of one type, and reset it at once. No seat, no payment.
+ */
+export function assertCinexSeatOrder(fields: Record<string, string>) {
+  const number = (v: string | undefined) => v !== undefined && /^\d{1,12}(?:\.\d{1,4})?$/.test(v);
+  const keys = Object.keys(fields).sort().join(',');
+  if (keys !== 'bookingfeetotal,cantboletos,indicetickets,tickettotal,total,totalticketsusd' || fields.cantboletos !== '1'
+    || !/^,{1,30}1$/.test(fields.indicetickets ?? '') || !['total', 'bookingfeetotal', 'tickettotal', 'totalticketsusd'].every(k => number(fields[k]))) {
+    throw new DataError('error', 'Pedido Cinex no permitido.');
+  }
 }

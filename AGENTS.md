@@ -85,9 +85,13 @@ npm run dev                   # stdio server from source
 
 ## Hard rules
 
-- Read-only. Never call Cinex `boletos_datadev.php`, and never call anything
-  else that selects, holds, reserves or buys seats or tickets. A new provider
-  URL must be added on purpose to `http/allow-list.ts`.
+- Never buy, pay or select a seat. One exception, approved by the owner: a
+  seat map a cinema shows only inside an order may be read by opening an order
+  of exactly one ticket, which the same call always resets. On Cinex that is
+  `boletos_data.php` (only when a regular room's seat page has no grid; see
+  `seats/seat-map.ts`) reset with `resetpurchase.php`. Never call Cinex
+  `boletos_datadev.php` or `asientos_datadevx.php`. A new provider URL must be
+  added on purpose to `http/allow-list.ts`.
 - Seats are never cached: `getSeatMap` always reads fresh.
 - Never commit credentials, cookies, tokens, session files
   (`~/.config/cinev/*.json`), `.env*`, or real authenticated responses. Test
