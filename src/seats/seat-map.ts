@@ -7,7 +7,7 @@ import type { CallOptions } from '../http/read-context.js';
 import { cinepicTicketsLeft, cinepicVenueName, cpBuy } from '../providers/cinepic/sites.js';
 import { findField, object, rows } from '../providers/parsing.js';
 import { SeatResult, seatLayout } from './schema.js';
-import { clean, cinepicBookableTypes, EmptyCinexMap, parseCinepicSeats, parseCinesUnidosSeats, parseCinexSeats, parseCinexShowing, showing } from './parsers.js';
+import { clean, cinepicBookableTypes, cinexRowShifts, EmptyCinexMap, parseCinepicSeats, parseCinesUnidosSeats, parseCinexSeats, parseCinexShowing, showing } from './parsers.js';
 import { renderSeats } from './ascii.js';
 
 export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions): Promise<z.infer<typeof SeatResult>> {
@@ -64,7 +64,11 @@ export async function getSeatMap(http: HttpClient, q: Query, call?: CallOptions)
         return c.authenticated('cinex', 'https://www.cinex.com.ve/asientosdev.php');
       });
       const page = parseCinexShowing(html);
-      try { result.seats = parseCinexSeats(html, q); }
+      try {
+        result.seats = parseCinexSeats(html, q);
+        const shifts = cinexRowShifts(html);
+        if (Object.keys(shifts).length) result.layout = { ...result.layout, row_shift: shifts };
+      }
       catch (e) {
         // Seen 2026-11-05: for many functions Cinex sends the grid only after tickets are
         // chosen (boletos_datadev.php, which starts a timed order). Cinve never does that,

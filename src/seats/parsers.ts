@@ -114,6 +114,23 @@ export function parseCinesUnidosSeats(data: unknown): SeatData[] {
     }))));
 }
 
+/**
+ * cinex.com.ve centers each row of its map (.centermap is display:flex;
+ * justify-content:center, checked 2026-11-11), and most rooms pad every row to
+ * one width with blank cells. Where a row is shorter (Parque Cerro Verde VIP:
+ * row A has 11 cells, the others 13), the page draws it shifted right by half
+ * the difference. Returns that shift, in seats, for each shorter row.
+ */
+export function cinexRowShifts(html: string): Record<string, number> {
+  const $ = load(html), widths = new Map<string, number>();
+  $('#mapcontent .row').filter((_, r) => $(r).children('.rowletter').length === 1).each((_, r) => {
+    widths.set($(r).children('.rowletter').text().trim(), $(r).children().not('.rowletter').length);
+  });
+  const widest = Math.max(0, ...widths.values()), shifts: Record<string, number> = {};
+  for (const [row, width] of widths) if (width < widest) shifts[row] = (widest - width) / 2;
+  return shifts;
+}
+
 /** The right function's page arrived with an empty grid. */
 export class EmptyCinexMap extends DataError {}
 

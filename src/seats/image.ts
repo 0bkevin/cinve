@@ -8,7 +8,8 @@ const seatStatuses = ['available', 'occupied', 'unavailable', 'unknown'] as cons
 export type SeatStatus = typeof seatStatuses[number];
 export type MapSeat = { label: string; row: string; area: string; row_index: number; column_index: number; status: SeatStatus };
 /** The provider-verified orientation from SeatResult.layout. */
-export type MapLayout = { screen: 'top' | 'bottom' | 'unverified'; column_order: 'ascending' | 'descending' };
+/** row_shift: rows the provider centers because they are shorter, in seats (may be half a seat). */
+export type MapLayout = { screen: 'top' | 'bottom' | 'unverified'; column_order: 'ascending' | 'descending'; row_shift?: Record<string, number> | undefined };
 /** cinema: the venue's name when known, else its ID. The rest, when the provider named them, label the function. */
 export type MapHeader = { provider: string; cinema: string; session: string; queriedAt: string; movie?: string | undefined; screen?: string | undefined; date?: string | undefined; time?: string | undefined };
 
@@ -77,7 +78,9 @@ export function renderSeatMapSvg(seats: MapSeat[], layout: MapLayout, header: Ma
   const areas = [...new Set(seats.map(s => s.area))];
   const showAreaNames = areas.length > 1;
   // Columns share one scale across areas, as in the ASCII map, so an area keeps its horizontal place.
-  const minCol = Math.min(...seats.map(s => s.column_index)), cols = Math.max(...seats.map(s => s.column_index)) - minCol + 1;
+  // A seat's place across the room: its column, plus the shift of a row the provider centers.
+  const place = (s: MapSeat) => s.column_index + (layout.row_shift?.[s.row] ?? 0);
+  const minCol = Math.min(...seats.map(place)), cols = Math.max(...seats.map(place)) - minCol + 1;
   const groups = areas.map(area => {
     const group = seats.filter(s => s.area === area);
     const minRow = Math.min(...group.map(s => s.row_index)), maxRow = Math.max(...group.map(s => s.row_index));
@@ -144,7 +147,7 @@ export function renderSeatMapSvg(seats: MapSeat[], layout: MapLayout, header: Ma
         out.push(`<text x="${left + gridWidth + label / 2}" y="${cy + SEAT_H / 2 + 4}" font-size="12" fill="${ink.faint}">${shown}</text>`);
       }
       for (const s of rowSeats) {
-        const col = s.column_index - minCol, shown = layout.column_order === 'descending' ? cols - 1 - col : col;
+        const col = place(s) - minCol, shown = layout.column_order === 'descending' ? cols - 1 - col : col;
         const x = left + shown * CELL + (CELL - SEAT) / 2, c = palette[s.status], number = seatNumber(s);
         const size = numberSize, fitted = numbers.get(number) ?? number;
         out.push(`<g><title>${escape(`${s.label}: ${c.name.toLowerCase()}`)}</title><rect x="${x}" y="${cy}" width="${SEAT}" height="${SEAT_H}" rx="4" ${seatPaint(s.status, 1)}/>`

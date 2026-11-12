@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
 import { Client } from '@modelcontextprotocol/client';
 import { renderSeats } from '../../src/seats/ascii.js';
-import { cinepicBookableTypes, parseCinepicSeats, parseCinesUnidosSeats, parseCinexSeats, parseCinexShowing } from '../../src/seats/parsers.js';
+import { cinepicBookableTypes, cinexRowShifts, parseCinepicSeats, parseCinesUnidosSeats, parseCinexSeats, parseCinexShowing } from '../../src/seats/parsers.js';
 import { seatLayout } from '../../src/seats/schema.js';
 import { cinepicTicketsLeft } from '../../src/providers/cinepic/sites.js';
 import { crc32, inflateSync } from 'node:zlib';
@@ -446,4 +446,32 @@ test('Cinepic: lettered columns are read the way the purchase page numbers its g
   const seats = parseCinepicSeats({ butacas: [s('1', 'A', 'A:1'), s('1', 'C', 'A:2'), s('2', 'b', 'B:1')] });
   assert.deepEqual(seats.map(x => [x.row_index, x.column_index]), [[0, 0], [0, 2], [1, 1]]);
   assert.throws(() => parseCinepicSeats({ butacas: [s('1', 'AA', 'A:1')] }), 'two letters are not a column');
+});
+
+test('Cinex: a shorter row is centered as cinex.com.ve centers it (Parque Cerro Verde VIP)', () => {
+  // As sent on 2026-11-11: rows G-B have 13 cells, row A only 11, and .centermap centers each row.
+  const seat = (id: string, r: number, c: number) => `<div class='seatvipplus' alt='0' id='${id}' onclick=javascript:decideAsientoNew('${id}','${r}','${c}','1','0000000002','','N','N'); title='Asiento ${id}'></div>`;
+  const blank = `<div class='blankspace'></div>`;
+  const row = (letter: string, cells: string[]) => `<div class='row centermap'><div class='rowletter'>${letter}</div>${cells.join('')}</div>`;
+  const g = Array.from({ length: 13 }, (_, c) => seat(`G${c + 1}`, 0, c));
+  const b = [blank, blank, ...[1, 2, 3, 4].map((n, k) => seat(`B${n}`, 5, k + 2)), blank, ...[5, 6, 7, 8, 9, 10].map((n, k) => seat(`B${n}`, 5, k + 7))];
+  const a = [seat('A1', 0, 0), seat('A2', 0, 1), blank, blank, blank, ...[5, 6, 7, 8, 9, 10].map((n, k) => seat(`A${n}`, 0, k + 5))];
+  const html = (rows: string) => `<a id="btnasientosatras" href="boletosdev.php?cinemaid=PCV&sessionid=s1">Atras</a><div id="mapcontent"><div class="row centermap">${rows}</div></div>`;
+  const page = html(row('G', g) + row('B', b) + row('A', a));
+  assert.deepEqual(cinexRowShifts(page), { A: 1 });
+  const seats = parseCinexSeats(page, { provider: 'cinex', cinema_id: 'PCV', session_id: 's1' });
+  const layout = { ...seatLayout('cinex'), row_shift: cinexRowShifts(page) };
+  const at = drawn(renderSeatMapSvg(seats, layout, header)), x = (id: string) => nth(at.filter(s => s.label === id), 0).x;
+  assert.equal(x('A1'), x('G2'), 'A1 sits under G2, one seat in, as on the Cinex page');
+  assert.equal(x('A10'), x('G12')); assert.equal(x('B1'), x('G3'), 'full-width rows are not shifted');
+  // The ASCII map indents row A by one column too.
+  const ascii = renderSeats(seats, layout).split('\n'), col = (line: string, label: string) => line.indexOf(label);
+  assert.equal(col(nth(ascii.filter(l => l.includes('A1O')), 0), 'A1O'), col(nth(ascii.filter(l => l.includes('G2O')), 0), 'G2O'));
+  // An odd difference is half a seat (San Ignacio 3 VIP: 10 cells, row A 9).
+  const half = html(row('B', Array.from({ length: 10 }, (_, c) => seat(`B${c + 1}`, 0, c))) + row('A', Array.from({ length: 9 }, (_, c) => seat(`A${c + 1}`, 1, c))));
+  assert.deepEqual(cinexRowShifts(half), { A: 0.5 });
+  const hs = parseCinexSeats(half, { provider: 'cinex', cinema_id: 'PCV', session_id: 's1' });
+  const hat = drawn(renderSeatMapSvg(hs, { ...seatLayout('cinex'), row_shift: { A: 0.5 } }, header)), hx = (id: string) => nth(hat.filter(s => s.label === id), 0).x;
+  assert.equal(hx('A1') - hx('B1'), 15, 'half a 30-unit cell');
+  assert.deepEqual(cinexRowShifts(html(row('G', g) + row('F', g.map(c => c.replaceAll('G', 'F'))))), {}, 'equal rows need no shift');
 });

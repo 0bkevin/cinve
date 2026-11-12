@@ -33,6 +33,7 @@ export const SeatResult = z.object({
   layout: z.object({
     screen: z.enum(['top', 'bottom', 'unverified']).describe('Lado de la pantalla en el mapa ascii y en la imagen, como lo dibuja la web del proveedor; unverified si no se pudo confirmar.'),
     column_order: z.enum(['ascending', 'descending']).describe('descending: la web del proveedor dibuja column_index de derecha a izquierda; el mapa ascii y la imagen lo respetan.'),
+    row_shift: z.record(z.string().max(40), z.number().min(0).max(100)).optional().describe('Filas que la web del proveedor centra por ser más cortas: cuántos asientos (puede ser medio) se desplaza cada una desde column_index 0. El mapa ascii y la imagen ya lo aplican.'),
   }),
   showing: ShowingFields.optional().describe('La función según la misma respuesta del mapa (texto del proveedor), para rotular la imagen; los campos ausentes no se pudieron leer.'),
   ascii: z.string(),
