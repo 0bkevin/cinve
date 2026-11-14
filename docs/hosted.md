@@ -90,12 +90,11 @@ npm run hosted:admin -- revoke <client-id>
 
 ## Web languages and discovery
 
-Browser pages support Spanish and English. `?lang=es` or `?lang=en` overrides
-`Accept-Language`; unsupported or missing preferences fall back to Spanish.
-Public pages that negotiate English redirect temporarily, with no caching, to
-`?lang=en` so shared links and social crawlers keep the selected language.
-Responses vary by `Accept-Language` and declare `Content-Language`. Internal
-links keep the chosen language.
+Browser pages support Spanish and English. Spanish is the default for every
+visitor; browser language settings (`Accept-Language`) are ignored. English is
+served only at `?lang=en`, which the language menu links to, so shared links
+and social crawlers keep the selected language. Responses declare
+`Content-Language`. Internal links keep the chosen language.
 
 `/install` also varies by `Accept`. An explicit `lang` serves HTML even without
 an HTML Accept header; `?format=text` always serves the English agent guide.

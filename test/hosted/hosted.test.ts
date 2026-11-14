@@ -1825,22 +1825,26 @@ test('a device id planted in a browser never becomes a proof for the account sig
   assert.equal(await f.links.admitSignIn(subject(issued!)), undefined, 'the browser that signed in does');
 });
 
-test('all browser routes negotiate languages, keep explicit choices, and retain security headers', async t => {
+test('all browser routes default to Spanish whatever the browser prefers, keep explicit choices, and retain security headers', async t => {
   const f = await fixture(t);
   const securityHeaders = ['content-security-policy', 'referrer-policy', 'x-content-type-options', 'x-frame-options', 'permissions-policy', 'cross-origin-opener-policy', 'cross-origin-resource-policy', 'cross-origin-embedder-policy'];
   for (const path of ['/', '/instrucciones', '/install', '/privacidad', '/connect', '/missing', '/oauth/authorize?client_id=unknown']) {
-    const es = await fetch(f.origin + path, { headers: { Accept: 'text/html', 'Accept-Language': 'es-VE' } });
-    const en = await fetch(f.origin + path, { headers: { Accept: 'text/html', 'Accept-Language': 'en-GB,en;q=0.9' } });
-    assert.equal(en.status, es.status, path);
+    const withLang = (lang: string) => f.origin + path + (path.includes('?') ? '&' : '?') + 'lang=' + lang;
+    const plain = await fetch(f.origin + path, { redirect: 'manual', headers: { Accept: 'text/html', 'Accept-Language': 'en-GB,en;q=0.9' } });
+    assert.notEqual(plain.status, 307, path);
+    assert.equal(plain.headers.get('content-language'), 'es', path);
+    assert.doesNotMatch(plain.headers.get('vary') ?? '', /Accept-Language/, path);
+    assert.equal(load(await plain.text())('html').attr('lang'), 'es', path);
+    const en = await fetch(withLang('en'), { headers: { Accept: 'text/html', 'Accept-Language': 'es-VE' } });
+    assert.equal(en.status, plain.status, path);
     assert.equal(en.headers.get('content-language'), 'en', path);
-    assert.match(en.headers.get('vary')!, /Accept-Language/, path);
     assert.equal(load(await en.text())('html').attr('lang'), 'en', path);
-    for (const header of securityHeaders) assert.equal(en.headers.get(header), es.headers.get(header), `${path}: ${header}`);
-    const explicit = await fetch(f.origin + path + (path.includes('?') ? '&' : '?') + 'lang=es', { headers: { Accept: 'text/html', 'Accept-Language': 'en-US' } });
+    for (const header of securityHeaders) assert.equal(en.headers.get(header), plain.headers.get(header), `${path}: ${header}`);
+    const explicit = await fetch(withLang('es'), { headers: { Accept: 'text/html', 'Accept-Language': 'en-US' } });
     assert.equal(load(await explicit.text())('html').attr('lang'), 'es', path);
   }
   const install = await fetch(f.origin + '/install?lang=en', { headers: { Accept: 'text/html' } });
-  assert.match(install.headers.get('vary')!, /Accept, Accept-Language/);
+  assert.equal(install.headers.get('vary'), 'Accept');
   assert.equal(install.headers.get('link'), `<${f.origin}/install?lang=en>; rel="canonical"`);
   const guide = await fetch(f.origin + '/install?format=text&lang=es', { headers: { Accept: 'text/html', 'Accept-Language': 'es' } });
   assert.match(await guide.text(), /^Cinve MCP installation/);
@@ -1917,25 +1921,21 @@ test('OAuth consent preserves authorization fields across language links, errors
   assert.equal(new URL(approve.headers.get('location')!).searchParams.get('state'), 'state123');
 });
 
-test('public pages pin negotiated English for sharing and serve matching default and explicit OG images', async t => {
+test('public pages serve Spanish by default, English only at ?lang=en, with matching OG images', async t => {
   const f = await fixture(t);
   const cases = [
     { query: '', language: '', locale: 'es' },
     { query: '', language: 'fr-FR,fr;q=0.9', locale: 'es' },
     { query: '', language: 'es-VE,es;q=0.9,en;q=0.8', locale: 'es' },
-    { query: '', language: 'en-US,en;q=0.9,es;q=0.8', locale: 'en' },
+    { query: '', language: 'en-US,en;q=0.9,es;q=0.8', locale: 'es' },
     { query: '?lang=es', language: 'en-US,en;q=0.9', locale: 'es' },
     { query: '?lang=en', language: 'es-VE,es;q=0.9', locale: 'en' },
   ] as const;
   const images = new Set<string>();
   for (const path of ['/', '/install', '/instrucciones', '/privacidad']) {
-    const negotiated = await fetch(f.origin + path + '?source=share', { redirect: 'manual', headers: { Accept: 'text/html', 'Accept-Language': 'en-US' } });
-    assert.equal(negotiated.status, 307);
-    assert.equal(negotiated.headers.get('cache-control'), 'no-store');
-    assert.match(negotiated.headers.get('vary')!, /Accept-Language/);
-    const location = new URL(negotiated.headers.get('location')!, f.origin);
-    assert.equal(location.searchParams.get('lang'), 'en');
-    assert.equal(location.searchParams.get('source'), 'share');
+    const shared = await fetch(f.origin + path + '?source=share', { redirect: 'manual', headers: { Accept: 'text/html', 'Accept-Language': 'en-US' } });
+    assert.equal(shared.status, 200);
+    assert.equal(shared.headers.get('content-language'), 'es');
     for (const { query, language, locale } of cases) {
       const response = await fetch(f.origin + path + query, { headers: { Accept: 'text/html', ...(language ? { 'Accept-Language': language } : {}) } });
       assert.equal(response.status, 200);
@@ -1972,7 +1972,7 @@ test('public pages pin negotiated English for sharing and serve matching default
     assert.equal(png.readUInt32BE(16), 1200); assert.equal(png.readUInt32BE(20), 630);
   }
   const head = await fetch(f.origin + '/', { method: 'HEAD', redirect: 'manual', headers: { 'Accept-Language': 'en-US' } });
-  assert.equal(head.status, 307); assert.equal(await head.text(), '');
+  assert.equal(head.status, 200); assert.equal(head.headers.get('content-language'), 'es'); assert.equal(await head.text(), '');
   const guide = await fetch(f.origin + '/install?format=text', { redirect: 'manual', headers: { Accept: 'text/html', 'Accept-Language': 'en-US' } });
   assert.equal(guide.status, 200); assert.match(await guide.text(), /^Cinve MCP installation/);
 });

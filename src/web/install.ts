@@ -1,5 +1,5 @@
 import { installationPage } from '../public-web.js';
-import { pageLocale, publicPageCache, redirectNegotiatedEnglish, setSecurityHeaders } from './http.js';
+import { pageLocale, publicPageCache, setSecurityHeaders } from './http.js';
 import { canonicalUrl } from './locale.js';
 import { seatInstructions } from '../seats/guidance.js';
 import { cinemaInstructions } from '../agent-instructions.js';
@@ -156,7 +156,6 @@ export function serveInstall(req: IncomingMessage, res: ServerResponse, publicUr
     (explicitLocale === 'es' || explicitLocale === 'en' || Boolean(req.headers.accept?.includes('text/html')));
   res.setHeader('Vary', 'Accept');
   const locale = browser ? pageLocale(req, res) : 'en';
-  if (browser && redirectNegotiatedEnglish(req, res, locale)) return true;
   if (!browser) res.setHeader('Content-Language', 'en');
   const guide = browser ? installationPage(publicUrl, locale) : installGuide(publicUrl);
   if (browser) res.setHeader('Content-Type', 'text/html; charset=utf-8');

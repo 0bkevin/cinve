@@ -30,7 +30,7 @@ import { ConnectionLinks, cinemaUnavailableMessage, ipv6Block, signInFloor, sign
 import type { SignInSubject } from './connection-links.js';
 import { EncryptedSessionStore, HostedUsers, digest } from './store.js';
 import { loginPage } from '../auth-web.js';
-import { pageLocale, redirectNegotiatedEnglish } from '../web/http.js';
+import { pageLocale } from '../web/http.js';
 import { credentialMessage, webError } from '../web/errors.js';
 
 class AnonymousSessions extends SessionStore {
@@ -177,7 +177,6 @@ export async function createHostedApp(options: {
       const pagePath = req.url?.split('?')[0];
       if (['GET', 'HEAD'].includes(req.method ?? '') && (pagePath === '/connect' || pagePath === '/' || pagePath === '/instrucciones' || pagePath === '/privacidad')) {
         const locale = pageLocale(req, res);
-        if (pagePath !== '/connect' && redirectNegotiatedEnglish(req, res, locale)) return;
         if (pagePath !== '/connect') res.setHeader('Cache-Control', publicPageCache);
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(req.method === 'HEAD' ? undefined : pagePath === '/' ? landingPage(origin, locale) : pagePath === '/instrucciones' ? instructionsPage(origin, locale) : pagePath === '/privacidad' ? privacyPage(origin, locale) : loginPage(locale)); return;
       }

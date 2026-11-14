@@ -10,16 +10,11 @@ import { privacyPage } from '../../src/web/pages/privacy.js';
 
 const origin = 'https://cinve.example';
 
-test('locale selection honors explicit URL, weighted regional languages, and Spanish fallback', () => {
-  const cases: [string, string, Locale][] = [
-    ['?lang=es', 'en-US,en;q=0.9', 'es'], ['?lang=en', 'es-VE', 'en'],
-    ['', 'en-GB,en;q=0.9,es;q=0.8', 'en'], ['', 'en;q=0.2,es-VE;q=0.9', 'es'],
-    ['', 'fr-CA, en-US;q=0.7, es;q=0.6', 'en'], ['', 'en;q=0,es;q=0.5', 'es'],
-    ['', 'en;q=garbage, es;q=0.8', 'es'], ['', 'en;q=1.1,es;q=0.8', 'es'],
-    ['', 'en;q=0.5,es;q=0.5', 'en'], ['', 'fr,de', 'es'], ['', '', 'es'],
-    ['?lang=fr', 'en', 'en'], ['?lang=<script>', '', 'es'],
+test('locale selection is Spanish unless the URL asks for English', () => {
+  const cases: [string, Locale][] = [
+    ['', 'es'], ['?lang=es', 'es'], ['?lang=en', 'en'], ['?lang=fr', 'es'], ['?lang=EN', 'es'], ['?lang=<script>', 'es'],
   ];
-  for (const [query, header, expected] of cases) assert.equal(resolveLocale(new URL(origin + '/' + query), header), expected, `${query} / ${header}`);
+  for (const [query, expected] of cases) assert.equal(resolveLocale(new URL(origin + '/' + query)), expected, query);
 });
 
 test('locale links preserve OAuth fields and fragments and replace an existing language', () => {

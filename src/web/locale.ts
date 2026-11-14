@@ -1,18 +1,9 @@
-/** URL language wins; negotiated pages vary on Accept-Language. */
+/** Spanish unless the URL asks for English; browser language settings are ignored. */
 export type Locale = 'es' | 'en';
 export const locales: readonly Locale[] = ['es', 'en'];
 
-export function resolveLocale(url: URL, acceptLanguage = ''): Locale {
-  const explicit = url.searchParams.get('lang');
-  if (explicit === 'es' || explicit === 'en') return explicit;
-  const preferences = acceptLanguage.split(',').map((part, order) => {
-    const [tag, ...parameters] = part.trim().toLowerCase().split(';');
-    const quality = parameters.find(value => value.trim().startsWith('q='));
-    const q = quality ? Number(quality.trim().slice(2)) : 1;
-    return { language: tag?.split('-')[0], q, order };
-  }).filter(item => Number.isFinite(item.q) && item.q > 0 && item.q <= 1)
-    .sort((a, b) => b.q - a.q || a.order - b.order);
-  return preferences.find(item => item.language === 'es' || item.language === 'en')?.language as Locale | undefined ?? 'es';
+export function resolveLocale(url: URL): Locale {
+  return url.searchParams.get('lang') === 'en' ? 'en' : 'es';
 }
 
 /** Preserve OAuth parameters and fragments while selecting a language. */
