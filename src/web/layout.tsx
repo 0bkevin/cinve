@@ -3,7 +3,7 @@ import { h, Fragment, raw, renderDocument, type Child } from './jsx.js';
 import { icons } from './ui.js';
 import { catalog } from './content.js';
 import type { Locale } from './locale.js';
-import { canonicalUrl, localeUrl } from './locale.js';
+import { canonicalUrl, localeChoiceUrl, localeUrl } from './locale.js';
 
 /** Search and social metadata, only for indexable public pages. */
 function SocialMeta({ canonical, title, description, locale, path }: { canonical?: string | undefined; title: string; description: string; locale: Locale; path: string }) {
@@ -60,8 +60,8 @@ export function Page({ title, compact, script, index, canonical, description, st
                 <details class="dropdown-menu language-menu">
                   <summary class="btn language-trigger" data-variant="ghost" data-size="sm"><span data-current-locale-label lang={locale}>{locale === 'es' ? text.spanish : text.english}</span>{icons.chevronDown()}</summary>
                   <div class="language-options">
-                    <a data-locale-switch="es" href={localized('es')} lang="es" aria-current={locale === 'es' ? 'page' : undefined}><span>{text.spanish}</span><span class="language-check" data-locale-check="es" aria-hidden="true">{locale === 'es' ? '✓' : ''}</span></a>
-                    <a data-locale-switch="en" href={localized('en')} lang="en" aria-current={locale === 'en' ? 'page' : undefined}><span>{text.english}</span><span class="language-check" data-locale-check="en" aria-hidden="true">{locale === 'en' ? '✓' : ''}</span></a>
+                    <a data-locale-switch="es" href={localeChoiceUrl(path, 'es')} rel="nofollow" lang="es" aria-current={locale === 'es' ? 'page' : undefined}><span>{text.spanish}</span><span class="language-check" data-locale-check="es" aria-hidden="true">{locale === 'es' ? '✓' : ''}</span></a>
+                    <a data-locale-switch="en" href={localeChoiceUrl(path, 'en')} rel="nofollow" lang="en" aria-current={locale === 'en' ? 'page' : undefined}><span>{text.english}</span><span class="language-check" data-locale-check="en" aria-hidden="true">{locale === 'en' ? '✓' : ''}</span></a>
                   </div>
                 </details>
               </span>

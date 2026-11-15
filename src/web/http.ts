@@ -1,12 +1,12 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { localeUrl, resolveLocale, type Locale } from './locale.js';
+import { localeCookie, localeCookieMaxAge, localeUrl, resolveLocale, savedLocale, type Locale } from './locale.js';
 
 /** Append rather than overwrite: /install also varies by representation. */
 export function pageLocale(req: IncomingMessage, res: ServerResponse) {
   const vary = String(res.getHeader('Vary') ?? '').split(',').map(value => value.trim()).filter(Boolean);
-  if (!vary.some(value => value.toLowerCase() === 'accept-language')) vary.push('Accept-Language');
+  for (const header of ['Accept-Language', 'Cookie']) if (!vary.some(value => value.toLowerCase() === header.toLowerCase())) vary.push(header);
   res.setHeader('Vary', vary.join(', '));
-  const locale = resolveLocale(new URL(req.url ?? '/', 'https://cinve.invalid'), req.headers['accept-language']);
+  const locale = resolveLocale(new URL(req.url ?? '/', 'https://cinve.invalid'), req.headers['accept-language'], savedLocale(req.headers.cookie));
   res.setHeader('Content-Language', locale);
   return locale;
 }
@@ -19,6 +19,25 @@ export function redirectNegotiatedEnglish(req: IncomingMessage, res: ServerRespo
   if (locale !== 'en' || explicit === 'es' || explicit === 'en') return false;
   res.setHeader('Cache-Control', 'no-store');
   res.writeHead(307, { Location: localeUrl(url.pathname + url.search, 'en') });
+  res.end();
+  return true;
+}
+
+/** GET /lang?to=es|en&next=/path: remember the language picked in the menu
+ *  for a year, then return to the page in that language. Only same-origin
+ *  paths are followed; anything else goes home. */
+export function serveLocaleChoice(req: IncomingMessage, res: ServerResponse, https: boolean): boolean {
+  const url = new URL(req.url ?? '/', 'https://cinve.invalid');
+  if (url.pathname !== '/lang' || (req.method !== 'GET' && req.method !== 'HEAD')) return false;
+  const to = url.searchParams.get('to');
+  const next = url.searchParams.get('next') ?? '/';
+  const target = next.startsWith('/') && !next.startsWith('//') && !next.startsWith('/\\') && new URL(next, url).origin === url.origin ? next : '/';
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Robots-Tag', 'noindex');
+  if (to === 'es' || to === 'en') {
+    res.setHeader('Set-Cookie', `${localeCookie}=${to}; Path=/; Max-Age=${localeCookieMaxAge}; SameSite=Lax${https ? '; Secure' : ''}`);
+    res.writeHead(303, { Location: localeUrl(target, to) });
+  } else res.writeHead(303, { Location: target });
   res.end();
   return true;
 }
