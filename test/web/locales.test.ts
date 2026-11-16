@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { load } from 'cheerio';
 import { catalog, structuredData } from '../../src/web/content.js';
-import { canonicalUrl, localeUrl, resolveLocale, type Locale } from '../../src/web/locale.js';
+import { canonicalUrl, localeUrl, resolveLocale, savedLocale, type Locale } from '../../src/web/locale.js';
 import { landingPage, installationPage, instructionsPage, authorizationPage, authorizationErrorPage, notFoundPage } from '../../src/public-web.js';
 import { loginPage } from '../../src/auth-web.js';
 import { serverInstructions } from '../../src/agent-instructions.js';
@@ -20,6 +20,15 @@ test('locale selection honors explicit URL, weighted regional languages, and Spa
     ['?lang=fr', 'en', 'en'], ['?lang=<script>', '', 'es'],
   ];
   for (const [query, header, expected] of cases) assert.equal(resolveLocale(new URL(origin + '/' + query), header), expected, `${query} / ${header}`);
+});
+
+test('a saved language choice wins over the browser but not over the URL', () => {
+  assert.equal(resolveLocale(new URL(origin + '/'), 'en-US', 'es'), 'es');
+  assert.equal(resolveLocale(new URL(origin + '/'), 'es-VE', 'en'), 'en');
+  assert.equal(resolveLocale(new URL(origin + '/?lang=en'), 'es-VE', 'es'), 'en');
+  assert.equal(savedLocale('a=1; cinve_lang=en; b=2'), 'en');
+  assert.equal(savedLocale('cinve_lang=es'), 'es');
+  for (const header of ['', 'cinve_lang=fr', 'xcinve_lang=en', 'cinve_lang=english', undefined]) assert.equal(savedLocale(header), undefined, String(header));
 });
 
 test('locale links preserve OAuth fields and fragments and replace an existing language', () => {
@@ -57,7 +66,11 @@ test('every view localizes visible text and provides a working language switcher
       assert.equal($('.language-menu').attr('open'), undefined, 'language disclosure starts closed');
       for (const target of ['es', 'en']) {
         const link = $(`[data-locale-switch="${target}"]`);
-        assert.equal(new URL(link.attr('href')!, origin).searchParams.get('lang'), target);
+        const choice = new URL(link.attr('href')!, origin);
+        assert.equal(choice.pathname, '/lang');
+        assert.equal(choice.searchParams.get('to'), target);
+        assert.ok(choice.searchParams.get('next')?.startsWith('/'));
+        assert.equal(link.attr('rel'), 'nofollow');
         assert.equal(link.attr('lang'), target);
       }
       $('pre, script, noscript').remove(); // Original MCP instructions are deliberately unchanged.

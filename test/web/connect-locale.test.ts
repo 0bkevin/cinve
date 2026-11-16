@@ -116,7 +116,7 @@ test('public language links preserve the current section, including after naviga
     () => ({ matches: true }), (event: string, callback: () => void) => { if (event === 'hashchange') hashListeners.push(callback); }, class {});
   const links = () => [...document.querySelectorAll<HTMLAnchorElement>('[data-locale-switch]')].map(link => new URL(link.getAttribute('href')!, location));
   assert.deepEqual(links().map(url => url.hash), ['#mano', '#mano']);
-  assert.deepEqual(links().map(url => url.searchParams.get('lang')), ['es', 'en']);
+  assert.deepEqual(links().map(url => [url.pathname, url.searchParams.get('to'), url.searchParams.get('next')]), [['/lang', 'es', '/install'], ['/lang', 'en', '/install']]);
   location.hash = '#contenido';
   for (const listener of hashListeners) listener();
   assert.deepEqual(links().map(url => url.hash), ['#contenido', '#contenido']);

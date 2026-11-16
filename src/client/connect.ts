@@ -137,6 +137,9 @@ document.addEventListener('click', event => {
   const languageMenu = link.closest('details') as HTMLDetailsElement | null;
   if (languageMenu) languageMenu.open = false;
   currentLocale = target;
+  // Remember the choice like the /lang route does; this page switches in
+  // place so the invitation in the fragment never reaches the server.
+  document.cookie = `cinve_lang=${target}; Path=/; Max-Age=31536000; SameSite=Lax${location.protocol === 'https:' ? '; Secure' : ''}`;
   const url = new URL(location.href);
   url.searchParams.set('lang', target);
   if (exchanged) url.hash = '';

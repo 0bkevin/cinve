@@ -1850,6 +1850,39 @@ test('all browser routes negotiate languages, keep explicit choices, and retain 
   assert.equal(await head.text(), '');
 });
 
+test('the language picked in the menu is saved and wins over the browser language on later visits', async t => {
+  const f = await fixture(t);
+  const english = { Accept: 'text/html', 'Accept-Language': 'en-US,en;q=0.9' };
+  const first = await fetch(f.origin + '/', { redirect: 'manual', headers: english });
+  assert.equal(first.status, 307, 'without a saved choice the browser language decides');
+  const chose = await fetch(f.origin + '/lang?to=es&next=%2Finstrucciones%3Flang%3Den', { redirect: 'manual', headers: english });
+  assert.equal(chose.status, 303);
+  assert.equal(chose.headers.get('location'), '/instrucciones?lang=es');
+  assert.equal(chose.headers.get('cache-control'), 'no-store');
+  const cookie = chose.headers.get('set-cookie')!;
+  assert.match(cookie, /^cinve_lang=es; Path=\/; Max-Age=31536000; SameSite=Lax/);
+  const saved = { ...english, Cookie: 'other=1; ' + cookie.split(';')[0] };
+  for (const path of ['/', '/instrucciones', '/privacidad', '/install', '/connect', '/missing']) {
+    const visit = await fetch(f.origin + path, { redirect: 'manual', headers: saved });
+    assert.notEqual(visit.status, 307, path);
+    assert.equal(visit.headers.get('content-language'), 'es', path);
+    assert.match(visit.headers.get('vary')!, /Cookie/, path);
+    assert.equal(load(await visit.text())('html').attr('lang'), 'es', path);
+  }
+  const explicit = await fetch(f.origin + '/?lang=en', { headers: saved });
+  assert.equal(explicit.headers.get('content-language'), 'en', 'an explicit URL still wins');
+  const savedEnglish = await fetch(f.origin + '/privacidad', { redirect: 'manual', headers: { Accept: 'text/html', 'Accept-Language': 'es-VE', Cookie: 'cinve_lang=en' } });
+  assert.equal(savedEnglish.status, 307);
+  assert.equal(savedEnglish.headers.get('location'), '/privacidad?lang=en');
+  for (const next of ['//evil.example/x', 'https://evil.example/', '/\\evil.example', 'javascript:alert(1)']) {
+    const response = await fetch(f.origin + '/lang?to=en&next=' + encodeURIComponent(next), { redirect: 'manual' });
+    assert.equal(response.headers.get('location'), '/?lang=en', next);
+  }
+  const unknown = await fetch(f.origin + '/lang?to=fr&next=%2Fprivacidad', { redirect: 'manual' });
+  assert.equal(unknown.headers.get('location'), '/privacidad');
+  assert.equal(unknown.headers.get('set-cookie'), null);
+});
+
 test('English sitemap alternates, answer-engine links and social image resolve on the hosted origin', async t => {
   const f = await fixture(t);
   const xml = load(await (await fetch(f.origin + '/sitemap.xml')).text(), { xml: true });
@@ -1900,7 +1933,11 @@ test('OAuth consent preserves authorization fields across language links, errors
   const response = await fetch(request.url);
   const cookie = response.headers.get('set-cookie')!.split(';')[0]!;
   const $ = load(await response.text());
-  const switchUrl = new URL($('[data-locale-switch="es"]').attr('href')!, f.origin);
+  const choice = new URL($('[data-locale-switch="es"]').attr('href')!, f.origin);
+  assert.equal(choice.searchParams.get('to'), 'es');
+  const switched = await fetch(choice, { redirect: 'manual' });
+  assert.equal(switched.status, 303);
+  const switchUrl = new URL(switched.headers.get('location')!, f.origin);
   for (const [key, value] of Object.entries(request.params)) assert.equal(switchUrl.searchParams.get(key), value);
   assert.equal(switchUrl.searchParams.get('lang'), 'es');
   const action = $('form').first().attr('action')!;

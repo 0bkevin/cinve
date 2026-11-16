@@ -30,7 +30,7 @@ import { ConnectionLinks, cinemaUnavailableMessage, ipv6Block, signInFloor, sign
 import type { SignInSubject } from './connection-links.js';
 import { EncryptedSessionStore, HostedUsers, digest } from './store.js';
 import { loginPage } from '../auth-web.js';
-import { pageLocale, redirectNegotiatedEnglish } from '../web/http.js';
+import { pageLocale, redirectNegotiatedEnglish, serveLocaleChoice } from '../web/http.js';
 import { credentialMessage, webError } from '../web/errors.js';
 
 class AnonymousSessions extends SessionStore {
@@ -174,6 +174,7 @@ export async function createHostedApp(options: {
       if (req.headers.host !== publicUrl.host) throw new HttpError(403, req.url === '/mcp' ? 'Origin not allowed.' : 'Origen no permitido.');
       // Static pages cost no database work, so they are served before any
       // limit: a user behind a shared address can always open the link page.
+      if (serveLocaleChoice(req, res, publicUrl.protocol === 'https:')) return;
       const pagePath = req.url?.split('?')[0];
       if (['GET', 'HEAD'].includes(req.method ?? '') && (pagePath === '/connect' || pagePath === '/' || pagePath === '/instrucciones' || pagePath === '/privacidad')) {
         const locale = pageLocale(req, res);
