@@ -60,7 +60,7 @@
     "@types/fontkit": "2.0.9",
     "@types/node": "^26.6.6",
     "@types/pg": "^8.23.1",
-    "basecoat-css": "1.1.0",
+    "basecoat-css": "1.2.1",
     "fontkit": "2.0.4",
     "linkedom": "0.18.15",
     "simple-icons": "16.35.0",
